@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -58,10 +59,13 @@ type execParams struct {
 }
 
 // outputParams is the payload of an "exec/output" notification: a chunk of the
-// child's stdout or stderr as it is produced.
+// child's stdout or stderr as it is produced. Data is base64 (std encoding) so
+// the stream is binary-safe — raw bytes can't survive a JSON string field
+// otherwise (invalid UTF-8 becomes U+FFFD), and a multibyte rune split across a
+// read boundary would corrupt too. The host (vmctl) decodes before writing out.
 type outputParams struct {
 	Stream string `json:"stream"` // "stdout" | "stderr"
-	Data   string `json:"data"`
+	Data   string `json:"data"`   // base64-encoded chunk
 }
 
 type execResult struct {
@@ -73,10 +77,10 @@ type execResult struct {
 func (g *guest) exec(ctx context.Context, raw json.RawMessage) (any, error) {
 	var p execParams
 	if err := json.Unmarshal(raw, &p); err != nil {
-		return nil, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "exec: bad params: " + err.Error()}
+		return nil, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "bad params: " + err.Error()}
 	}
 	if p.Cmd == "" {
-		return nil, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "exec: cmd is required"}
+		return nil, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "cmd is required"}
 	}
 	notifier, _ := rpc.NotifierFromContext(ctx)
 
@@ -94,14 +98,14 @@ func (g *guest) exec(ctx context.Context, raw json.RawMessage) (any, error) {
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, &rpc.Error{Code: rpc.CodeInternal, Message: "exec: stdout pipe: " + err.Error()}
+		return nil, &rpc.Error{Code: rpc.CodeInternal, Message: "stdout pipe: " + err.Error()}
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		return nil, &rpc.Error{Code: rpc.CodeInternal, Message: "exec: stderr pipe: " + err.Error()}
+		return nil, &rpc.Error{Code: rpc.CodeInternal, Message: "stderr pipe: " + err.Error()}
 	}
 	if err := cmd.Start(); err != nil {
-		return nil, &rpc.Error{Code: rpc.CodeInternal, Message: "exec: start: " + err.Error()}
+		return nil, &rpc.Error{Code: rpc.CodeInternal, Message: "start: " + err.Error()}
 	}
 
 	var wg sync.WaitGroup
@@ -116,7 +120,7 @@ func (g *guest) exec(ctx context.Context, raw json.RawMessage) (any, error) {
 		if errors.As(err, &ee) {
 			code = ee.ExitCode()
 		} else {
-			return nil, &rpc.Error{Code: rpc.CodeInternal, Message: "exec: wait: " + err.Error()}
+			return nil, &rpc.Error{Code: rpc.CodeInternal, Message: "wait: " + err.Error()}
 		}
 	}
 	return execResult{ExitCode: code}, nil
@@ -130,7 +134,7 @@ func streamPipe(wg *sync.WaitGroup, n rpc.Notifier, stream string, r io.Reader) 
 	for {
 		m, err := r.Read(buf)
 		if m > 0 && n != nil {
-			_ = n.Notify("exec/output", outputParams{Stream: stream, Data: string(buf[:m])})
+			_ = n.Notify("exec/output", outputParams{Stream: stream, Data: base64.StdEncoding.EncodeToString(buf[:m])})
 		}
 		if err != nil {
 			return

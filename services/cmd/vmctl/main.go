@@ -15,6 +15,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -93,11 +94,15 @@ func main() {
 			if json.Unmarshal(raw, &o) != nil {
 				return
 			}
+			data, err := base64.StdEncoding.DecodeString(o.Data)
+			if err != nil {
+				return
+			}
 			w := os.Stdout
 			if o.Stream == "stderr" {
 				w = os.Stderr
 			}
-			fmt.Fprint(w, o.Data)
+			_, _ = w.Write(data)
 		}
 		var res struct {
 			ExitCode int `json:"exitCode"`

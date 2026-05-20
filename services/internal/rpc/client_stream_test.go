@@ -3,6 +3,7 @@ package rpc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -65,5 +66,50 @@ func TestCallStreamDeliversNotificationsThenResult(t *testing.T) {
 	}
 	if res.ExitCode != 7 {
 		t.Errorf("exitCode = %d, want 7", res.ExitCode)
+	}
+}
+
+// TestCallStreamCancelAbortsAndTearsDownHandler proves the disconnect-teardown
+// path both ends rely on: cancelling the caller's context makes CallStream return
+// context.Canceled, and the resulting connection drop cancels the still-running
+// server handler (the analog of killing the guest child when the Hop-2 caller
+// goes away).
+func TestCallStreamCancelAbortsAndTearsDownHandler(t *testing.T) {
+	started := make(chan struct{})
+	returned := make(chan struct{})
+	srv := NewServer(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv.Register("hang", func(ctx context.Context, _ json.RawMessage) (any, error) {
+		close(started)
+		defer close(returned)
+		<-ctx.Done() // unblocks only when the connection is torn down
+		return nil, ctx.Err()
+	})
+
+	cConn, sConn := net.Pipe()
+	go srv.serveConn(context.Background(), sConn)
+
+	c := NewClient(cConn)
+	defer c.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- c.CallStream(ctx, "hang", nil, nil, nil) }()
+
+	<-started // handler is running; now drop the caller
+	cancel()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("CallStream err = %v, want context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("CallStream did not return after cancel")
+	}
+
+	select {
+	case <-returned:
+	case <-time.After(5 * time.Second):
+		t.Fatal("server handler was not cancelled after the connection dropped")
 	}
 }

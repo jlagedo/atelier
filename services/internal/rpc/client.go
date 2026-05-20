@@ -69,7 +69,7 @@ type streamFrame struct {
 // the response (or an error response) is read. This is the client half of the
 // server's streaming notifications (design.md §8): exec streams stdout/stderr as
 // notifications, then returns its result. onNotify may be nil.
-func (c *Client) CallStream(_ context.Context, method string, params, result any, onNotify func(method string, params json.RawMessage)) error {
+func (c *Client) CallStream(ctx context.Context, method string, params, result any, onNotify func(method string, params json.RawMessage)) error {
 	var rawParams json.RawMessage
 	if params != nil {
 		b, err := json.Marshal(params)
@@ -85,9 +85,28 @@ func (c *Client) CallStream(_ context.Context, method string, params, result any
 		return err
 	}
 
+	// Honor context cancellation during the (otherwise blocking) read loop: a
+	// cancel closes the connection, which unblocks readMessage. The broker drives
+	// the guest exec with its per-connection context, so when the Hop-2 caller
+	// disconnects this is what aborts the guest-side stream.
+	if done := ctx.Done(); done != nil {
+		stop := make(chan struct{})
+		defer close(stop)
+		go func() {
+			select {
+			case <-done:
+				_ = c.conn.Close()
+			case <-stop:
+			}
+		}()
+	}
+
 	for {
 		var f streamFrame
 		if err := readMessage(c.br, &f); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			return err
 		}
 		// A notification has a method and no id; deliver it and keep reading.

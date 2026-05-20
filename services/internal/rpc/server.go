@@ -60,6 +60,13 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 
 func (s *Server) serveConn(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
+	// Tie a cancelable context to the connection's lifetime: when the peer
+	// disconnects (readMessage below returns), defer cancel() aborts any handler
+	// still in flight. That tears down a long-running exec — and kills its guest
+	// child via exec.CommandContext — instead of leaking it after the caller goes
+	// away.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	// One writer per connection: serializes whole messages so a handler's
 	// streamed notifications can't interleave with each other or the final
 	// response (the exec handler streams stdout+stderr from two goroutines).
@@ -74,7 +81,11 @@ func (s *Server) serveConn(ctx context.Context, conn net.Conn) {
 			}
 			return
 		}
-		s.dispatch(ctx, cw, &req)
+		// Dispatch in a goroutine so the read loop keeps watching the connection
+		// while a handler runs; a mid-flight disconnect then unblocks readMessage
+		// and cancels the handler. req is a fresh value each iteration, so taking
+		// its address here is safe.
+		go s.dispatch(ctx, cw, &req)
 	}
 }
 

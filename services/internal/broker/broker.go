@@ -149,7 +149,8 @@ func (b *Broker) exec(ctx context.Context, params json.RawMessage) (any, error) 
 
 	conn, err := b.vms.DialGuest(ctx, p.ID)
 	if err != nil {
-		return nil, &rpc.Error{Code: rpc.CodeInternal, Message: "exec: dial guest: " + err.Error()}
+		// DialGuest errors already carry "vm: ..." context; don't re-prefix.
+		return nil, &rpc.Error{Code: rpc.CodeInternal, Message: err.Error()}
 	}
 	defer conn.Close()
 
