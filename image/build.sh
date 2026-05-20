@@ -28,10 +28,10 @@ have() { command -v "$1" >/dev/null 2>&1; }
 
 cmd_check() {
   log "tool readiness:"
-  for t in docker mke2fs qemu-img sha256sum; do
+  for t in docker go mke2fs qemu-img sha256sum; do
     if have "$t"; then printf '  ok    %s\n' "$t"; else printf '  MISSING %s\n' "$t"; fi
   done
-  log "all stages need docker; rootfs also needs mke2fs (+ qemu-img for VHD/VHDX)."
+  log "all stages need docker + go (guest daemon); rootfs also needs mke2fs (+ qemu-img for VHD/VHDX)."
 }
 
 # ensure_tree builds the rootfs container and exports its filesystem into
@@ -55,6 +55,15 @@ ensure_tree() {
 
   log "installing guest init"
   install -D -m 0755 guest/init.sh "$WORK/rootfs/sbin/init"
+
+  # Cross-compile the guest daemon (design.md §8 Hop 3) and inject it like init.
+  # CGO_ENABLED=0 => a fully static binary (no glibc/loader coupling in the rootfs).
+  have go || die "go not found (needed to cross-compile the guest daemon, services/cmd/guestd)"
+  log "building guest daemon (guestd, linux/amd64 static)"
+  local out; out="$(pwd)/$WORK/guestd"
+  ( cd ../services && env GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o "$out" ./cmd/guestd )
+  install -D -m 0755 "$out" "$WORK/rootfs/usr/sbin/guestd"
+
   TREE_READY=1
 }
 

@@ -60,6 +60,11 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 
 func (s *Server) serveConn(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
+	// One writer per connection: serializes whole messages so a handler's
+	// streamed notifications can't interleave with each other or the final
+	// response (the exec handler streams stdout+stderr from two goroutines).
+	cw := &connWriter{w: conn}
+	ctx = WithNotifier(ctx, cw)
 	br := bufio.NewReader(conn)
 	for {
 		var req Request
@@ -69,15 +74,15 @@ func (s *Server) serveConn(ctx context.Context, conn net.Conn) {
 			}
 			return
 		}
-		s.dispatch(ctx, conn, &req)
+		s.dispatch(ctx, cw, &req)
 	}
 }
 
-func (s *Server) dispatch(ctx context.Context, w io.Writer, req *Request) {
+func (s *Server) dispatch(ctx context.Context, cw *connWriter, req *Request) {
 	h, ok := s.handler(req.Method)
 	if !ok {
 		if !req.IsNotification() {
-			s.writeError(w, req.ID, &Error{Code: CodeMethodNotFound, Message: "method not found: " + req.Method})
+			s.writeError(cw, req.ID, &Error{Code: CodeMethodNotFound, Message: "method not found: " + req.Method})
 		}
 		return
 	}
@@ -91,18 +96,45 @@ func (s *Server) dispatch(ctx context.Context, w io.Writer, req *Request) {
 		if !errors.As(err, &rpcErr) {
 			rpcErr = &Error{Code: CodeInternal, Message: err.Error()}
 		}
-		s.writeError(w, req.ID, rpcErr)
+		s.writeError(cw, req.ID, rpcErr)
 		return
 	}
 
 	raw, err := json.Marshal(result)
 	if err != nil {
-		s.writeError(w, req.ID, &Error{Code: CodeInternal, Message: "marshal result: " + err.Error()})
+		s.writeError(cw, req.ID, &Error{Code: CodeInternal, Message: "marshal result: " + err.Error()})
 		return
 	}
-	_ = writeMessage(w, &Response{JSONRPC: Version, ID: req.ID, Result: raw})
+	_ = cw.writeMsg(&Response{JSONRPC: Version, ID: req.ID, Result: raw})
 }
 
-func (s *Server) writeError(w io.Writer, id json.RawMessage, e *Error) {
-	_ = writeMessage(w, &Response{JSONRPC: Version, ID: id, Error: e})
+func (s *Server) writeError(cw *connWriter, id json.RawMessage, e *Error) {
+	_ = cw.writeMsg(&Response{JSONRPC: Version, ID: id, Error: e})
+}
+
+// connWriter serializes Content-Length framed messages to one connection. Each
+// writeMsg call holds the lock for the whole message (header + body), so
+// concurrent notifications and the final response never corrupt the framing.
+type connWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (c *connWriter) writeMsg(v any) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return writeMessage(c.w, v)
+}
+
+// Notify implements Notifier: a JSON-RPC notification is a request with no ID.
+func (c *connWriter) Notify(method string, params any) error {
+	var raw json.RawMessage
+	if params != nil {
+		b, err := json.Marshal(params)
+		if err != nil {
+			return err
+		}
+		raw = b
+	}
+	return c.writeMsg(&Request{JSONRPC: Version, Method: method, Params: raw})
 }

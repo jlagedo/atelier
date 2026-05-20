@@ -29,6 +29,16 @@ else
   echo "atelier guest init: modprobe failed (kernel/modules mismatch?)"
 fi
 
-# TODO(M5b): exec the guest daemon (services/cmd/guestd) as the long-running PID 1.
-echo "atelier guest init: scaffold — guest daemon not installed yet (M5b)"
+# Hand off to the guest daemon (design.md §8 Hop 3): the AF_VSOCK JSON-RPC server
+# that the host control plane talks to. It binds hv_sock, so make sure the
+# transport is loaded (tolerant: it may be built in, or already auto-loaded).
+modprobe hv_sock 2>/dev/null || true
+
+# guestd becomes the long-running PID 1. Fall back to a shell if it isn't shipped
+# (e.g. a bundle built without it) so the VM still boots and stays debuggable.
+if [ -x /usr/sbin/guestd ]; then
+  echo "atelier guest init: starting guestd (vsock RPC server) ..."
+  exec /usr/sbin/guestd
+fi
+echo "atelier guest init: guestd not installed — dropping to shell"
 exec /bin/sh

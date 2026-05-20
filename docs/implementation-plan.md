@@ -109,7 +109,7 @@ Tiny but blocking. No product code; just make the toolchain usable.
 
 ## Phase 1 — Compute substrate (M0–M2)
 
-> Status: `☑ S0a` `☑ S1.1` `☑ S1.2` `☑ S1.3` `☐ S2.1` `☐ S2.2`
+> Status: `☑ S0a` `☑ S1.1` `☑ S1.2` `☑ S1.3` `☑ S2.1` `☐ S2.2`
 >
 > The heart of the project. End state: a command on the host runs a program **inside our
 > own Linux VM** and streams the output back. *"M0–M2 alone will teach you more about
@@ -250,6 +250,30 @@ Tiny but blocking. No product code; just make the toolchain usable.
 - **Exit:** guest daemon up at boot.
 - **Depends:** S1.2 (a booting VM).  **Risk:** static-linking `guestd` for the rootfs;
   vsock port/CID conventions.
+- **Result (2026-05-20): DONE — our guest daemon comes up on the vsock port at boot.**
+  Implemented the guest side end-to-end (host side is S2.2). **`internal/rpc` gained a server→client notification
+  path** (`notify.go`: `Notifier` + ctx helpers; `server.go`: a per-connection `connWriter`
+  that serializes whole Content-Length messages, injected into the handler ctx) so a handler
+  can stream while it runs — none existed before. New leaf package **`internal/vsock`** holds
+  the one shared `GuestRPCPort = 5000` (host reaches it in S2.2 via the AF_HYPERV GUID
+  `00001388-facb-11e6-bd58-64006a7986d3`) + a Linux `Listen()` over **`github.com/mdlayher/vsock`**
+  (returns a `net.Listener`, plugs straight into `rpc.Server.Serve`) and a non-Linux stub so
+  `go build ./...` stays green on the Windows box. **`cmd/guestd`** (was a scaffold) now binds
+  vsock, serves `exec` (streams stdout/stderr as `exec/output` notifications, returns
+  `{exitCode}`), and is robust as PID 1 (never `os.Exit`s — on listen failure it logs and
+  blocks so the serial console stays readable, no kernel panic). Image: **`build.sh`**
+  cross-compiles guestd (`GOOS=linux GOARCH=amd64 CGO_ENABLED=0`, static) inside `ensure_tree`
+  and installs it to `/usr/sbin/guestd` like `init.sh` (`go` added to the tool checks);
+  **`init.sh`** now `modprobe hv_sock` then `exec /usr/sbin/guestd` (falls back to a shell if
+  absent). `exec`'s wire shapes are deliberately **not** in `protocol.json` yet — they land in
+  S2.2 with the host caller. **Verified:** `go build ./...` (native + `GOOS=linux`), `go vet`,
+  `go test` all green, incl. a new `rpc` test asserting two notifications arrive before the
+  response, in order. **Empirical boot (`.spike/boot_ours.ps1`, elevated):** serial console shows
+  `EXT4-fs (sda): mounted … r/w` → our init (`kernel 6.8.0-117-generic`, `modprobe ok`) →
+  `NET: Registered PF_VSOCK protocol family` + `hv_vmbus: registering driver hv_sock` →
+  `atelier guest init: starting guestd …` →
+  **`{"msg":"atelier-guestd listening","transport":"vsock","port":5000}`**, then the guest
+  holds PID 1 (no kernel panic) through a clean `stopVM` (`err:null`).
 
 ### S2.2 — M2: Host↔guest exec bridge (Hop 3)
 - **Goal:** **the** Phase-1 payoff — run a guest command from the host and stream output.

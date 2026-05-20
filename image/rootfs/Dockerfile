@@ -6,7 +6,8 @@ FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Manifest (design.md §7): init shell, python3+pip, node, git, ripgrep, CA certs.
-# The guest bridge daemon + TS agent CLI are layered in later milestones.
+# The guest bridge daemon (guestd, design.md §8 Hop 3) is cross-compiled and
+# injected by image/build.sh (not apt); the TS agent CLI lands in a later milestone.
 #
 # The matched guest kernel (design.md §7 coupling rule) is installed here too, so
 # the kernel, its /lib/modules/<ver>, and the boot initramfs all come from ONE apt
