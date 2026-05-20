@@ -25,9 +25,9 @@ Early scaffold — two areas are runnable, the rest follow the milestone ladder 
 | `apps/desktop` | Electron/React desktop UI (chat-forward shell) |
 | `services` | Go module — privileged host broker, in-VM daemon, dev CLI |
 | `packages` | Shared TS libs — agent loop, protocol, provider seam, UI *(skeleton)* |
-| `image` | VM image build — kernel + initrd + rootfs bundle *(skeleton)* |
+| `image` | VM image build pipeline — kernel + initrd + rootfs bundle |
 | `skills` | Skill distribution (DXT/`.mcpb` analog) *(skeleton)* |
-| `tools` | Repo tooling (codegen, scripts) *(skeleton)* |
+| `tools/protogen` | Protocol codegen — schema → TS + Go |
 | `docs` | Design & architecture docs |
 
 ## Quick start

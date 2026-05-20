@@ -27,6 +27,15 @@ Thumbs.db
 # build output & generated (keep the folder README reminders)
 image/bundle/*
 !image/bundle/README.md
+# image build scratch + artifacts (sources under image/{rootfs,initrd,kernel,guest} stay tracked)
+image/.work/
+image/**/*.vhd
+image/**/*.vhdx
+image/**/*.ext4
+image/**/*.img
+image/**/*.tar
+image/kernel/vmlinuz*
+image/initrd/initrd*
 apps/desktop/resources/*
 !apps/desktop/resources/README.md
 packages/protocol/src/*

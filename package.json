@@ -13,6 +13,7 @@
     "lint": "npm --prefix apps/desktop run lint",
     "format": "npm --prefix apps/desktop run format",
     "typecheck": "npm --prefix apps/desktop run typecheck",
-    "test": "npm --prefix apps/desktop run test"
+    "test": "npm --prefix apps/desktop run test",
+    "protogen": "node tools/protogen/protogen.mjs"
   }
 }

@@ -14,9 +14,9 @@ Per-directory placeholder READMEs were removed from initialized areas in favor o
 | `apps/desktop` | Electron/React desktop UI (the shell) | scaffolded (feature 0) |
 | `services` | One Go module — host broker, in-VM daemon, dev CLI | scaffolded (Hop-2 seam) |
 | `packages` | Shared TS libs — agent loop, protocol, provider seam, UI | skeleton |
-| `image` | VM image build — kernel + initrd + rootfs bundle | skeleton |
+| `image` | VM image build — kernel + initrd + rootfs bundle | scaffolded (build pipeline) |
 | `skills` | Skill distribution (DXT/`.mcpb` analog) | skeleton |
-| `tools` | Repo tooling (codegen, scripts) | skeleton |
+| `tools/protogen` | Protocol codegen (schema → TS + Go) | scaffolded |
 | `docs` | Design & architecture docs | `design.md` |
 
 Generated/build output is gitignored: `apps/desktop/.vite`, `apps/desktop/out`, `**/node_modules`,
@@ -67,6 +67,34 @@ Conventions:
 - `internal/broker` is the containment chokepoint: every capability use passes the policy gate
   (allow/ask/deny) + audit log before acting (design §10).
 - `go.mod` `go` directive is pinned to the installed toolchain (1.24); latest stable is Go 1.26.
+
+## Protocol codegen — `tools/protogen`
+
+`packages/protocol/schema/protocol.json` is the **canonical** Hop-2 protocol (design §8).
+`tools/protogen` (zero-dep Node) generates TS + Go from it; outputs are **gitignored** —
+regenerate, don't hand-edit.
+
+```sh
+npm run protogen        # from repo root
+# writes packages/protocol/src/index.ts  and  services/pkg/protocol/protocol.go
+```
+
+TODO: emit Zod schemas alongside the TS interfaces.
+
+## VM image build — `image/`
+
+Builds the utility-VM bundle (kernel + initrd + ext4 rootfs VHD), Cowork's
+`claudevm.bundle` analog (design §7). Sources are tracked under
+`image/{rootfs,initrd,kernel,guest}`; build output goes to `image/bundle/` (gitignored).
+Big artifacts (multi-GB VHDs) are **not** committed — they're produced here and stored
+externally (registry / release assets), not in git/LFS.
+
+```sh
+cd image
+./build.sh check        # tool readiness (docker, mke2fs, qemu-img)
+./build.sh rootfs       # docker export ubuntu:22.04 -> ext4 (mke2fs -d, no root) -> VHD
+./build.sh all          # kernel (TODO M1) + rootfs + initrd (TODO M1) + bundle
+```
 
 ## Versions
 

@@ -1,0 +1,11 @@
+{
+  "name": "@atelier/protogen",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Codegen: protocol schema -> TS + Go structs (design.md §8).",
+  "bin": { "protogen": "protogen.mjs" },
+  "scripts": {
+    "generate": "node protogen.mjs"
+  }
+}
