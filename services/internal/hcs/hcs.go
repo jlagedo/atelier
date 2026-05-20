@@ -16,4 +16,8 @@ type Driver interface {
 	Create(ctx context.Context, id string, doc []byte) error
 	Start(ctx context.Context, id string) error
 	Stop(ctx context.Context, id string) error
+	// RuntimeID returns the VM's runtime GUID (the compute system's RuntimeId),
+	// the partition identity the host uses to address the guest over hvsock
+	// (Hop 3). It differs from the friendly id passed to Create.
+	RuntimeID(ctx context.Context, id string) (string, error)
 }

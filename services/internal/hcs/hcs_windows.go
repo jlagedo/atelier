@@ -4,6 +4,8 @@ package hcs
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"sync"
 )
 
@@ -58,6 +60,30 @@ func (d *winDriver) Stop(_ context.Context, id string) error {
 		return termErr
 	}
 	return closeErr
+}
+
+// RuntimeID returns the compute system's RuntimeId GUID — the partition identity
+// the host dials over hvsock (Hop 3). It is assigned by HCS and differs from the
+// friendly id passed to Create.
+func (d *winDriver) RuntimeID(_ context.Context, id string) (string, error) {
+	system, err := d.handle(id)
+	if err != nil {
+		return "", err
+	}
+	doc, err := hcsGetComputeSystemProperties(system)
+	if err != nil {
+		return "", err
+	}
+	var props struct {
+		RuntimeID string `json:"RuntimeId"`
+	}
+	if err := json.Unmarshal([]byte(doc), &props); err != nil {
+		return "", fmt.Errorf("hcs: parse properties for %q: %w", id, err)
+	}
+	if props.RuntimeID == "" {
+		return "", fmt.Errorf("hcs: no RuntimeId in properties for %q", id)
+	}
+	return props.RuntimeID, nil
 }
 
 // handle returns the tracked system handle for id, opening an existing system

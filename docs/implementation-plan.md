@@ -109,7 +109,7 @@ Tiny but blocking. No product code; just make the toolchain usable.
 
 ## Phase 1 — Compute substrate (M0–M2)
 
-> Status: `☑ S0a` `☑ S1.1` `☑ S1.2` `☑ S1.3` `☑ S2.1` `☐ S2.2`
+> Status: `☑ S0a` `☑ S1.1` `☑ S1.2` `☑ S1.3` `☑ S2.1` `☑ S2.2`
 >
 > The heart of the project. End state: a command on the host runs a program **inside our
 > own Linux VM** and streams the output back. *"M0–M2 alone will teach you more about
@@ -286,6 +286,37 @@ Tiny but blocking. No product code; just make the toolchain usable.
   end-to-end across Hop 2 → Hop 3.
 - **Exit:** **host drives the guest.** Substrate complete.
 - **Depends:** S2.1.  **Risk:** hvsock connect handshake; back-pressure on streaming.
+- **Result (2026-05-20): DONE — the host drives the guest; the Phase-1 substrate is complete.**
+  Implemented the host half of Hop 3. **`internal/rpc` gained `Client.CallStream`** — the client
+  twin of S2.1's server-side notifier: it delivers each interleaved JSON-RPC notification to a
+  callback, then returns the response (the old single-shot `Call` is untouched). Covered by a new
+  `net.Pipe` test asserting two `exec/output` notifications arrive in order before the result.
+  **Host→guest dial:** added the missing piece — the dial target is **not** the friendly id
+  `"vm0"` but the compute system's **RuntimeId GUID** (confirmed against hcsshim
+  `internal/uvm/create.go`, which caches `properties.RuntimeID`). So our `computecore.dll`
+  bindings gained **`HcsGetComputeSystemProperties`** (+ a result-doc-returning wait helper) and a
+  new `Driver.RuntimeID`. `internal/vm.Manager.DialGuest` (Windows; stub elsewhere) dials with
+  go-winio's root `winio` package — `winio.Dial(ctx, &winio.HvsockAddr{VMID: runtimeID GUID,
+  ServiceID: winio.VsockServiceID(5000)})` — caching the GUID on the instance and using a bounded
+  `HvsockDialer{Retries,RetryWait}` to absorb the `startVM`→guestd-bind race. The compute-system
+  doc now also sets **`DefaultConnectSecurityDescriptor`** (host *connects*, so the bind SD alone
+  isn't enough). **Broker `exec`** runs the gate (`door:"compute"`) → `DialGuest` → `CallStream`,
+  relaying the guest's `exec/output` straight back to the Hop-2 caller via the per-connection
+  notifier from ctx; the guest connection is **per-call** (opened/closed around exec — chosen over
+  a persistent pooled client because `rpc.Client` is single-in-flight; pooling/multiplexing is a
+  later optimization). **Protocol:** `tools/protogen` gained array (`T[]`) and map (`map<K,V>`)
+  types; `protocol.json` gained the `exec` method + `ExecParams`/`ExecResult`, regenerated
+  (generated Go/TS now carry `Args []string` / `Env map[string]string`). **`vmctl exec`**:
+  `vmctl exec -id vm0 [-cwd …] [-env K=V] -- <cmd> <args…>` streams stdout/stderr live and exits
+  with the guest's exit code (`flag` stops at `--`). `go build`/`vet`/`test` green (incl. the new
+  `CallStream` test) on Windows and `GOOS=linux`. **Empirical (elevated, reusing the S2.1
+  bundle):** `vmctl exec -id vm0 -- ls -la /` streamed the guest root; `cat /etc/os-release` →
+  **`Ubuntu 22.04.5 LTS`** (the live "it's really our rootfs" proof deferred since S1.2);
+  `python3 --version` → `Python 3.10.12`; exit-code propagation (`sh -c 'exit 3'` → host
+  `$LASTEXITCODE == 3`); stdout/stderr split (`… 1>out.txt` captured only `OUT`, `ERR` to the
+  console); `-cwd /etc` → `/etc`; `-env GREETING=hello` → `hello`; unknown VM (`-id ghost`) →
+  clean error, no hang. Spike runner `.spike/boot_ours.ps1` extended with the exec round-trip;
+  binaries `.spike/bin/{host,vmctl}.exe` rebuilt.
 
 ---
 

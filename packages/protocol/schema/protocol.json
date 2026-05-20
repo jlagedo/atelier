@@ -6,6 +6,7 @@
     { "name": "createVM", "params": "CreateVMParams", "result": null },
     { "name": "startVM", "params": "VMRef", "result": null },
     { "name": "stopVM", "params": "VMRef", "result": null },
+    { "name": "exec", "params": "ExecParams", "result": "ExecResult" },
     { "name": "readFile", "params": "ReadFileParams", "result": "FileContent" },
     { "name": "writeFile", "params": "WriteFileParams", "result": null }
   ],
@@ -20,6 +21,8 @@
     },
     "CreateVMParams": { "id": "string", "kernelPath": "string", "initrdPath": "string", "rootfsPath": "string", "memoryMB": "int", "cpuCount": "int" },
     "VMRef": { "id": "string" },
+    "ExecParams": { "id": "string", "cmd": "string", "args": "string[]", "cwd": "string", "env": "map<string,string>" },
+    "ExecResult": { "exitCode": "int" },
     "ReadFileParams": { "path": "string" },
     "WriteFileParams": { "path": "string", "content": "string" },
     "FileContent": { "path": "string", "content": "string", "size": "int" }

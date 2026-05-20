@@ -14,9 +14,12 @@ import (
 	"strings"
 )
 
-// Default bind security descriptor for the VM's hvsocket: allow SYSTEM + the
-// Builtin Administrators group full access. Same value hcsshim uses for LCOW.
-const hvSocketBindSD = "D:P(A;;FA;;;SY)(A;;FA;;;BA)"
+// Default security descriptor for the VM's hvsocket (used for both bind and
+// connect): allow SYSTEM + the Builtin Administrators group full access. Same
+// value hcsshim uses for LCOW. The connect SD is what lets the host process
+// dial the guest's vsock listener (Hop 3, S2.2) — without it the host's
+// AF_HYPERV connect is refused.
+const hvSocketSD = "D:P(A;;FA;;;SY)(A;;FA;;;BA)"
 
 // DocConfig is the small, host-facing knob set we build a compute-system doc
 // from. internal/vm fills it from a VMConfig.
@@ -81,7 +84,8 @@ func MakeLCOWDoc(c DocConfig) ([]byte, error) {
 		},
 		HvSocket: &HvSocket2{
 			HvSocketConfig: &HvSocketSystemConfig{
-				DefaultBindSecurityDescriptor: hvSocketBindSD,
+				DefaultBindSecurityDescriptor:    hvSocketSD,
+				DefaultConnectSecurityDescriptor: hvSocketSD,
 			},
 		},
 		// Plan9 (the /workspace 9p share) is intentionally absent until S3.1.

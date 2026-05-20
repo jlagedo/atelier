@@ -13,8 +13,30 @@ const goOut = resolve(root, "services/pkg/protocol/protocol.go");
 
 const TS = { string: "string", int: "number", bool: "boolean" };
 const GO = { string: "string", int: "int64", bool: "bool" };
-const tsType = (t) => TS[t] ?? t;
-const goType = (t) => GO[t] ?? t;
+
+// Compound types: "T[]" arrays and "map<K,V>" maps; both nest. Anything else is
+// a scalar (mapped via the tables above) or a named type (passed through).
+const mapParts = (t) => {
+  const inner = t.slice(4, -1);
+  const i = inner.indexOf(",");
+  return [inner.slice(0, i).trim(), inner.slice(i + 1).trim()];
+};
+const tsType = (t) => {
+  if (t.endsWith("[]")) return `${tsType(t.slice(0, -2))}[]`;
+  if (t.startsWith("map<") && t.endsWith(">")) {
+    const [k, v] = mapParts(t);
+    return `Record<${tsType(k)}, ${tsType(v)}>`;
+  }
+  return TS[t] ?? t;
+};
+const goType = (t) => {
+  if (t.endsWith("[]")) return `[]${goType(t.slice(0, -2))}`;
+  if (t.startsWith("map<") && t.endsWith(">")) {
+    const [k, v] = mapParts(t);
+    return `map[${goType(k)}]${goType(v)}`;
+  }
+  return GO[t] ?? t;
+};
 const pascal = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
 const banner = (src) =>

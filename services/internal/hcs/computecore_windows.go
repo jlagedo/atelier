@@ -36,12 +36,13 @@ var (
 	procHcsCreateOperation        = modcomputecore.NewProc("HcsCreateOperation")
 	procHcsCloseOperation         = modcomputecore.NewProc("HcsCloseOperation")
 	procHcsWaitForOperationResult = modcomputecore.NewProc("HcsWaitForOperationResult")
-	procHcsCreateComputeSystem    = modcomputecore.NewProc("HcsCreateComputeSystem")
-	procHcsOpenComputeSystem      = modcomputecore.NewProc("HcsOpenComputeSystem")
-	procHcsStartComputeSystem     = modcomputecore.NewProc("HcsStartComputeSystem")
-	procHcsTerminateComputeSystem = modcomputecore.NewProc("HcsTerminateComputeSystem")
-	procHcsCloseComputeSystem     = modcomputecore.NewProc("HcsCloseComputeSystem")
-	procHcsGrantVmAccess          = modcomputecore.NewProc("HcsGrantVmAccess")
+	procHcsCreateComputeSystem        = modcomputecore.NewProc("HcsCreateComputeSystem")
+	procHcsOpenComputeSystem          = modcomputecore.NewProc("HcsOpenComputeSystem")
+	procHcsStartComputeSystem         = modcomputecore.NewProc("HcsStartComputeSystem")
+	procHcsTerminateComputeSystem     = modcomputecore.NewProc("HcsTerminateComputeSystem")
+	procHcsCloseComputeSystem         = modcomputecore.NewProc("HcsCloseComputeSystem")
+	procHcsGetComputeSystemProperties = modcomputecore.NewProc("HcsGetComputeSystemProperties")
+	procHcsGrantVmAccess              = modcomputecore.NewProc("HcsGrantVmAccess")
 )
 
 // GrantVMAccess adds an access ACE so the VM worker process for vmID may read
@@ -109,11 +110,13 @@ func closeOperation(op hcsOperation) {
 	}
 }
 
-// waitForOperationResult blocks until the operation finishes and returns its
-// final status. The result document (LocalAlloc'd by HCS) is read then freed.
-func waitForOperationResult(op hcsOperation, call string) error {
+// waitForOperationResultDoc blocks until the operation finishes and returns its
+// result document (JSON) alongside the final status. The document (LocalAlloc'd
+// by HCS) is read then freed. Calls that produce a payload (e.g. properties) use
+// the document; lifecycle calls ignore it via waitForOperationResult.
+func waitForOperationResultDoc(op hcsOperation, call string) (string, error) {
 	if err := procHcsWaitForOperationResult.Find(); err != nil {
-		return err
+		return "", err
 	}
 	var result *uint16
 	r0, _, _ := syscall.SyscallN(
@@ -122,7 +125,15 @@ func waitForOperationResult(op hcsOperation, call string) error {
 		uintptr(uint32(hcsTimeoutInfinite)),
 		uintptr(unsafe.Pointer(&result)),
 	)
-	return hresultError(call, r0, consumeResultDoc(result))
+	doc := consumeResultDoc(result)
+	return doc, hresultError(call, r0, doc)
+}
+
+// waitForOperationResult blocks until the operation finishes and returns its
+// final status, discarding any result document.
+func waitForOperationResult(op hcsOperation, call string) error {
+	_, err := waitForOperationResultDoc(op, call)
+	return err
 }
 
 // consumeResultDoc reads a PWSTR result document and frees it with LocalFree.
@@ -195,6 +206,32 @@ func hcsOpenComputeSystem(id string) (hcsSystem, error) {
 		return 0, hresultError("HcsOpenComputeSystem", r0, "")
 	}
 	return system, nil
+}
+
+// hcsGetComputeSystemProperties queries the system's properties and returns the
+// result document (JSON). A NULL property query asks for the default property
+// set, which carries the top-level "RuntimeId" used to address the guest over
+// hvsock (Hop 3, S2.2).
+func hcsGetComputeSystemProperties(system hcsSystem) (string, error) {
+	op, err := createOperation()
+	if err != nil {
+		return "", err
+	}
+	defer closeOperation(op)
+
+	if err := procHcsGetComputeSystemProperties.Find(); err != nil {
+		return "", err
+	}
+	r0, _, _ := syscall.SyscallN(
+		procHcsGetComputeSystemProperties.Addr(),
+		uintptr(system),
+		uintptr(op),
+		0, // propertyQuery: NULL => default properties (includes RuntimeId)
+	)
+	if int32(r0) < 0 {
+		return "", hresultError("HcsGetComputeSystemProperties", r0, "")
+	}
+	return waitForOperationResultDoc(op, "HcsGetComputeSystemProperties")
 }
 
 // hcsStartComputeSystem starts (boots) the system and blocks until start completes.

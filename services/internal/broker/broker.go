@@ -46,6 +46,7 @@ func (b *Broker) Register(s *rpc.Server) {
 	s.Register("createVM", b.createVM)
 	s.Register("startVM", b.startVM)
 	s.Register("stopVM", b.stopVM)
+	s.Register("exec", b.exec)
 	s.Register("readFile", b.gatedStub("readFile", "files"))
 	s.Register("writeFile", b.gatedStub("writeFile", "files"))
 }
@@ -113,6 +114,63 @@ func (b *Broker) stopVM(ctx context.Context, params json.RawMessage) (any, error
 		return nil, err
 	}
 	return nil, nil
+}
+
+// ExecParams asks to run a command inside VM ID. Args/Cwd/Env are optional.
+type ExecParams struct {
+	ID   string            `json:"id"`
+	Cmd  string            `json:"cmd"`
+	Args []string          `json:"args,omitempty"`
+	Cwd  string            `json:"cwd,omitempty"`
+	Env  map[string]string `json:"env,omitempty"`
+}
+
+// ExecResult is the command's exit status. stdout/stderr are streamed before it
+// as exec/output notifications, not returned here.
+type ExecResult struct {
+	ExitCode int `json:"exitCode"`
+}
+
+// exec is the host half of Hop 3 (design.md §8): gate the request, dial the
+// guest daemon over hvsock, call its exec, and relay each exec/output
+// notification straight back to the Hop-2 caller (vmctl) before returning the
+// exit code. The connection is per-call (opened and closed around exec).
+func (b *Broker) exec(ctx context.Context, params json.RawMessage) (any, error) {
+	if err := b.authorize(ctx, "exec", "compute"); err != nil {
+		return nil, err
+	}
+	var p ExecParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "exec: " + err.Error()}
+	}
+	if p.Cmd == "" {
+		return nil, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "exec: cmd is required"}
+	}
+
+	conn, err := b.vms.DialGuest(ctx, p.ID)
+	if err != nil {
+		return nil, &rpc.Error{Code: rpc.CodeInternal, Message: "exec: dial guest: " + err.Error()}
+	}
+	defer conn.Close()
+
+	// The handler runs on the Hop-2 connection, so this notifier writes back to
+	// the caller; relay the guest's exec/output notifications through it verbatim.
+	host, _ := rpc.NotifierFromContext(ctx)
+
+	gc := rpc.NewClient(conn)
+	var res ExecResult
+	err = gc.CallStream(ctx, "exec",
+		map[string]any{"cmd": p.Cmd, "args": p.Args, "cwd": p.Cwd, "env": p.Env},
+		&res,
+		func(method string, np json.RawMessage) {
+			if host != nil {
+				_ = host.Notify(method, np)
+			}
+		})
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
 }
 
 // Status is the getStatus result.

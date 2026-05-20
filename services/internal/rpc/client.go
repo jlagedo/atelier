@@ -53,3 +53,57 @@ func (c *Client) Call(_ context.Context, method string, params, result any) erro
 	}
 	return nil
 }
+
+// streamFrame is a permissive view of any message read while a CallStream is in
+// flight: a notification (method, no id) or the response (id + result/error).
+type streamFrame struct {
+	ID     json.RawMessage `json:"id,omitempty"`
+	Method string          `json:"method,omitempty"`
+	Params json.RawMessage `json:"params,omitempty"`
+	Result json.RawMessage `json:"result,omitempty"`
+	Error  *Error          `json:"error,omitempty"`
+}
+
+// CallStream sends a request and invokes onNotify for each JSON-RPC notification
+// that arrives on the connection before the matching response. It returns when
+// the response (or an error response) is read. This is the client half of the
+// server's streaming notifications (design.md §8): exec streams stdout/stderr as
+// notifications, then returns its result. onNotify may be nil.
+func (c *Client) CallStream(_ context.Context, method string, params, result any, onNotify func(method string, params json.RawMessage)) error {
+	var rawParams json.RawMessage
+	if params != nil {
+		b, err := json.Marshal(params)
+		if err != nil {
+			return err
+		}
+		rawParams = b
+	}
+
+	idRaw, _ := json.Marshal(c.id.Add(1))
+	req := Request{JSONRPC: Version, ID: idRaw, Method: method, Params: rawParams}
+	if err := writeMessage(c.conn, &req); err != nil {
+		return err
+	}
+
+	for {
+		var f streamFrame
+		if err := readMessage(c.br, &f); err != nil {
+			return err
+		}
+		// A notification has a method and no id; deliver it and keep reading.
+		if f.Method != "" && len(f.ID) == 0 {
+			if onNotify != nil {
+				onNotify(f.Method, f.Params)
+			}
+			continue
+		}
+		// Otherwise this is the response to our request.
+		if f.Error != nil {
+			return f.Error
+		}
+		if result != nil && len(f.Result) > 0 {
+			return json.Unmarshal(f.Result, result)
+		}
+		return nil
+	}
+}

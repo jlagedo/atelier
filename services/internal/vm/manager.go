@@ -51,6 +51,9 @@ type Manager struct {
 type instance struct {
 	cfg     VMConfig
 	console consoleStream
+	// runtimeID is the VM's hvsock partition GUID (the compute system's
+	// RuntimeId), cached lazily on the first DialGuest. Empty until then.
+	runtimeID string
 }
 
 // NewManager returns a Manager backed by the platform HCS driver.
