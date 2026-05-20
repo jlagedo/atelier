@@ -18,7 +18,7 @@
       "uptimeMs": "int",
       "vmCount": "int"
     },
-    "CreateVMParams": { "id": "string", "doc": "string" },
+    "CreateVMParams": { "id": "string", "kernelPath": "string", "rootfsPath": "string", "memoryMB": "int", "cpuCount": "int" },
     "VMRef": { "id": "string" },
     "ReadFileParams": { "path": "string" },
     "WriteFileParams": { "path": "string", "content": "string" },

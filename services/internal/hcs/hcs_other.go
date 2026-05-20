@@ -14,3 +14,6 @@ func New() Driver { return stubDriver{} }
 func (stubDriver) Create(context.Context, string, []byte) error { return ErrUnsupported }
 func (stubDriver) Start(context.Context, string) error          { return ErrUnsupported }
 func (stubDriver) Stop(context.Context, string) error           { return ErrUnsupported }
+
+// GrantVMAccess is a no-op off Windows (there is no HCS to grant access to).
+func GrantVMAccess(_, _ string) error { return nil }

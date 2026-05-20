@@ -12,16 +12,18 @@ import (
 	"time"
 
 	"github.com/jlagedo/atelier/services/internal/rpc"
+	"github.com/jlagedo/atelier/services/internal/vm"
 )
 
 // Version is the host service version.
 const Version = "0.0.0"
 
-// Broker holds the policy gate, audit logger, and process start time.
+// Broker holds the policy gate, audit logger, VM manager, and process start time.
 type Broker struct {
 	start time.Time
 	log   *slog.Logger
 	gate  Gate
+	vms   *vm.Manager
 }
 
 // New returns a Broker. A nil logger uses slog.Default(); a nil gate uses the
@@ -33,7 +35,7 @@ func New(log *slog.Logger, gate Gate) *Broker {
 	if gate == nil {
 		gate = AllowAll{log: log}
 	}
-	return &Broker{start: time.Now(), log: log, gate: gate}
+	return &Broker{start: time.Now(), log: log, gate: gate, vms: vm.NewManager(log)}
 }
 
 // Register wires the broker's methods onto the RPC server. The taxonomy mirrors
@@ -41,11 +43,74 @@ func New(log *slog.Logger, gate Gate) *Broker {
 // implemented in this scaffold; the rest are gated, audited stubs.
 func (b *Broker) Register(s *rpc.Server) {
 	s.Register("getStatus", b.getStatus)
-	s.Register("createVM", b.gatedStub("createVM", "compute"))
-	s.Register("startVM", b.gatedStub("startVM", "compute"))
-	s.Register("stopVM", b.gatedStub("stopVM", "compute"))
+	s.Register("createVM", b.createVM)
+	s.Register("startVM", b.startVM)
+	s.Register("stopVM", b.stopVM)
 	s.Register("readFile", b.gatedStub("readFile", "files"))
 	s.Register("writeFile", b.gatedStub("writeFile", "files"))
+}
+
+// CreateVMParams describes a VM to create. KernelPath/RootFSPath are host paths
+// (dev-only; the broker will resolve a pinned bundle itself once it exists).
+type CreateVMParams struct {
+	ID         string `json:"id"`
+	KernelPath string `json:"kernelPath"`
+	RootFSPath string `json:"rootfsPath"`
+	MemoryMB   uint64 `json:"memoryMB"`
+	CPUCount   int32  `json:"cpuCount"`
+}
+
+// VMRef identifies an existing VM.
+type VMRef struct {
+	ID string `json:"id"`
+}
+
+func (b *Broker) createVM(ctx context.Context, params json.RawMessage) (any, error) {
+	if err := b.authorize(ctx, "createVM", "compute"); err != nil {
+		return nil, err
+	}
+	var p CreateVMParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "createVM: " + err.Error()}
+	}
+	if err := b.vms.Create(ctx, vm.VMConfig{
+		ID:         p.ID,
+		KernelPath: p.KernelPath,
+		RootFSPath: p.RootFSPath,
+		MemoryMB:   p.MemoryMB,
+		CPUCount:   p.CPUCount,
+	}); err != nil {
+		return nil, err
+	}
+	return nil, nil
+}
+
+func (b *Broker) startVM(ctx context.Context, params json.RawMessage) (any, error) {
+	if err := b.authorize(ctx, "startVM", "compute"); err != nil {
+		return nil, err
+	}
+	var p VMRef
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "startVM: " + err.Error()}
+	}
+	if err := b.vms.Start(ctx, p.ID); err != nil {
+		return nil, err
+	}
+	return nil, nil
+}
+
+func (b *Broker) stopVM(ctx context.Context, params json.RawMessage) (any, error) {
+	if err := b.authorize(ctx, "stopVM", "compute"); err != nil {
+		return nil, err
+	}
+	var p VMRef
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "stopVM: " + err.Error()}
+	}
+	if err := b.vms.Stop(ctx, p.ID); err != nil {
+		return nil, err
+	}
+	return nil, nil
 }
 
 // Status is the getStatus result.
@@ -65,21 +130,30 @@ func (b *Broker) getStatus(_ context.Context, _ json.RawMessage) (any, error) {
 		Platform: runtime.GOOS + "/" + runtime.GOARCH,
 		PID:      os.Getpid(),
 		UptimeMS: time.Since(b.start).Milliseconds(),
-		VMCount:  0,
+		VMCount:  b.vms.Count(),
 	}, nil
+}
+
+// authorize is the containment chokepoint: it runs the policy gate and audit log
+// for one method/door, returning a wire error if the gate denies it.
+func (b *Broker) authorize(ctx context.Context, method, door string) error {
+	decision, err := b.gate.Check(ctx, method, door)
+	if err != nil {
+		return &rpc.Error{Code: rpc.CodeInternal, Message: "policy error: " + err.Error()}
+	}
+	b.log.Info("rpc", "method", method, "door", door, "decision", decision.String())
+	if decision == Deny {
+		return &rpc.Error{Code: rpc.CodeInvalidRequest, Message: method + " denied by policy"}
+	}
+	return nil
 }
 
 // gatedStub returns a handler that runs the policy gate + audit log (the
 // containment chokepoint) before reporting that the method isn't built yet.
 func (b *Broker) gatedStub(method, door string) rpc.HandlerFunc {
 	return func(ctx context.Context, _ json.RawMessage) (any, error) {
-		decision, err := b.gate.Check(ctx, method, door)
-		if err != nil {
-			return nil, &rpc.Error{Code: rpc.CodeInternal, Message: "policy error: " + err.Error()}
-		}
-		b.log.Info("rpc", "method", method, "door", door, "decision", decision.String())
-		if decision == Deny {
-			return nil, &rpc.Error{Code: rpc.CodeInvalidRequest, Message: method + " denied by policy"}
+		if err := b.authorize(ctx, method, door); err != nil {
+			return nil, err
 		}
 		return nil, &rpc.Error{Code: rpc.CodeInternal, Message: method + " not implemented yet (scaffold)"}
 	}

@@ -4,6 +4,7 @@ dist/
 build/
 *.tsbuildinfo
 vendor/
+.spike
 
 # electron forge / vite output
 .vite/
