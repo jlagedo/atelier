@@ -7,7 +7,7 @@
 //	vmctl [method] [flags]
 //
 //	vmctl getStatus
-//	vmctl createVM -id vm0 -kernel C:\path\kernel -rootfs E:\path\rootfs.vhd [-mem 2048 -cpu 2]
+//	vmctl createVM -id vm0 -kernel C:\path\vmlinuz -rootfs E:\path\rootfs.vhd [-initrd C:\path\initrd -mem 2048 -cpu 2]
 //	vmctl startVM  -id vm0
 //	vmctl stopVM   -id vm0
 package main
@@ -34,6 +34,7 @@ func main() {
 	addr := fs.String("addr", rpc.DefaultAddress, "host address")
 	id := fs.String("id", "vm0", "vm id")
 	kernel := fs.String("kernel", "", "host path to a direct-boot kernel")
+	initrd := fs.String("initrd", "", "host path to the boot initrd (optional)")
 	rootfs := fs.String("rootfs", "", "host path to the rootfs VHD")
 	mem := fs.Uint64("mem", 0, "memory in MB (0 = broker default)")
 	cpu := fs.Int("cpu", 0, "processor count (0 = broker default)")
@@ -45,6 +46,7 @@ func main() {
 		params = map[string]any{
 			"id":         *id,
 			"kernelPath": *kernel,
+			"initrdPath": *initrd,
 			"rootfsPath": *rootfs,
 			"memoryMB":   *mem,
 			"cpuCount":   *cpu,

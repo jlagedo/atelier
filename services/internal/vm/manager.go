@@ -22,6 +22,9 @@ import (
 type VMConfig struct {
 	ID         string
 	KernelPath string
+	// InitrdPath is the host path to the matched boot initramfs (S1.3). Optional:
+	// empty keeps the S1.2 built-in-driver boot (no initrd).
+	InitrdPath string
 	RootFSPath string
 	MemoryMB   uint64
 	CPUCount   int32
@@ -76,6 +79,7 @@ func (m *Manager) Create(ctx context.Context, cfg VMConfig) error {
 	doc, err := hcs.MakeLCOWDoc(hcs.DocConfig{
 		Owner:          "atelier",
 		KernelFilePath: cfg.KernelPath,
+		InitrdPath:     cfg.InitrdPath,
 		RootFSPath:     cfg.RootFSPath,
 		MemoryMB:       cfg.MemoryMB,
 		ProcessorCount: cfg.CPUCount,
@@ -87,7 +91,11 @@ func (m *Manager) Create(ctx context.Context, cfg VMConfig) error {
 
 	// The VM worker runs as a restricted virtual account; grant it access to the
 	// files it must read (best-effort: log and continue if not required here).
-	for _, p := range []string{cfg.RootFSPath, cfg.KernelPath} {
+	paths := []string{cfg.RootFSPath, cfg.KernelPath}
+	if cfg.InitrdPath != "" {
+		paths = append(paths, cfg.InitrdPath)
+	}
+	for _, p := range paths {
 		if err := hcs.GrantVMAccess(cfg.ID, p); err != nil {
 			m.log.Warn("grant vm access", "vm", cfg.ID, "path", p, "err", err)
 		}

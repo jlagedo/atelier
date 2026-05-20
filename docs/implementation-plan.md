@@ -109,7 +109,7 @@ Tiny but blocking. No product code; just make the toolchain usable.
 
 ## Phase 1 — Compute substrate (M0–M2)
 
-> Status: `☑ S0a` `☑ S1.1` `☑ S1.2` `☐ S1.3` `☐ S2.1` `☐ S2.2`
+> Status: `☑ S0a` `☑ S1.1` `☑ S1.2` `☑ S1.3` `☐ S2.1` `☐ S2.2`
 >
 > The heart of the project. End state: a command on the host runs a program **inside our
 > own Linux VM** and streams the output back. *"M0–M2 alone will teach you more about
@@ -208,6 +208,36 @@ Tiny but blocking. No product code; just make the toolchain usable.
   loads (`modprobe` succeeds).
 - **Exit:** a pinned, self-built `kernel + initrd + rootfs` bundle that boots.
 - **Depends:** S1.2.  **Risk:** initramfs missing a driver → no root mount; module mismatch.
+- **Result (2026-05-20): DONE — our VM boots the matched, self-built kernel+initrd+rootfs bundle.**
+  Chose the **Docker-integrated** path so the coupling rule holds *by construction*: the rootfs
+  Docker build installs `linux-image-generic-hwe-22.04` + `initramfs-tools`
+  (`image/rootfs/Dockerfile`), so the matched **kernel (`6.8.0-117-generic`, Cowork-parity)**,
+  its `/lib/modules/<ver>`, and a **full** boot initramfs (`initramfs-tools` default
+  `MODULES=most`, like Cowork's fat initrd) all come from one apt transaction. `image/build.sh`
+  refactored: a memoized `ensure_tree` builds+exports the container once; `kernel`/`initrd`
+  **extract + pin** `vmlinuz`/`initrd` from `/boot` of that tree (`fetch-kernel.sh` rewritten to
+  extract, not download); ext4 bumped 2G→4G for the modules; `manifest.txt` records the kernel
+  version; `cmd_all` reordered `rootfs→kernel→initrd→bundle`. `image/initrd/modules.conf` is now
+  reference-only (every driver is already in the full initrd). Go side: threaded an optional
+  `initrdPath` through `protocol.json` (regenerated) → broker `CreateVMParams` → `vm.VMConfig` →
+  `hcs.DocConfig.InitrdPath` (the doc field `LinuxKernelDirect.InitRdPath` was already wired in
+  S1.2) → `GrantVMAccess` (VM-worker account reads the initrd); `vmctl` gained `-initrd`. Empty
+  `initrdPath` preserves the S1.2 no-initrd boot (regression-safe). **Empirical boot
+  (`.spike/boot_ours.ps1`, elevated):** serial log shows `Linux version 6.8.0-117-generic` →
+  initrd unpacked → `hv_vmbus`/`hv_storvsc` from the initrd → `[sda] … 4.00 GiB` →
+  `EXT4-fs (sda): mounted filesystem … r/w` (root on `/dev/sda`, no UUID) → switch_root → our
+  `/sbin/init`, which prints **`kernel 6.8.0-117-generic | /lib/modules: 6.8.0-117-generic`**
+  (the coupling proof: `uname -r` == the modules dir == `manifest.txt`) and
+  **`modprobe ok (module ecosystem matched)`**; `9pnet`/`9p` load and the `/workspace` mount
+  declines gracefully (no Plan9 share until S3.1); clean `stopVM` (`err:null`), no panic.
+  **Two fixes the real initrd forced (not needed under S1.2's built-in-driver kernel):**
+  (1) **`noresume`** added to the default cmdline (`internal/hcs/doc.go`) — Ubuntu's initramfs
+  otherwise stalls boot ~30s in `local-premount` waiting for a non-existent hibernate/resume
+  device; (2) **idempotent pseudo-fs mounts** in `image/guest/init.sh` — initramfs-tools moves
+  `/proc`,`/sys`,`/dev` into the real root on switch_root, so our init's re-`mount` returned
+  "already mounted" (exit 32) and under `set -e` killed PID 1 → kernel panic; the mounts now
+  tolerate it (`2>/dev/null || true`). `go build ./...`/`vet`/`test` green. Spike runner extended
+  with `-Initrd` (defaults to the bundle); binaries `.spike/bin/{host,vmctl}.exe`.
 
 ### S2.1 — M2: Guest daemon (hvsocket server side)
 - **Goal:** an in-VM agent that accepts commands over vsock and streams stdout.

@@ -55,6 +55,7 @@ func (b *Broker) Register(s *rpc.Server) {
 type CreateVMParams struct {
 	ID         string `json:"id"`
 	KernelPath string `json:"kernelPath"`
+	InitrdPath string `json:"initrdPath"`
 	RootFSPath string `json:"rootfsPath"`
 	MemoryMB   uint64 `json:"memoryMB"`
 	CPUCount   int32  `json:"cpuCount"`
@@ -76,6 +77,7 @@ func (b *Broker) createVM(ctx context.Context, params json.RawMessage) (any, err
 	if err := b.vms.Create(ctx, vm.VMConfig{
 		ID:         p.ID,
 		KernelPath: p.KernelPath,
+		InitrdPath: p.InitrdPath,
 		RootFSPath: p.RootFSPath,
 		MemoryMB:   p.MemoryMB,
 		CPUCount:   p.CPUCount,

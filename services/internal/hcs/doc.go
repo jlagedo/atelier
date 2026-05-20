@@ -132,7 +132,10 @@ func defaultCmdLine(c DocConfig) string {
 	if c.ConsolePipe != "" {
 		b.WriteString("console=ttyS0,115200 ")
 	}
-	fmt.Fprintf(&b, "root=/dev/sda %s init=/sbin/init", rw)
+	// noresume: a utility VM never hibernates, so skip the Ubuntu initramfs
+	// resume (hibernate) premount probe, which otherwise stalls boot ~30s waiting
+	// for a swap/resume device that doesn't exist (observed S1.3).
+	fmt.Fprintf(&b, "root=/dev/sda %s noresume init=/sbin/init", rw)
 	return b.String()
 }
 
