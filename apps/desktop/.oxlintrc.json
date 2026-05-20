@@ -1,0 +1,10 @@
+{
+  "ignorePatterns": [".vite/", "out/", "dist/", "node_modules/"],
+  "env": {
+    "browser": true,
+    "node": true,
+    "es2024": true
+  },
+  "plugins": ["react", "typescript"],
+  "rules": {}
+}

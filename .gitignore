@@ -5,6 +5,10 @@ build/
 *.tsbuildinfo
 vendor/
 
+# electron forge / vite output
+.vite/
+out/
+
 # binaries / test
 *.exe
 *.test
