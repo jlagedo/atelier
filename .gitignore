@@ -1,0 +1,31 @@
+# deps / build
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+vendor/
+
+# binaries / test
+*.exe
+*.test
+
+# env / secrets
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# build output & generated (keep the folder README reminders)
+image/bundle/*
+!image/bundle/README.md
+apps/desktop/resources/*
+!apps/desktop/resources/README.md
+packages/protocol/src/*
+!packages/protocol/src/README.md
+services/pkg/protocol/*
+!services/pkg/protocol/README.md
