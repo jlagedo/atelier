@@ -322,7 +322,7 @@ Tiny but blocking. No product code; just make the toolchain usable.
 
 ## Phase 2 — The doors (M3–M4)
 
-> Status: `☐ S3.1` `☐ S4.1`
+> Status: `☑ S3.1` `☐ S4.1`
 >
 > Now slices are genuinely **feature-vertical**: each door (§10) is one capability,
 > independently demoable through `vmctl`. **Files** and **Compute** are unlocked here;
@@ -342,6 +342,41 @@ Tiny but blocking. No product code; just make the toolchain usable.
 - **Exit:** **Files door** open and contained.
 - **Depends:** S2.2.  **Risk:** 9p "bad address" fights on Windows (§15 bug threads);
   symlink canonicalization correctness.
+- **Result (2026-05-20): DONE — the Files door opens, contained, and is swappable at
+  runtime with no reboot.** The 9p mount mechanism (the slice's central unknown), confirmed
+  against hcsshim's guest `plan9.Mount`: HCS serves a Plan9 share over **hvsock**, so the guest
+  **dials AF_VSOCK to the host (CID 2) on the share's port (564)**, takes the connection **fd**,
+  and mounts `9p -o trans=fd,rfdno=N,wfdno=N,msize=65536,version=9p2000.L,aname=workspace`. A
+  shell can't hand an fd to `mount(2)`, so the mount lives in **guestd** (raw `unix.Socket`/
+  `Connect`/`Mount`); the scaffolded `init.sh` `trans=virtio` line was wrong and was removed.
+  **Pivoted from boot-time to runtime attach** (design call with the user): baking the share into
+  the create doc would force a VM reboot to swap workspaces — a non-starter for the planned
+  one-VM/many-tabs UI. So the boot doc now carries only an **empty `Plan9: {}` controller**, and
+  shares are added/removed on the **running** VM. Our `computecore.dll` bindings gained
+  **`HcsModifyComputeSystem`** + `Driver.Modify`; `MakePlan9AddRequest`/`RemoveRequest` author the
+  `ModifySettingRequest` (`ResourcePath VirtualMachine/Devices/Plan9/Shares`, `RequestType
+  Add`/`Remove`) — **host-side Settings only, no GuestRequest** (we run no GCS; guestd mounts
+  itself). New broker verbs **`attachWorkspace`/`detachWorkspace`** (gate `door:"files"`, audited)
+  orchestrate both halves: host `GrantVMAccess`+`Modify` then a guestd `mount`/`unmount` RPC over
+  Hop 3; `attachWorkspace` auto-detaches any current workspace first, so swapping needs no reboot.
+  **`readFile`/`writeFile`** are real (replacing the gated stubs): host-side, broker-mediated I/O
+  jailed to the **currently-attached** workspace — `jailPath` rejects absolute paths, `..`
+  escapes, and escaping symlinks (resolves the deepest existing ancestor so not-yet-created files
+  are still vetted); content is **base64** on the wire so Excel/binary survive (the S2.2 lesson).
+  `vmctl` gained `attachWorkspace`/`detachWorkspace`/`readFile`/`writeFile`. Protocol grew the two
+  workspace verbs + `AttachWorkspaceParams` (regenerated). `go build`/`vet`/`test` green on Windows
+  and `GOOS=linux` (incl. new `jailPath` + round-trip unit tests). **Empirical (elevated):** on a
+  running VM, `attachWorkspace ws` → guest `/workspace` shows the host file; broker `writeFile` →
+  guest `cat` sees it; guest write → broker `readFile` sees it; `readFile ../../..` is denied;
+  **swap** `attachWorkspace ws2` flips `/workspace` to the second folder's file **with no reboot**;
+  `detachWorkspace` unmounts it (guest `/workspace` empties, `readFile` → "files door not
+  configured"). Serial log shows guestd `mounted share … port 564` / `unmounted share`; every op
+  audited `door=files`; no warnings/errors/panics. The VM-worker account's directory ACL via
+  `HcsGrantVmAccess` sufficed both directions. Multi-share-per-VM / per-session `sessionId` +
+  in-VM bwrap isolation (the multi-tab end-state) remain a later slice; the runtime-attach
+  primitives built here are its foundation. Spike runner `.spike/boot_ours.ps1` extended with the
+  attach→round-trip→swap→detach flow; binaries `.spike/bin/{host,vmctl}.exe` rebuilt; rootfs
+  rebuilt to ship the RPC-mount guestd.
 
 ### S4.1 — M4: Network door (egress jail)
 - **Goal:** the guest reaches **only** allowlisted destinations; everything else blocked

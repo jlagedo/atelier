@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/jlagedo/atelier/services/internal/rpc"
@@ -24,10 +25,19 @@ type Broker struct {
 	log   *slog.Logger
 	gate  Gate
 	vms   *vm.Manager
+
+	// mu guards workspace, the canonicalized host folder currently attached as the
+	// Files-door root (design.md §10 — S3.1): the jail root readFile/writeFile
+	// resolve against, set by attachWorkspace and cleared by detachWorkspace.
+	// Empty means no workspace is attached (the door is closed). A single root
+	// today; this generalizes to a per-session map later.
+	mu        sync.Mutex
+	workspace string
 }
 
 // New returns a Broker. A nil logger uses slog.Default(); a nil gate uses the
-// dev-time AllowAll gate.
+// dev-time AllowAll gate. The Files door starts closed; a workspace is attached
+// at runtime via attachWorkspace (no reboot to swap).
 func New(log *slog.Logger, gate Gate) *Broker {
 	if log == nil {
 		log = slog.Default()
@@ -36,6 +46,20 @@ func New(log *slog.Logger, gate Gate) *Broker {
 		gate = AllowAll{log: log}
 	}
 	return &Broker{start: time.Now(), log: log, gate: gate, vms: vm.NewManager(log)}
+}
+
+// currentWorkspace returns the attached Files-door root, or "" if none.
+func (b *Broker) currentWorkspace() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.workspace
+}
+
+// setWorkspace records (or clears, with "") the attached Files-door root.
+func (b *Broker) setWorkspace(root string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.workspace = root
 }
 
 // Register wires the broker's methods onto the RPC server. The taxonomy mirrors
@@ -47,8 +71,10 @@ func (b *Broker) Register(s *rpc.Server) {
 	s.Register("startVM", b.startVM)
 	s.Register("stopVM", b.stopVM)
 	s.Register("exec", b.exec)
-	s.Register("readFile", b.gatedStub("readFile", "files"))
-	s.Register("writeFile", b.gatedStub("writeFile", "files"))
+	s.Register("attachWorkspace", b.attachWorkspace)
+	s.Register("detachWorkspace", b.detachWorkspace)
+	s.Register("readFile", b.readFile)
+	s.Register("writeFile", b.writeFile)
 }
 
 // CreateVMParams describes a VM to create. KernelPath/RootFSPath are host paths
@@ -207,15 +233,4 @@ func (b *Broker) authorize(ctx context.Context, method, door string) error {
 		return &rpc.Error{Code: rpc.CodeInvalidRequest, Message: method + " denied by policy"}
 	}
 	return nil
-}
-
-// gatedStub returns a handler that runs the policy gate + audit log (the
-// containment chokepoint) before reporting that the method isn't built yet.
-func (b *Broker) gatedStub(method, door string) rpc.HandlerFunc {
-	return func(ctx context.Context, _ json.RawMessage) (any, error) {
-		if err := b.authorize(ctx, method, door); err != nil {
-			return nil, err
-		}
-		return nil, &rpc.Error{Code: rpc.CodeInternal, Message: method + " not implemented yet (scaffold)"}
-	}
 }

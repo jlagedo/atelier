@@ -20,4 +20,8 @@ type Driver interface {
 	// the partition identity the host uses to address the guest over hvsock
 	// (Hop 3). It differs from the friendly id passed to Create.
 	RuntimeID(ctx context.Context, id string) (string, error)
+	// Modify applies a settings change (a ModifyComputeSystem document) to a
+	// running VM — e.g. adding or removing a Plan9 /workspace share at runtime
+	// (Files door, S3.1). doc is JSON from MakePlan9AddRequest/RemoveRequest.
+	Modify(ctx context.Context, id string, doc []byte) error
 }

@@ -150,6 +150,45 @@ func (m *Manager) Stop(ctx context.Context, id string) error {
 	return err
 }
 
+// AttachWorkspace shares hostPath into the running VM as the /workspace 9p share
+// (Files door, S3.1): it grants the VM-worker account access to the folder, then
+// adds the Plan9 share via ModifyComputeSystem. The guest still has to mount it
+// (the broker drives guestd over Hop 3) — this is only the host half.
+func (m *Manager) AttachWorkspace(ctx context.Context, id, hostPath string, readOnly bool) error {
+	if _, ok := m.get(id); !ok {
+		return fmt.Errorf("vm: %q not found", id)
+	}
+	if err := hcs.GrantVMAccess(id, hostPath); err != nil {
+		m.log.Warn("grant vm access (workspace)", "vm", id, "path", hostPath, "err", err)
+	}
+	doc, err := hcs.MakePlan9AddRequest(hostPath, readOnly)
+	if err != nil {
+		return err
+	}
+	if err := m.drv.Modify(ctx, id, doc); err != nil {
+		return err
+	}
+	m.log.Info("workspace attached", "vm", id, "path", hostPath, "readOnly", readOnly)
+	return nil
+}
+
+// DetachWorkspace removes the /workspace 9p share from the running VM (the host
+// half of detach; the guest unmounts separately, driven by the broker).
+func (m *Manager) DetachWorkspace(ctx context.Context, id string) error {
+	if _, ok := m.get(id); !ok {
+		return fmt.Errorf("vm: %q not found", id)
+	}
+	doc, err := hcs.MakePlan9RemoveRequest()
+	if err != nil {
+		return err
+	}
+	if err := m.drv.Modify(ctx, id, doc); err != nil {
+		return err
+	}
+	m.log.Info("workspace detached", "vm", id)
+	return nil
+}
+
 // Count is the number of tracked VMs (surfaced in getStatus.vmCount).
 func (m *Manager) Count() int {
 	m.mu.Lock()

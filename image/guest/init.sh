@@ -13,11 +13,11 @@ mount -t devtmpfs devtmpfs /dev   2>/dev/null || true
 mount -t tmpfs    tmpfs    /tmp   2>/dev/null || true
 
 # /workspace: the only persistent mount, shared from the host over 9p
-# (design.md §8 — Plan9/9p, not virtiofs). The mount tag is set by the host's
-# compute-system doc; "workspace" is a placeholder.
+# (design.md §8, §10 — Plan9/9p, not virtiofs). HCS serves the share over hvsock,
+# so the mount needs a connected AF_VSOCK fd (trans=fd) — which a shell can't pass
+# to mount(2). guestd does the mount itself (cmd/guestd/mount_linux.go, S3.1); we
+# just ensure the mount point exists.
 mkdir -p /workspace
-mount -t 9p -o trans=virtio,version=9p2000.L workspace /workspace 2>/dev/null \
-  || echo "init: /workspace 9p mount not available (host share not configured yet)"
 
 # Boot diagnostics (design.md §7 coupling rule, S1.3 verify): the running kernel
 # version must match a /lib/modules/<ver> dir, and modprobe must work — proof that

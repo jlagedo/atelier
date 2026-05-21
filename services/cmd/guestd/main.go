@@ -37,7 +37,10 @@ func main() {
 	log.Info("atelier-guestd listening", "transport", "vsock", "port", vsock.GuestRPCPort)
 
 	srv := rpc.NewServer(log)
-	srv.Register("exec", (&guest{log: log}).exec)
+	g := &guest{log: log}
+	srv.Register("exec", g.exec)
+	srv.Register("mount", g.mount)     // Files door (S3.1): mount a host 9p share
+	srv.Register("unmount", g.unmount) // Files door (S3.1): unmount a share
 
 	if err := srv.Serve(context.Background(), ln); err != nil {
 		log.Error("rpc serve stopped", "err", err)
@@ -124,6 +127,50 @@ func (g *guest) exec(ctx context.Context, raw json.RawMessage) (any, error) {
 		}
 	}
 	return execResult{ExitCode: code}, nil
+}
+
+// mountParams asks guestd to mount a host 9p share (Files door, S3.1): dial the
+// host on Port and mount it (aname=Tag) at Target.
+type mountParams struct {
+	Port   uint32 `json:"port"`
+	Tag    string `json:"tag"`
+	Target string `json:"target"`
+}
+
+type unmountParams struct {
+	Target string `json:"target"`
+}
+
+// mount mounts a host Plan9/9p share the host just added via ModifyComputeSystem.
+func (g *guest) mount(_ context.Context, raw json.RawMessage) (any, error) {
+	var p mountParams
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "bad params: " + err.Error()}
+	}
+	if p.Target == "" || p.Tag == "" || p.Port == 0 {
+		return nil, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "port, tag and target are required"}
+	}
+	if err := mountShare(p.Port, p.Tag, p.Target); err != nil {
+		return nil, &rpc.Error{Code: rpc.CodeInternal, Message: err.Error()}
+	}
+	g.log.Info("mounted share", "target", p.Target, "port", p.Port, "tag", p.Tag)
+	return nil, nil
+}
+
+// unmount unmounts a previously-mounted share (the guest half of detach).
+func (g *guest) unmount(_ context.Context, raw json.RawMessage) (any, error) {
+	var p unmountParams
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "bad params: " + err.Error()}
+	}
+	if p.Target == "" {
+		return nil, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "target is required"}
+	}
+	if err := unmountShare(p.Target); err != nil {
+		return nil, &rpc.Error{Code: rpc.CodeInternal, Message: err.Error()}
+	}
+	g.log.Info("unmounted share", "target", p.Target)
+	return nil, nil
 }
 
 // streamPipe forwards a child's output stream as exec/output notifications until

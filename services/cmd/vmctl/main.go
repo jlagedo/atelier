@@ -11,6 +11,10 @@
 //	vmctl startVM  -id vm0
 //	vmctl stopVM   -id vm0
 //	vmctl exec     -id vm0 [-cwd /tmp] [-env K=V ...] -- ls -la /
+//	vmctl attachWorkspace -id vm0 -path E:\path\folder   (share folder at /workspace)
+//	vmctl detachWorkspace -id vm0
+//	vmctl readFile  -path notes.txt                      (prints to stdout)
+//	vmctl writeFile -path out.txt [-content "..."]       (else reads stdin)
 package main
 
 import (
@@ -19,6 +23,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -57,6 +62,8 @@ func main() {
 	cwd := fs.String("cwd", "", "working directory in the guest (exec)")
 	env := envFlag{}
 	fs.Var(env, "env", "guest env var KEY=VALUE (exec; repeatable)")
+	path := fs.String("path", "", "workspace-relative file path (readFile/writeFile)")
+	content := fs.String("content", "", "file content (writeFile; if unset, read from stdin)")
 	_ = fs.Parse(args)
 
 	conn, err := rpc.Dial(*addr)
@@ -114,6 +121,46 @@ func main() {
 		os.Exit(res.ExitCode)
 	}
 
+	// Files door (design.md §10): content travels base64-encoded so binary files
+	// (Excel/Word/PDF) survive the JSON wire. readFile decodes to stdout;
+	// writeFile encodes from -content or stdin.
+	if method == "readFile" {
+		var res struct {
+			Content string `json:"content"`
+		}
+		if err := client.Call(context.Background(), "readFile", map[string]any{"path": *path}, &res); err != nil {
+			fmt.Fprintf(os.Stderr, "readFile: %v\n", err)
+			os.Exit(1)
+		}
+		data, err := base64.StdEncoding.DecodeString(res.Content)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "readFile: bad content encoding: %v\n", err)
+			os.Exit(1)
+		}
+		_, _ = os.Stdout.Write(data)
+		return
+	}
+	if method == "writeFile" {
+		var raw []byte
+		if *content != "" {
+			raw = []byte(*content)
+		} else {
+			var err error
+			if raw, err = io.ReadAll(os.Stdin); err != nil {
+				fmt.Fprintf(os.Stderr, "writeFile: read stdin: %v\n", err)
+				os.Exit(1)
+			}
+		}
+		p := map[string]any{"path": *path, "content": base64.StdEncoding.EncodeToString(raw)}
+		var result json.RawMessage
+		if err := client.Call(context.Background(), "writeFile", p, &result); err != nil {
+			fmt.Fprintf(os.Stderr, "writeFile: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("ok (writeFile %s)\n", *path)
+		return
+	}
+
 	var params any
 	switch method {
 	case "createVM":
@@ -125,8 +172,10 @@ func main() {
 			"memoryMB":   *mem,
 			"cpuCount":   *cpu,
 		}
-	case "startVM", "stopVM":
+	case "startVM", "stopVM", "detachWorkspace":
 		params = map[string]any{"id": *id}
+	case "attachWorkspace":
+		params = map[string]any{"id": *id, "path": *path}
 	}
 
 	var result json.RawMessage

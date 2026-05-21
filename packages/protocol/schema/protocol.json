@@ -7,6 +7,8 @@
     { "name": "startVM", "params": "VMRef", "result": null },
     { "name": "stopVM", "params": "VMRef", "result": null },
     { "name": "exec", "params": "ExecParams", "result": "ExecResult" },
+    { "name": "attachWorkspace", "params": "AttachWorkspaceParams", "result": null },
+    { "name": "detachWorkspace", "params": "VMRef", "result": null },
     { "name": "readFile", "params": "ReadFileParams", "result": "FileContent" },
     { "name": "writeFile", "params": "WriteFileParams", "result": null }
   ],
@@ -23,6 +25,7 @@
     "VMRef": { "id": "string" },
     "ExecParams": { "id": "string", "cmd": "string", "args": "string[]", "cwd": "string", "env": "map<string,string>" },
     "ExecResult": { "exitCode": "int" },
+    "AttachWorkspaceParams": { "id": "string", "path": "string", "readOnly": "bool" },
     "ReadFileParams": { "path": "string" },
     "WriteFileParams": { "path": "string", "content": "string" },
     "FileContent": { "path": "string", "content": "string", "size": "int" }

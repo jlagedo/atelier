@@ -12,6 +12,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/jlagedo/atelier/services/internal/vsock"
 )
 
 // Default security descriptor for the VM's hvsocket (used for both bind and
@@ -20,6 +22,14 @@ import (
 // dial the guest's vsock listener (Hop 3, S2.2) — without it the host's
 // AF_HYPERV connect is refused.
 const hvSocketSD = "D:P(A;;FA;;;SY)(A;;FA;;;BA)"
+
+// Plan9 share flags (private in the HCS schema; values mirror hcsshim). The
+// LinuxMetadata flag makes the 9p server carry Unix uid/gid/mode so the guest
+// sees correct ownership/permissions on the /workspace files (S3.1).
+const (
+	plan9FlagReadOnly      int32 = 0x00000001
+	plan9FlagLinuxMetadata int32 = 0x00000004
+)
 
 // DocConfig is the small, host-facing knob set we build a compute-system doc
 // from. internal/vm fills it from a VMConfig.
@@ -88,7 +98,11 @@ func MakeLCOWDoc(c DocConfig) ([]byte, error) {
 				DefaultConnectSecurityDescriptor: hvSocketSD,
 			},
 		},
-		// Plan9 (the /workspace 9p share) is intentionally absent until S3.1.
+		// An empty Plan9 controller so /workspace shares can be added/removed on
+		// the *running* VM via ModifyComputeSystem (the Files door, design.md §10
+		// — S3.1). Workspaces attach/detach at runtime (one long-lived VM, no
+		// reboot to swap), so no share is baked into the boot doc.
+		Plan9: &Plan9{},
 	}
 	if c.ConsolePipe != "" {
 		devices.ComPorts = map[uint32]ComPort{
@@ -141,6 +155,55 @@ func defaultCmdLine(c DocConfig) string {
 	// for a swap/resume device that doesn't exist (observed S1.3).
 	fmt.Fprintf(&b, "root=/dev/sda %s noresume init=/sbin/init", rw)
 	return b.String()
+}
+
+// plan9ShareResourcePath is the HCS resource path for the Plan9 share list,
+// addressed by ModifyComputeSystem to add/remove shares on a running VM.
+const plan9ShareResourcePath = "VirtualMachine/Devices/Plan9/Shares"
+
+// MakePlan9AddRequest builds the ModifyComputeSystem document that adds the
+// /workspace 9p share (host folder hostPath) to a running VM (Files door, S3.1).
+// It carries only the host-side Settings — no GuestRequest — because we run no
+// GCS: the guest (guestd) mounts the share itself over our control plane.
+func MakePlan9AddRequest(hostPath string, readOnly bool) ([]byte, error) {
+	flags := plan9FlagLinuxMetadata
+	if readOnly {
+		flags |= plan9FlagReadOnly
+	}
+	return json.Marshal(modifySettingRequest{
+		ResourcePath: plan9ShareResourcePath,
+		RequestType:  "Add",
+		Settings: Plan9Share{
+			Name:       vsock.WorkspaceShareTag,
+			AccessName: vsock.WorkspaceShareTag,
+			Path:       hostPath,
+			Port:       int32(vsock.WorkspacePlan9Port),
+			Flags:      flags,
+			ReadOnly:   readOnly,
+		},
+	})
+}
+
+// MakePlan9RemoveRequest builds the ModifyComputeSystem document that removes the
+// /workspace 9p share from a running VM (the host side of detach).
+func MakePlan9RemoveRequest() ([]byte, error) {
+	return json.Marshal(modifySettingRequest{
+		ResourcePath: plan9ShareResourcePath,
+		RequestType:  "Remove",
+		Settings: Plan9Share{
+			Name:       vsock.WorkspaceShareTag,
+			AccessName: vsock.WorkspaceShareTag,
+			Port:       int32(vsock.WorkspacePlan9Port),
+		},
+	})
+}
+
+// modifySettingRequest is the document passed to HcsModifyComputeSystem. We omit
+// the GuestRequest field (no GCS); the guest is driven over our own RPC instead.
+type modifySettingRequest struct {
+	ResourcePath string `json:"ResourcePath,omitempty"`
+	RequestType  string `json:"RequestType,omitempty"`
+	Settings     any    `json:"Settings,omitempty"`
 }
 
 // --- Schema 2.1 compute-system document (subset we author) ------------------
@@ -244,10 +307,13 @@ type Plan9 struct {
 
 // Plan9Share is one host-folder→guest-mount 9p share.
 type Plan9Share struct {
-	Name         string   `json:"Name,omitempty"`
-	AccessName   string   `json:"AccessName,omitempty"`
-	Path         string   `json:"Path,omitempty"`
-	Port         int32    `json:"Port,omitempty"`
+	Name       string `json:"Name,omitempty"`
+	AccessName string `json:"AccessName,omitempty"`
+	Path       string `json:"Path,omitempty"`
+	Port       int32  `json:"Port,omitempty"`
+	// Flags carries the share's behavior bits (LinuxMetadata, ReadOnly, …);
+	// private in the HCS schema, mirrored from hcsshim. See plan9Flag* consts.
+	Flags        int32    `json:"Flags,omitempty"`
 	ReadOnly     bool     `json:"ReadOnly,omitempty"`
 	AllowedFiles []string `json:"AllowedFiles,omitempty"`
 }

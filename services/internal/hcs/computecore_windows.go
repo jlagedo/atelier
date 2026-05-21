@@ -39,6 +39,7 @@ var (
 	procHcsCreateComputeSystem        = modcomputecore.NewProc("HcsCreateComputeSystem")
 	procHcsOpenComputeSystem          = modcomputecore.NewProc("HcsOpenComputeSystem")
 	procHcsStartComputeSystem         = modcomputecore.NewProc("HcsStartComputeSystem")
+	procHcsModifyComputeSystem        = modcomputecore.NewProc("HcsModifyComputeSystem")
 	procHcsTerminateComputeSystem     = modcomputecore.NewProc("HcsTerminateComputeSystem")
 	procHcsCloseComputeSystem         = modcomputecore.NewProc("HcsCloseComputeSystem")
 	procHcsGetComputeSystemProperties = modcomputecore.NewProc("HcsGetComputeSystemProperties")
@@ -232,6 +233,36 @@ func hcsGetComputeSystemProperties(system hcsSystem) (string, error) {
 		return "", hresultError("HcsGetComputeSystemProperties", r0, "")
 	}
 	return waitForOperationResultDoc(op, "HcsGetComputeSystemProperties")
+}
+
+// hcsModifyComputeSystem applies a settings change (our ModifySettingRequest
+// JSON) to a running system and blocks until it completes. Used to add/remove
+// Plan9 /workspace shares at runtime (Files door, S3.1).
+func hcsModifyComputeSystem(system hcsSystem, config string) error {
+	cfgp, err := windows.UTF16PtrFromString(config)
+	if err != nil {
+		return err
+	}
+	op, err := createOperation()
+	if err != nil {
+		return err
+	}
+	defer closeOperation(op)
+
+	if err := procHcsModifyComputeSystem.Find(); err != nil {
+		return err
+	}
+	r0, _, _ := syscall.SyscallN(
+		procHcsModifyComputeSystem.Addr(),
+		uintptr(system),
+		uintptr(op),
+		uintptr(unsafe.Pointer(cfgp)),
+		0, // identity: NULL
+	)
+	if int32(r0) < 0 {
+		return hresultError("HcsModifyComputeSystem", r0, "")
+	}
+	return waitForOperationResult(op, "HcsModifyComputeSystem")
 }
 
 // hcsStartComputeSystem starts (boots) the system and blocks until start completes.

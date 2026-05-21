@@ -62,6 +62,16 @@ func (d *winDriver) Stop(_ context.Context, id string) error {
 	return closeErr
 }
 
+// Modify applies a ModifyComputeSystem settings change to a running VM (e.g. add
+// or remove a Plan9 /workspace share — Files door, S3.1).
+func (d *winDriver) Modify(_ context.Context, id string, doc []byte) error {
+	system, err := d.handle(id)
+	if err != nil {
+		return err
+	}
+	return hcsModifyComputeSystem(system, string(doc))
+}
+
 // RuntimeID returns the compute system's RuntimeId GUID — the partition identity
 // the host dials over hvsock (Hop 3). It is assigned by HCS and differs from the
 // friendly id passed to Create.
