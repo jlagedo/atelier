@@ -11,6 +11,7 @@ vendor/
 out/
 
 # binaries / test
+/bin/
 *.exe
 *.test
 
