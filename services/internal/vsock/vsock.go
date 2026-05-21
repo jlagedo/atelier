@@ -25,3 +25,13 @@ const WorkspacePlan9Port uint32 = 564
 // WorkspaceShareTag is the 9p share name: the host doc's Plan9Share AccessName
 // and the `aname=` the guest passes when mounting. Both ends share it.
 const WorkspaceShareTag = "workspace"
+
+// EgressLinkPort is the vsock port carrying the guest's user-mode network link
+// (design.md §8 Hop 3 channel 2, §10 Network door — S4.1). The guest's
+// gvforwarder dials AF_VSOCK CID 2 (the host) on this port and POSTs /connect to
+// the host's gvisor-tap-vsock virtualnetwork, which then serves as the guest's
+// entire network (DHCP/DNS/forward + egress allowlist — all host-controlled). On
+// the host the AF_HYPERV listener uses the service GUID derived from this port
+// (winio.VsockServiceID(EgressLinkPort)); the guest uses the raw port. Both ends
+// import it so they can never drift. 1024 is gvforwarder's default link port.
+const EgressLinkPort uint32 = 1024

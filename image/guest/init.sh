@@ -4,6 +4,10 @@
 # and the host /workspace share, then hands off to the guest daemon.
 set -eu
 
+# Guarantee a usable PATH for PID 1 and everything it spawns (guestd's exec, plus
+# the Network-door helpers it runs: modprobe, dhclient — S4.1).
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+
 # The boot initramfs (S1.3) already mounts /proc, /sys, /dev and moves them into
 # the real root on switch_root. Re-mounting them then fails with "already mounted"
 # — which under `set -e` would exit PID 1 and panic the kernel. So tolerate it.

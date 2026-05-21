@@ -96,6 +96,19 @@ func MakeLCOWDoc(c DocConfig) ([]byte, error) {
 			HvSocketConfig: &HvSocketSystemConfig{
 				DefaultBindSecurityDescriptor:    hvSocketSD,
 				DefaultConnectSecurityDescriptor: hvSocketSD,
+				// Authorize the egress link service (Network door, S4.1) per-VM so
+				// the guest's gvforwarder may connect to our host-side gvisor network
+				// on it. HCS does this implicitly for its own services (e.g. the 9p
+				// share); ours is a plain host listener, so we list it here — the
+				// per-VM analogue of a GuestCommunicationServices registry entry, and
+				// the reason guest->host on this port routes without a host reboot.
+				ServiceTable: map[string]HvSocketServiceConfig{
+					egressServiceGUID(): {
+						BindSecurityDescriptor:    hvSocketSD,
+						ConnectSecurityDescriptor: hvSocketSD,
+						AllowWildcardBinds:        true,
+					},
+				},
 			},
 		},
 		// An empty Plan9 controller so /workspace shares can be added/removed on
@@ -294,10 +307,29 @@ type HvSocket2 struct {
 	HvSocketConfig *HvSocketSystemConfig `json:"HvSocketConfig,omitempty"`
 }
 
-// HvSocketSystemConfig sets default security descriptors for guest hvsockets.
+// HvSocketSystemConfig sets default security descriptors for guest hvsockets,
+// plus a per-service-GUID ServiceTable for services that need explicit
+// authorization (e.g. the egress link the guest connects to — S4.1).
 type HvSocketSystemConfig struct {
-	DefaultBindSecurityDescriptor    string `json:"DefaultBindSecurityDescriptor,omitempty"`
-	DefaultConnectSecurityDescriptor string `json:"DefaultConnectSecurityDescriptor,omitempty"`
+	DefaultBindSecurityDescriptor    string                           `json:"DefaultBindSecurityDescriptor,omitempty"`
+	DefaultConnectSecurityDescriptor string                           `json:"DefaultConnectSecurityDescriptor,omitempty"`
+	ServiceTable                     map[string]HvSocketServiceConfig `json:"ServiceTable,omitempty"`
+}
+
+// HvSocketServiceConfig is the per-service hvsocket authorization (field names
+// mirror hcsshim's schema2 so HCS accepts the doc).
+type HvSocketServiceConfig struct {
+	BindSecurityDescriptor    string `json:"BindSecurityDescriptor,omitempty"`
+	ConnectSecurityDescriptor string `json:"ConnectSecurityDescriptor,omitempty"`
+	AllowWildcardBinds        bool   `json:"AllowWildcardBinds,omitempty"`
+	Disabled                  bool   `json:"Disabled,omitempty"`
+}
+
+// egressServiceGUID is the Hyper-V vsock service GUID for the egress link port
+// (template "<port-8hex>-facb-11e6-bd58-64006a7986d3"); the guest connects to the
+// host on it (Network door, S4.1).
+func egressServiceGUID() string {
+	return fmt.Sprintf("%08x-facb-11e6-bd58-64006a7986d3", vsock.EgressLinkPort)
 }
 
 // Plan9 is the 9p file-share device (the /workspace share, wired in S3.1).

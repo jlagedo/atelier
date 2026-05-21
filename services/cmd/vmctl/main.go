@@ -15,6 +15,7 @@
 //	vmctl detachWorkspace -id vm0
 //	vmctl readFile  -path notes.txt                      (prints to stdout)
 //	vmctl writeFile -path out.txt [-content "..."]       (else reads stdin)
+//	vmctl setEgressPolicy -allow pypi.org,files.pythonhosted.org  (empty = deny all)
 package main
 
 import (
@@ -64,6 +65,7 @@ func main() {
 	fs.Var(env, "env", "guest env var KEY=VALUE (exec; repeatable)")
 	path := fs.String("path", "", "workspace-relative file path (readFile/writeFile)")
 	content := fs.String("content", "", "file content (writeFile; if unset, read from stdin)")
+	allow := fs.String("allow", "", "comma-separated egress allowlist host suffixes (setEgressPolicy; empty = deny all)")
 	_ = fs.Parse(args)
 
 	conn, err := rpc.Dial(*addr)
@@ -176,6 +178,14 @@ func main() {
 		params = map[string]any{"id": *id}
 	case "attachWorkspace":
 		params = map[string]any{"id": *id, "path": *path}
+	case "setEgressPolicy":
+		var allowList []string
+		for _, h := range strings.Split(*allow, ",") {
+			if h = strings.TrimSpace(h); h != "" {
+				allowList = append(allowList, h)
+			}
+		}
+		params = map[string]any{"allow": allowList}
 	}
 
 	var result json.RawMessage

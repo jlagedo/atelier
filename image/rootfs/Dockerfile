@@ -16,6 +16,10 @@ ENV DEBIAN_FRONTEND=noninteractive
 # ext4/overlay/fuse). initramfs-tools is explicit (the kernel meta only recommends
 # it, and --no-install-recommends would drop it) so the kernel postinst generates
 # /boot/initrd.img-<ver>. image/build.sh extracts vmlinuz + initrd from /boot.
+# isc-dhcp-client (dhclient): the guest network forwarder (gvforwarder, S4.1) runs
+# it on the tap interface to take a DHCP lease from the host's user-mode network
+# (gvisor-tap-vsock) — it configures the address, default route, and resolv.conf.
+# iproute2 + curl are for exercising/inspecting egress from the guest.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       busybox-static \
       python3 \
@@ -25,6 +29,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ripgrep \
       ca-certificates \
       openssh-server \
+      isc-dhcp-client \
+      iproute2 \
+      curl \
       initramfs-tools \
       linux-image-generic-hwe-22.04 \
     && rm -rf /var/lib/apt/lists/*

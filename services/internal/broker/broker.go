@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jlagedo/atelier/services/internal/netjail"
 	"github.com/jlagedo/atelier/services/internal/rpc"
 	"github.com/jlagedo/atelier/services/internal/vm"
 )
@@ -25,6 +26,12 @@ type Broker struct {
 	log   *slog.Logger
 	gate  Gate
 	vms   *vm.Manager
+
+	// egress is the Network-door policy (design.md §10 — S4.1): a runtime-settable,
+	// default-deny allowlist the guest's user-mode network (gvisor) consults. The
+	// same pointer is handed to the VM manager, so setEgressPolicy mutates the live
+	// object the network enforces — no reboot to change policy.
+	egress *netjail.Allowlist
 
 	// mu guards workspace, the canonicalized host folder currently attached as the
 	// Files-door root (design.md §10 — S3.1): the jail root readFile/writeFile
@@ -45,7 +52,8 @@ func New(log *slog.Logger, gate Gate) *Broker {
 	if gate == nil {
 		gate = AllowAll{log: log}
 	}
-	return &Broker{start: time.Now(), log: log, gate: gate, vms: vm.NewManager(log)}
+	egress := netjail.NewAllowlist(log)
+	return &Broker{start: time.Now(), log: log, gate: gate, vms: vm.NewManager(log, egress), egress: egress}
 }
 
 // currentWorkspace returns the attached Files-door root, or "" if none.
@@ -75,6 +83,7 @@ func (b *Broker) Register(s *rpc.Server) {
 	s.Register("detachWorkspace", b.detachWorkspace)
 	s.Register("readFile", b.readFile)
 	s.Register("writeFile", b.writeFile)
+	s.Register("setEgressPolicy", b.setEgressPolicy)
 }
 
 // CreateVMParams describes a VM to create. KernelPath/RootFSPath are host paths

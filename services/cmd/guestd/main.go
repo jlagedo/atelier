@@ -36,6 +36,11 @@ func main() {
 	}
 	log.Info("atelier-guestd listening", "transport", "vsock", "port", vsock.GuestRPCPort)
 
+	// Bring up the guest's network link (Network door, S4.1): gvforwarder bridges
+	// a tap device to the host's user-mode network over vsock. Supervised in the
+	// background; egress is still gated host-side by the allowlist (default-deny).
+	superviseEgress(log)
+
 	srv := rpc.NewServer(log)
 	g := &guest{log: log}
 	srv.Register("exec", g.exec)

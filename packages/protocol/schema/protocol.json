@@ -10,7 +10,8 @@
     { "name": "attachWorkspace", "params": "AttachWorkspaceParams", "result": null },
     { "name": "detachWorkspace", "params": "VMRef", "result": null },
     { "name": "readFile", "params": "ReadFileParams", "result": "FileContent" },
-    { "name": "writeFile", "params": "WriteFileParams", "result": null }
+    { "name": "writeFile", "params": "WriteFileParams", "result": null },
+    { "name": "setEgressPolicy", "params": "SetEgressPolicyParams", "result": null }
   ],
   "types": {
     "Status": {
@@ -28,6 +29,7 @@
     "AttachWorkspaceParams": { "id": "string", "path": "string", "readOnly": "bool" },
     "ReadFileParams": { "path": "string" },
     "WriteFileParams": { "path": "string", "content": "string" },
-    "FileContent": { "path": "string", "content": "string", "size": "int" }
+    "FileContent": { "path": "string", "content": "string", "size": "int" },
+    "SetEgressPolicyParams": { "allow": "string[]" }
   }
 }

@@ -64,6 +64,18 @@ ensure_tree() {
   ( cd ../services && env GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o "$out" ./cmd/guestd )
   install -D -m 0755 "$out" "$WORK/rootfs/usr/sbin/guestd"
 
+  # Guest network forwarder (gvforwarder, design.md §8 Hop 3 channel 2 — S4.1):
+  # the Network door's guest half. It is gvisor-tap-vsock's cmd/vm; build it at the
+  # exact version services/go.mod pins (go install pkg@version resolves against the
+  # library's own module, independent of our go.mod). guestd supervises it at boot.
+  local gvbin gvver
+  gvver="$(cd ../services && go list -m -f '{{.Version}}' github.com/containers/gvisor-tap-vsock)"
+  log "building guest network forwarder (gvforwarder ${gvver}, linux/amd64 static)"
+  gvbin="$(pwd)/$WORK/bin"
+  ( env GOBIN="$gvbin" GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
+      go install -trimpath "github.com/containers/gvisor-tap-vsock/cmd/vm@${gvver}" )
+  install -D -m 0755 "$gvbin/vm" "$WORK/rootfs/usr/sbin/gvforwarder"
+
   TREE_READY=1
 }
 
