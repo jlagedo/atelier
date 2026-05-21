@@ -322,7 +322,7 @@ Tiny but blocking. No product code; just make the toolchain usable.
 
 ## Phase 2 — The doors (M3–M4)
 
-> Status: `☑ S3.1` `☐ S4.1`
+> Status: `☑ S3.1` `☑ S4.1`
 >
 > Now slices are genuinely **feature-vertical**: each door (§10) is one capability,
 > independently demoable through `vmctl`. **Files** and **Compute** are unlocked here;
@@ -391,12 +391,56 @@ Tiny but blocking. No product code; just make the toolchain usable.
   **fails**; `pip install` works only via the proxy; blocks are audited.
 - **Exit:** **Network door** is a jail. The compute door now has no unaudited escape.
 - **Depends:** S2.2.  **Risk:** HNS setup; getting the default-deny right (fail-closed).
+- **Decision (2026-05-20): went straight to the Cowork-exact end state, NOT the "restricted
+  NIC + proxy" start-simple.** Rationale: the guest already has **no NIC** (control RPC + 9p both
+  ride hvsock), so a real Hyper-V NIC + HNS + firewall would be *more* Windows machinery, a worse
+  fit, and thrown away later. Web research confirmed the model: **Cowork enforces egress as a
+  domain allowlist + DNS restriction** (Pluto Security's reverse-engineering) and the **canonical
+  gVisor pattern** is to allow/deny in the TCP **forwarder handler** (`r.ID()` → complete or RST).
+- **Result (2026-05-20): DONE — the Network door is a default-deny egress jail, verified live.**
+  The guest gets a `tap0` from **`containers/gvisor-tap-vsock`** (v0.8.9): its `gvforwarder` (built
+  from the lib's `cmd/vm`, shipped in the rootfs, supervised by guestd) dials AF_VSOCK CID 2 :
+  **1024** and bridges the tap to the host's user-mode TCP/IP stack served over an **AF_HYPERV
+  listener** — the host *is* the guest's whole network (DHCP/DNS/forward). The egress jail is
+  **composed, not forked**: `internal/netjail` reuses the library's exported DHCP/DNS/tap/stack but
+  supplies the two security seams the lib has no hook for — (1) a **jailed TCP forwarder** that
+  dials a destination only if its IP was **pinned** by an allowlisted DNS lookup (closes the
+  direct-IP escape), and (2) a **pinning DNS resolver** via `dns.NewWithUpstreamResolver` that
+  resolves **only allowlisted names** (NXDOMAIN otherwise, and refuses CNAME/MX/NS/SRV/TXT to
+  shrink the DNS-tunnel exfil surface) and records their IPs. No general UDP egress; ICMP not
+  forwarded. Policy is a **runtime, default-deny `Allowlist`** the broker owns and the stack
+  consults live — `setEgressPolicy {allow:[...]}` swaps it with **no reboot** (the S3.1
+  runtime-attach discipline); every resolve/connect decision is **audited `door=network`**. The
+  approach was research-led (per the user): web research confirmed the canonical gVisor
+  forwarder-handler decision point and Cowork's domain-allowlist + DNS-restriction model.
+  - **The central unknown — our own AF_HYPERV listener accepting the guest's gvisor link — was the
+    one real fight.** With a plain host listener the guest's connect to CID 2 : 1024 just timed out;
+    a global `GuestCommunicationServices` registry entry did **not** fix it. The fix that worked is
+    the **per-VM `HvSocket.ServiceTable`** in the compute doc (`internal/hcs/doc.go`): listing our
+    egress service GUID (`00000400-facb-11e6-bd58-64006a7986d3`, from the link port) with permissive
+    bind/connect SDs + `AllowWildcardBinds` — the same per-VM mechanism HCS uses for its own
+    services (e.g. 9p/564, which likewise has **no** registry entry). Confirmed by A/B: registry-only
+    failed, ServiceTable made it work, then deleting the registry key and re-running ServiceTable-only
+    still worked (so the registry path was dropped entirely — no global host mutation).
+  - **Live demo (elevated, `.spike/boot_ours.ps1`):** `tap0` took DHCP lease **192.168.127.2/24**
+    with default route via `.1`; default-deny blocked `curl https://example.com`
+    (`door=network decision=deny op=resolve`); `setEgressPolicy pypi.org,files.pythonhosted.org` →
+    **`pip install requests` succeeded** (downloaded + installed requests + deps), audited
+    `resolve allowed pypi.org` / `connect allowed 151.101.x`; a **non-allowlisted host stayed
+    blocked** and a **direct-IP `curl https://1.1.1.1` → connection refused** (IP not pinned,
+    `connect denied`); clearing the policy denied again **with no reboot**. S2.2 exec + S3.1 Files
+    (round-trip + `..` jail) still pass — no regression. `go build`/`vet`/`test` green on Windows
+    **and** `GOOS=linux`; rootfs rebuilt to ship `gvforwarder` + `isc-dhcp-client` + tun.
+  - **Known v1 limitations (later hardening):** IP-pinning allows any name sharing a pinned CDN IP —
+    a MITM/CONNECT proxy matching the exact hostname is the next layer (Cowork's layer 2); the in-VM
+    `socket()`-blocking sandbox (bwrap/seccomp, Cowork's layer 1) is a separate slice; multi-VM needs
+    a per-VM VMID-bound listener (today the host listens `GUIDWildcard`, fine for one VM).
 
 ---
 
 ## Phase 3 — The agent (M5)
 
-> Status: `☐ S5a.1` `☐ S5b.1`
+> Status: `☑ S5a.1` `☐ S5b.1`
 >
 > Wire the **SDK's seams**, don't write a loop (§8). The same module runs in both topologies.
 
@@ -412,6 +456,19 @@ Tiny but blocking. No product code; just make the toolchain usable.
 - **Exit:** working agent against a real VM, from a host CLI.
 - **Depends:** S3.1 (files), S4.1 (egress for any MCP/network).  **Risk:** seam wiring;
   provider auth/keys; approval round-trip latency.
+- **Result (2026-05-20):** ✅ Done. `packages/agent` (standalone npm pkg, `tsx`) hosts
+  `@anthropic-ai/claude-agent-sdk` and supplies the three seams: **executeTool** = an in-process
+  MCP server (`shell`/`read_file`/`write_file`) over a new TS Hop-2 client (`src/broker/client.ts`:
+  named pipe + Content-Length + JSON-RPC 2.0, base64 exec/file framing matching `vmctl`);
+  **callModel** = `packages/provider` (model `claude-sonnet-4-6` + `ANTHROPIC_API_KEY` from env,
+  `ANTHROPIC_BASE_URL` reserved for Eliza); **approvals** = a pre-baked policy via the SDK's
+  `canUseTool` (no end-user prompt — enterprise-shaped, audited). Live run against `vm0`: agent did
+  read_file → shell python → write_file and produced `/workspace/summary.csv` (grand total 37.50),
+  each call audited; a write to `/etc/...` was **denied** by policy. Notes: the broker Files door is
+  workspace-*relative* (the tool translates guest `/workspace/...` paths); `canUseTool` must be the
+  chokepoint (an `allowedTools` allowlist bypasses it); pinned `zod@^4` (SDK peer) and
+  `@types/node@^22` (Node-22 floor). No `protocol.json` change — reused `exec`/`readFile`/`writeFile`;
+  server-authoritative approvals (`checkPolicy` RPC) wait for a real Ask/Deny gate.
 
 ### S5b.1 — M5b: Move the loop INTO the guest (Topology B, Cowork parity)
 - **Goal:** same module runs as a Node CLI **in the rootfs**; its LLM/MCP/approval calls

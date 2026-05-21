@@ -1,0 +1,12 @@
+{
+  "name": "@atelier/provider",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Provider seam (design.md §13): resolves model + env for the agent loop. Anthropic API now, Eliza later.",
+  "license": "UNLICENSED",
+  "main": "src/index.ts",
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}

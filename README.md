@@ -5,18 +5,32 @@ Windows HCS, a **TypeScript** agent loop runs the AI, and an **Electron/React** 
 The whole point is letting an AI agent work on **local files** safely — by containment, not
 per-click consent.
 
-> Full design, decisions, and a glossary live in **[`docs/design.md`](docs/design.md)**.
+> Full design, decisions, and a glossary live in **[`docs/design.md`](docs/design.md)**; the
+> slice-by-slice build order and progress in **[`docs/implementation-plan.md`](docs/implementation-plan.md)**.
 > Build/run/test instructions and conventions live in **[`AGENTS.md`](AGENTS.md)**.
 
 ## Status
 
-Early scaffold — two areas are runnable, the rest follow the milestone ladder in the design doc:
+The **compute substrate is real**: our own Go bindings to Windows HCS boot our own Linux VM, and
+the host drives commands inside the guest, streaming output back. Work follows the milestone ladder
+in [`docs/implementation-plan.md`](docs/implementation-plan.md).
 
-- **Desktop shell** (`apps/desktop`) — a hardened Electron + React 19 + Tailwind v4 app booting
-  a chat-forward **mock** layout, with a working IPC seam. No real agent yet.
-- **Host service** (`services`) — a Go broker speaking JSON-RPC 2.0 (Content-Length framed) over
-  a named pipe (Windows) / unix socket (dev); `getStatus` works end-to-end, capability methods
-  are policy-gated, audited stubs. HCS (hcsshim) + guest transport are next.
+- **Host service** (`services`) — a Go broker speaking JSON-RPC 2.0 (Content-Length framed) over a
+  named pipe (Windows) / unix socket (dev). Every capability passes a policy gate (allow/ask/deny)
+  + audit log. What works end-to-end:
+  - **Boot** — our `computecore.dll` bindings author the compute-system doc and start the VM on a
+    self-built, version-matched **kernel + initrd + Ubuntu 22.04 rootfs** bundle.
+  - **Compute door** — `exec` runs a command in the guest over hvsocket and streams stdout/stderr
+    back live (`vmctl exec -id vm0 -- ls -la /`).
+  - **Files door** — a host folder mounts at `/workspace` over **9p**, attachable/swappable on a
+    *running* VM (no reboot); `readFile`/`writeFile` are broker-mediated and jailed to the
+    workspace (rejects `..` and escaping symlinks).
+  - **Network door** — a no-NIC user-mode network (gvisor-tap-vsock) with a default-deny egress
+    allowlist + pinning DNS resolver; `setEgressPolicy` swaps the allowlist at runtime. *Code
+    complete, not yet live-verified.*
+- **Desktop shell** (`apps/desktop`) — a hardened Electron + React 19 + Tailwind v4 app booting a
+  chat-forward **mock** layout, with a working IPC seam. Not yet wired to the broker; the real
+  agent loop and Electron-over-broker UI are the final milestones (M5–M6).
 
 ## Layout
 
@@ -42,7 +56,20 @@ go run ./cmd/host  -addr /tmp/atelier-host.sock &
 go run ./cmd/vmctl -addr /tmp/atelier-host.sock getStatus
 ```
 
-See **[`AGENTS.md`](AGENTS.md)** for the full command set, conventions, and verification notes.
+Driving a real VM needs **Windows + HCS** (Hyper-V Administrators or elevation) and a built image
+bundle. Once the broker (`cmd/host`) is up, `vmctl` exercises the whole substrate from a terminal:
+
+```sh
+vmctl createVM -id vm0 -kernel vmlinuz -initrd initrd -rootfs rootfs.vhd
+vmctl startVM  -id vm0
+vmctl exec     -id vm0 -- python3 --version          # run in the guest, stream output back
+vmctl attachWorkspace -id vm0 -path C:\work\folder   # share a host folder at /workspace
+vmctl setEgressPolicy -allow pypi.org,files.pythonhosted.org
+vmctl stopVM   -id vm0
+```
+
+Build the VM image bundle (kernel + initrd + rootfs) from `image/` — see `image/build.sh` (runs in
+WSL). See **[`AGENTS.md`](AGENTS.md)** for the full command set, conventions, and verification notes.
 
 ## Architecture at a glance
 

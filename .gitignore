@@ -14,10 +14,21 @@ out/
 *.exe
 *.test
 
+# Go build outputs — keep binaries out of the source tree (build into services/bin/).
+services/bin/*
+!services/bin/.gitkeep
+# Safety net for a naive `go build ./cmd/X` that drops an extensionless binary at the module root.
+/services/guestd
+/services/host
+/services/vmctl
+
 # env / secrets
 .env
 .env.*
 !.env.example
+
+# Claude Code (local, per-machine — never commit)
+.claude/settings.local.json
 
 # OS / editor
 .DS_Store

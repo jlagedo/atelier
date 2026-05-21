@@ -14,6 +14,7 @@
     "format": "npm --prefix apps/desktop run format",
     "typecheck": "npm --prefix apps/desktop run typecheck",
     "test": "npm --prefix apps/desktop run test",
-    "protogen": "node tools/protogen/protogen.mjs"
+    "protogen": "node tools/protogen/protogen.mjs",
+    "agent": "npm --prefix packages/agent run dev --"
   }
 }
