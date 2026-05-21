@@ -26,6 +26,31 @@ die() { printf '\033[1;31m[image] error:\033[0m %s\n' "$*" >&2; exit 1; }
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# stage_context assembles a SMALL, controlled Docker build context in $WORK/ctx so
+# the rootfs Dockerfile can COPY the in-guest agent (Topology B, S5b.1). The repo
+# root is too big to send as context (rootfs.vhd, .git, node_modules); instead we
+# copy just the Dockerfile + packages/{agent,provider,protocol} SOURCE (no
+# node_modules/dist) and build from there. npm install runs INSIDE the Docker build
+# (linux/amd64) so the baked node_modules has the right platform binaries.
+stage_pkg() {
+  local p="$1"
+  mkdir -p "$WORK/ctx/packages/$p"
+  ( cd "../packages/$p" && tar --exclude=node_modules --exclude=dist --exclude=.git -cf - . ) \
+    | ( cd "$WORK/ctx/packages/$p" && tar -xf - )
+}
+
+stage_context() {
+  # protocol/src is generated (gitignored). It must exist before we stage it.
+  [ -f "../packages/protocol/src/index.ts" ] \
+    || die "packages/protocol/src is missing — run 'npm run protogen' at the repo root first"
+  rm -rf "$WORK/ctx"
+  mkdir -p "$WORK/ctx/packages"
+  cp rootfs/Dockerfile "$WORK/ctx/Dockerfile"
+  stage_pkg agent
+  stage_pkg provider
+  stage_pkg protocol
+}
+
 cmd_check() {
   log "tool readiness:"
   for t in docker go mke2fs qemu-img sha256sum; do
@@ -44,8 +69,11 @@ ensure_tree() {
   have docker || die "docker not found (needed to build/export the Ubuntu rootfs + kernel)"
   mkdir -p "$WORK/rootfs" "$OUT"
 
+  log "staging build context (Dockerfile + packages/{agent,provider,protocol})"
+  stage_context
+
   log "building rootfs container image ($ROOTFS_TAG)"
-  docker build -t "$ROOTFS_TAG" rootfs
+  docker build -t "$ROOTFS_TAG" "$WORK/ctx"
 
   log "exporting container filesystem"
   cid="$(docker create "$ROOTFS_TAG")"

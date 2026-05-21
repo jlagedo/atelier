@@ -440,7 +440,7 @@ Tiny but blocking. No product code; just make the toolchain usable.
 
 ## Phase 3 — The agent (M5)
 
-> Status: `☑ S5a.1` `☐ S5b.1`
+> Status: `☑ S5a.1` `☑ S5b.1`
 >
 > Wire the **SDK's seams**, don't write a loop (§8). The same module runs in both topologies.
 
@@ -481,6 +481,27 @@ Tiny but blocking. No product code; just make the toolchain usable.
   and confirm the agent can't reach the model except through the broker.
 - **Exit:** Cowork-parity containment.
 - **Depends:** S5a.1.  **Risk:** in-guest Node packaging; tunneling MCP cleanly.
+- **Result (2026-05-21):** ✅ Done. The same loop now runs **inside** the cage. Because the loop is
+  in the sandbox, the two seams flipped *toward simplicity*, not toward tunnels: **executeTool went
+  local** — instead of the broker MCP server, the in-guest agent uses the **SDK's built-in coding
+  tools** (Bash/Read/Write/Edit/Glob/Grep/…) acting directly on the guest fs (`src/cli-guest.ts`,
+  no broker client, no `mcpServers`); **approvals** stayed the pre-baked `Policy` via `canUseTool`,
+  extended with a `mode:"guest"` map that allows the in-cage coding set (audited) and denies
+  out-of-cage tools (`WebFetch`/`WebSearch`) + unknowns (`src/seams/policy.ts`). **callModel** escapes
+  via the **existing egress jail** (S4.1): `vmctl agent` calls `setEgressPolicy(["api.anthropic.com"])`
+  then execs the agent over the broker — so **no new guestd/broker/protocol code was needed**.
+  Packaging: the rootfs now ships **NodeSource Node 22** (apt's is v12) and the agent + `node_modules`
+  baked in at `/opt/atelier/packages/agent` (`image/rootfs/Dockerfile` + a staged build context in
+  `image/build.sh`); runs via `tsx`. Live run against `vm0`: `node v22.22.2`, agent did built-in
+  Read → Write and produced `/workspace/summary.csv` (grand total **37.50**, identical on the host via
+  9p), the write **audited** by policy; exit 0. **Containment proof:** clearing the allowlist
+  (`setEgressPolicy []`) makes the model unreachable from the cage (`curl api.anthropic.com` →
+  *Could not resolve host*), and the egress jail lives in the broker process, so killing the broker
+  kills all guest network. **Deviation from the slice's stated plan:** rather than tunnelling
+  `callModel` guest→host so the *host holds the keys*, S5b.1 took the simpler **egress-allowlist**
+  path (user decision) — the `ANTHROPIC_API_KEY` rides into the guest process env. The host-side model
+  proxy (key never in the guest) is deferred to a future hardening slice; the network *path* is still
+  broker-mediated, but key residency is weaker than full Cowork parity.
 
 ---
 

@@ -16,6 +16,7 @@
 //	vmctl readFile  -path notes.txt                      (prints to stdout)
 //	vmctl writeFile -path out.txt [-content "..."]       (else reads stdin)
 //	vmctl setEgressPolicy -allow pypi.org,files.pythonhosted.org  (empty = deny all)
+//	vmctl agent    -id vm0 -- "<task>"   (S5b.1: run the agent loop INSIDE the guest)
 package main
 
 import (
@@ -43,6 +44,41 @@ func (e envFlag) Set(kv string) error {
 	}
 	e[kv[:i]] = kv[i+1:]
 	return nil
+}
+
+// execStream runs a guest `exec` over the broker, relaying the streamed
+// stdout/stderr notifications to our own stdout/stderr, and returns the guest's
+// exit code. Shared by the `exec` and `agent` subcommands.
+func execStream(client *rpc.Client, params map[string]any) int {
+	onNotify := func(m string, raw json.RawMessage) {
+		if m != "exec/output" {
+			return
+		}
+		var o struct {
+			Stream string `json:"stream"`
+			Data   string `json:"data"`
+		}
+		if json.Unmarshal(raw, &o) != nil {
+			return
+		}
+		data, err := base64.StdEncoding.DecodeString(o.Data)
+		if err != nil {
+			return
+		}
+		w := os.Stdout
+		if o.Stream == "stderr" {
+			w = os.Stderr
+		}
+		_, _ = w.Write(data)
+	}
+	var res struct {
+		ExitCode int `json:"exitCode"`
+	}
+	if err := client.CallStream(context.Background(), "exec", params, &res, onNotify); err != nil {
+		fmt.Fprintf(os.Stderr, "exec: %v\n", err)
+		return 1
+	}
+	return res.ExitCode
 }
 
 func main() {
@@ -92,35 +128,70 @@ func main() {
 			"cwd":  *cwd,
 			"env":  map[string]string(env),
 		}
-		onNotify := func(m string, raw json.RawMessage) {
-			if m != "exec/output" {
-				return
-			}
-			var o struct {
-				Stream string `json:"stream"`
-				Data   string `json:"data"`
-			}
-			if json.Unmarshal(raw, &o) != nil {
-				return
-			}
-			data, err := base64.StdEncoding.DecodeString(o.Data)
-			if err != nil {
-				return
-			}
-			w := os.Stdout
-			if o.Stream == "stderr" {
-				w = os.Stderr
-			}
-			_, _ = w.Write(data)
+		os.Exit(execStream(client, params))
+	}
+
+	// agent (S5b.1) runs the agent loop INSIDE the guest (Topology B). We open
+	// egress to the model host (default api.anthropic.com; -allow overrides), then
+	// exec the in-guest agent CLI baked into the rootfs at /opt/atelier. The loop's
+	// tools are the SDK's built-ins acting on the guest fs; only the model call
+	// leaves the cage. The API key rides in via the exec env (the operator's env);
+	// telemetry/autoupdate are disabled so the allowlist can stay tight.
+	if method == "agent" {
+		task := strings.TrimSpace(strings.Join(fs.Args(), " "))
+		if task == "" {
+			fmt.Fprintln(os.Stderr, `agent: missing task (usage: vmctl agent -id vm0 -- "<task>")`)
+			os.Exit(2)
 		}
-		var res struct {
-			ExitCode int `json:"exitCode"`
-		}
-		if err := client.CallStream(context.Background(), "exec", params, &res, onNotify); err != nil {
-			fmt.Fprintf(os.Stderr, "exec: %v\n", err)
+		apiKey := os.Getenv("ANTHROPIC_API_KEY")
+		if apiKey == "" {
+			fmt.Fprintln(os.Stderr, "agent: ANTHROPIC_API_KEY is not set in this shell's environment")
 			os.Exit(1)
 		}
-		os.Exit(res.ExitCode)
+
+		allowList := []string{"api.anthropic.com"}
+		if strings.TrimSpace(*allow) != "" {
+			allowList = nil
+			for _, h := range strings.Split(*allow, ",") {
+				if h = strings.TrimSpace(h); h != "" {
+					allowList = append(allowList, h)
+				}
+			}
+		}
+		var egRes json.RawMessage
+		if err := client.Call(context.Background(), "setEgressPolicy", map[string]any{"allow": allowList}, &egRes); err != nil {
+			fmt.Fprintf(os.Stderr, "agent: setEgressPolicy: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "[agent] egress allowlist: %s\n", strings.Join(allowList, ", "))
+
+		genv := map[string]string{
+			"ANTHROPIC_API_KEY":                        apiKey,
+			"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+			"DISABLE_AUTOUPDATER":                      "1",
+			"DISABLE_TELEMETRY":                        "1",
+			"DISABLE_ERROR_REPORTING":                  "1",
+			"HOME":                                     "/root",
+		}
+		// Forward provider knobs if set (model override, Eliza base URL).
+		for _, k := range []string{"ATELIER_MODEL", "ANTHROPIC_BASE_URL"} {
+			if v := os.Getenv(k); v != "" {
+				genv[k] = v
+			}
+		}
+		// Any explicit -env overrides win.
+		for k, v := range env {
+			genv[k] = v
+		}
+
+		params := map[string]any{
+			"id":   *id,
+			"cmd":  "/opt/atelier/packages/agent/node_modules/.bin/tsx",
+			"args": []string{"src/cli-guest.ts", "--task", task},
+			"cwd":  "/opt/atelier/packages/agent",
+			"env":  genv,
+		}
+		os.Exit(execStream(client, params))
 	}
 
 	// Files door (design.md §10): content travels base64-encoded so binary files
