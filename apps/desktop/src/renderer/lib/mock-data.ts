@@ -3,6 +3,8 @@
 // When M6 wires the host-client, this module is the single thing to replace.
 
 export type Role = "user" | "assistant";
+export type SessionMode = "chat" | "work";
+export type SessionStatus = "idle" | "running" | "waiting" | "done" | "error";
 
 export type ToolCall = {
   id: string;
@@ -25,15 +27,7 @@ export type ChatItem =
   | { kind: "tool"; id: string; tool: ToolCall }
   | { kind: "approval"; id: string; approval: Approval };
 
-export type Conversation = {
-  id: string;
-  title: string;
-  updatedAt: string;
-  preview: string;
-  items: ChatItem[];
-};
-
-export type FileKind = "csv" | "xlsx" | "md" | "py" | "txt" | "json" | "folder";
+export type FileKind = "csv" | "xlsx" | "md" | "py" | "txt" | "json" | "folder" | "ts";
 
 export type WorkspaceFile = {
   name: string;
@@ -43,144 +37,277 @@ export type WorkspaceFile = {
   status?: "new" | "modified";
 };
 
-export const conversations: Conversation[] = [
+export type WorkAccess = {
+  read: "allowed";
+  write: "ask";
+  shell: "ask";
+};
+
+export type ChangedFile = {
+  path: string;
+  status: "created" | "modified";
+};
+
+export type BackgroundTask = {
+  id: string;
+  label: string;
+  status: "running" | "waiting" | "done" | "error";
+};
+
+type BaseSession = {
+  id: string;
+  mode: SessionMode;
+  title: string;
+  updatedAt: string;
+  preview: string;
+  status: SessionStatus;
+  items: ChatItem[];
+};
+
+export type ChatSession = BaseSession & {
+  mode: "chat";
+  notes: string[];
+  artifacts: string[];
+};
+
+export type WorkSession = BaseSession & {
+  mode: "work";
+  folderName: string;
+  folderPath: string;
+  access: WorkAccess;
+  files: WorkspaceFile[];
+  changedFiles: ChangedFile[];
+  backgroundTasks: BackgroundTask[];
+};
+
+export type Session = ChatSession | WorkSession;
+
+export const chatSessions: ChatSession[] = [
   {
-    id: "orders-recon",
-    title: "Orders reconciliation",
-    updatedAt: "2m",
-    preview: "Flag duplicate order IDs in orders.csv",
+    id: "product-launch-ideas",
+    mode: "chat",
+    title: "Product launch ideas",
+    updatedAt: "5m",
+    preview: "Explore positioning for an AI workspace",
+    status: "idle",
+    notes: ["Keep the tone quiet and professional", "Avoid overpromising autonomous work"],
+    artifacts: ["Launch outline", "Audience notes"],
     items: [
       {
         kind: "message",
-        id: "m1",
+        id: "pl1",
         role: "user",
-        content: "Summarise `orders.csv` in my workspace and flag any duplicate order IDs.",
+        content: "Give me product launch ideas for Atelier that do not sound like another chatbot.",
       },
       {
         kind: "message",
-        id: "m2",
+        id: "pl2",
         role: "assistant",
         content:
-          "I'll read the file, scan for duplicate order IDs in Python, and write a short summary back to your workspace.\n\nHere's the plan:\n\n1. Read `/workspace/orders.csv`\n2. Group by `order_id` and count occurrences\n3. Write `summary.md` with the findings",
+          "Lean into the workspace angle: Atelier is less about chatting with an assistant and more about having a contained place where ideas, files, and careful execution can live together.\n\nA few directions:\n\n1. A calm AI workshop for local files\n2. Agentic work without losing control\n3. Chat when you want to think, Work when you want to act",
+      },
+    ],
+  },
+  {
+    id: "sandbox-architecture",
+    mode: "chat",
+    title: "Explain sandbox architecture",
+    updatedAt: "1h",
+    preview: "Describe the VM and broker boundaries",
+    status: "idle",
+    notes: ["Useful for docs/design.md follow-up"],
+    artifacts: ["Architecture summary"],
+    items: [
+      {
+        kind: "message",
+        id: "sa1",
+        role: "user",
+        content: "Explain the host broker and utility VM boundary in plain language.",
+      },
+      {
+        kind: "message",
+        id: "sa2",
+        role: "assistant",
+        content:
+          "The host broker is the controlled doorway. The utility VM is where risky work happens. Atelier routes file and command capabilities through the broker so every meaningful action can be gated and audited.",
+      },
+    ],
+  },
+  {
+    id: "customer-email",
+    mode: "chat",
+    title: "Draft customer email",
+    updatedAt: "Yesterday",
+    preview: "Write a concise beta update",
+    status: "idle",
+    notes: [],
+    artifacts: ["Beta update draft"],
+    items: [
+      {
+        kind: "message",
+        id: "ce1",
+        role: "user",
+        content: "Draft a short beta update email for early users.",
+      },
+    ],
+  },
+];
+
+const atelierFiles: WorkspaceFile[] = [
+  { name: "apps", kind: "folder", modified: "2m" },
+  { name: "docs", kind: "folder", modified: "1h" },
+  { name: "package.json", kind: "json", size: "684 B", modified: "1h" },
+  { name: "App.tsx", kind: "ts", size: "1.1 KB", modified: "2m", status: "modified" },
+  { name: "mock-data.ts", kind: "ts", size: "9.4 KB", modified: "just now", status: "modified" },
+  { name: "design.md", kind: "md", size: "19 KB", modified: "Mon" },
+];
+
+const invoiceFiles: WorkspaceFile[] = [
+  { name: "source", kind: "folder", modified: "Today" },
+  { name: "invoices.csv", kind: "csv", size: "2.8 MB", modified: "Today" },
+  { name: "purchase_orders.csv", kind: "csv", size: "1.7 MB", modified: "Today" },
+  { name: "mismatches.md", kind: "md", size: "2 KB", modified: "just now", status: "new" },
+];
+
+const briefFiles: WorkspaceFile[] = [
+  { name: "brief.md", kind: "md", size: "12 KB", modified: "Yesterday", status: "modified" },
+  { name: "notes.txt", kind: "txt", size: "640 B", modified: "Yesterday" },
+];
+
+export const workSessions: WorkSession[] = [
+  {
+    id: "atelier-work",
+    mode: "work",
+    title: "atelier",
+    updatedAt: "now",
+    preview: "Implement Chat / Work mock shell",
+    status: "running",
+    folderName: "atelier",
+    folderPath: "E:\\dev\\atelier",
+    access: { read: "allowed", write: "ask", shell: "ask" },
+    files: atelierFiles,
+    changedFiles: [
+      { path: "apps/desktop/src/renderer/App.tsx", status: "modified" },
+      { path: "apps/desktop/src/renderer/lib/mock-data.ts", status: "modified" },
+    ],
+    backgroundTasks: [
+      { id: "task-typecheck", label: "typecheck desktop shell", status: "running" },
+      { id: "task-review", label: "waiting on write approval", status: "waiting" },
+    ],
+    items: [
+      {
+        kind: "message",
+        id: "aw1",
+        role: "user",
+        content: "Map `E:\\dev\\atelier` and mock the new Chat / Work interface.",
+      },
+      {
+        kind: "message",
+        id: "aw2",
+        role: "assistant",
+        content:
+          "I have the folder mapped as a Work session. I'll keep Chat and Work histories separate, then make the right panel show folder access, changed files, running tasks, and the mock file tree.",
       },
       {
         kind: "tool",
-        id: "t1",
+        id: "awt1",
         tool: {
-          id: "t1",
-          label: "read file",
-          target: "/workspace/orders.csv",
+          id: "awt1",
+          label: "read folder",
+          target: "E:\\dev\\atelier",
           status: "done",
-          output: "12,480 rows · 9 columns · 1.4 MB",
+          output: "Found desktop renderer, mock data seam, and workspace panel components.",
         },
       },
       {
         kind: "tool",
-        id: "t2",
+        id: "awt2",
         tool: {
-          id: "t2",
-          label: "ran python",
-          target: "scan_duplicates.py",
-          status: "done",
-          output:
-            "> grouping by order_id\n> 3 duplicate order IDs found: BNY-10455, BNY-10812, BNY-11067\n> 6 affected rows",
+          id: "awt2",
+          label: "run typecheck",
+          target: "apps/desktop",
+          status: "running",
+          output: "> tsc --noEmit\n> checking renderer session types...",
         },
-      },
-      {
-        kind: "message",
-        id: "m3",
-        role: "assistant",
-        content:
-          "Done. Quick summary:\n\n| Metric | Value |\n| --- | --- |\n| Total orders | 12,480 |\n| Unique order IDs | 12,477 |\n| **Duplicates** | **3** (6 rows) |\n\nThe duplicates are `BNY-10455`, `BNY-10812`, and `BNY-11067`. I'd like to write the full breakdown to `summary.md`.",
       },
       {
         kind: "approval",
-        id: "a1",
+        id: "awa1",
         approval: {
-          id: "a1",
+          id: "awa1",
           action: "Write",
-          target: "summary.md",
-          detail: "to /workspace",
+          target: "apps/desktop/src/renderer",
+          detail: "mock Chat / Work UI changes",
           status: "pending",
         },
       },
     ],
   },
   {
-    id: "q2-variance",
-    title: "Q2 variance analysis",
-    updatedAt: "1h",
-    preview: "Compare actuals vs budget by cost centre",
+    id: "invoices-may",
+    mode: "work",
+    title: "invoices-may",
+    updatedAt: "12m",
+    preview: "Match invoices against purchase orders",
+    status: "waiting",
+    folderName: "invoices-may",
+    folderPath: "E:\\finance\\invoices-may",
+    access: { read: "allowed", write: "ask", shell: "ask" },
+    files: invoiceFiles,
+    changedFiles: [{ path: "mismatches.md", status: "created" }],
+    backgroundTasks: [{ id: "task-invoice-approval", label: "approval to write mismatch report", status: "waiting" }],
     items: [
       {
         kind: "message",
-        id: "qm1",
+        id: "im1",
         role: "user",
-        content: "Compare actuals vs budget by cost centre in `q2_variance.xlsx`.",
+        content: "Find invoices that do not have matching purchase orders.",
       },
       {
         kind: "message",
-        id: "qm2",
+        id: "im2",
         role: "assistant",
-        content: "On it — I'll load the workbook and compute the variance per cost centre.",
+        content: "I found 18 likely mismatches and am waiting before writing the report.",
       },
     ],
   },
   {
-    id: "payroll-cleanup",
-    title: "Payroll export cleanup",
+    id: "client-brief",
+    mode: "work",
+    title: "client-brief",
     updatedAt: "Yesterday",
-    preview: "Normalise employee IDs and trailing whitespace",
+    preview: "Clean up a client brief draft",
+    status: "done",
+    folderName: "client-brief",
+    folderPath: "E:\\clients\\brief",
+    access: { read: "allowed", write: "ask", shell: "ask" },
+    files: briefFiles,
+    changedFiles: [{ path: "brief.md", status: "modified" }],
+    backgroundTasks: [{ id: "task-brief", label: "rewrite brief sections", status: "done" }],
     items: [
       {
         kind: "message",
-        id: "pm1",
+        id: "cb1",
         role: "user",
-        content: "Clean up the payroll export — normalise employee IDs and strip whitespace.",
+        content: "Tighten the client brief and remove repeated sections.",
       },
-    ],
-  },
-  {
-    id: "vendor-invoice",
-    title: "Vendor invoice match",
-    updatedAt: "Yesterday",
-    preview: "Match invoices.csv against purchase_orders.csv",
-    items: [
       {
         kind: "message",
-        id: "vm1",
-        role: "user",
-        content: "Match `invoices.csv` against `purchase_orders.csv` and list mismatches.",
-      },
-    ],
-  },
-  {
-    id: "fx-refresh",
-    title: "FX rates refresh",
-    updatedAt: "Mon",
-    preview: "Pull latest EUR/USD and rebuild the rates sheet",
-    items: [
-      {
-        kind: "message",
-        id: "fm1",
-        role: "user",
-        content: "Refresh the FX rates sheet with the latest EUR/USD close.",
+        id: "cb2",
+        role: "assistant",
+        content: "Done. I tightened the overview and removed duplicate delivery notes.",
       },
     ],
   },
 ];
 
-export const activeConversationId = "orders-recon";
+export const sessions: Session[] = [...chatSessions, ...workSessions];
 
-export const workspaceFiles: WorkspaceFile[] = [
-  { name: "archive", kind: "folder", modified: "Apr 30" },
-  { name: "orders.csv", kind: "csv", size: "1.4 MB", modified: "2m", status: "modified" },
-  { name: "summary.md", kind: "md", size: "412 B", modified: "just now", status: "new" },
-  { name: "scan_duplicates.py", kind: "py", size: "1.1 KB", modified: "3m" },
-  { name: "q2_variance.xlsx", kind: "xlsx", size: "84 KB", modified: "1h" },
-  { name: "vendors.csv", kind: "csv", size: "22 KB", modified: "Yesterday" },
-  { name: "config.json", kind: "json", size: "2 KB", modified: "Mon" },
-  { name: "notes.txt", kind: "txt", size: "640 B", modified: "Mon" },
-];
+export const defaultSessionIds: Record<SessionMode, string> = {
+  chat: "product-launch-ideas",
+  work: "atelier-work",
+};
 
-export const workspaceRoot = "~/Atelier/workspace";
+export function sessionsForMode(mode: SessionMode): Session[] {
+  return sessions.filter((session) => session.mode === mode);
+}

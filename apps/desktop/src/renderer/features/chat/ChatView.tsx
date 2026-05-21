@@ -4,23 +4,23 @@ import { ToolCallCard } from "./ToolCallCard";
 import { ApprovalPrompt } from "./ApprovalPrompt";
 import { Composer } from "./Composer";
 import { EmptyState } from "./EmptyState";
-import type { Conversation } from "@/lib/mock-data";
+import type { Session } from "@/lib/mock-data";
 
 export function ChatView({
-  conversation,
+  session,
   workspaceOpen,
   onToggleWorkspace,
 }: {
-  conversation: Conversation;
+  session: Session;
   workspaceOpen: boolean;
   onToggleWorkspace: () => void;
 }) {
-  const isEmpty = conversation.items.length === 0;
+  const isEmpty = session.items.length === 0;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <ChatHeader
-        title={conversation.title}
+        session={session}
         workspaceOpen={workspaceOpen}
         onToggleWorkspace={onToggleWorkspace}
       />
@@ -32,7 +32,7 @@ export function ChatView({
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto max-w-3xl space-y-6 px-4 py-8">
-            {conversation.items.map((item) => {
+            {session.items.map((item) => {
               switch (item.kind) {
                 case "message":
                   return <MessageBubble key={item.id} role={item.role} content={item.content} />;
@@ -46,7 +46,7 @@ export function ChatView({
         </div>
       )}
 
-      <Composer />
+      <Composer mode={session.mode} />
     </div>
   );
 }

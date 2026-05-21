@@ -3,9 +3,11 @@ import { PaperPlaneRight, Paperclip } from "@phosphor-icons/react";
 
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import type { SessionMode } from "@/lib/mock-data";
 
-export function Composer() {
+export function Composer({ mode }: { mode: SessionMode }) {
   const [value, setValue] = useState("");
+  const isWork = mode === "work";
 
   function submit() {
     // Mock — no agent connected. Just clear the field.
@@ -34,7 +36,7 @@ export function Composer() {
               submit();
             }
           }}
-          placeholder="Message Atelier…"
+          placeholder={isWork ? "Ask Atelier to work in this folder..." : "Message Atelier..."}
           className="max-h-40 min-h-0 resize-none border-0 bg-transparent px-1 py-1.5 shadow-none focus-visible:ring-0"
         />
         <Button
@@ -49,7 +51,9 @@ export function Composer() {
         </Button>
       </div>
       <p className="text-muted-foreground/70 mt-2 text-center text-[11px]">
-        Mock interface — no agent connected. Files and Python run inside the sandboxed VM.
+        {isWork
+          ? "Mock interface — folder access, tool calls, and approvals are static."
+          : "Mock interface — no agent connected. Chat sessions do not map a work folder."}
       </p>
     </div>
   );

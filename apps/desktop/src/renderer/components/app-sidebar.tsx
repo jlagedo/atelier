@@ -1,30 +1,37 @@
 import { useEffect, useState } from "react";
-import { ChatCircle, NotePencil } from "@phosphor-icons/react";
+import { FolderPlus, NotePencil } from "@phosphor-icons/react";
 
 import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
-  SidebarGroup,
-  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
-  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { conversations } from "@/lib/mock-data";
+import { ModeSwitcher } from "@/features/sessions/ModeSwitcher";
+import { SessionList } from "@/features/sessions/SessionList";
+import type { Session, SessionMode } from "@/lib/mock-data";
 
 export function AppSidebar({
+  activeMode,
   activeId,
+  sessions,
+  onModeChange,
   onSelect,
 }: {
+  activeMode: SessionMode;
   activeId: string;
+  sessions: Session[];
+  onModeChange: (mode: SessionMode) => void;
   onSelect: (id: string) => void;
 }) {
   const [version, setVersion] = useState("…");
+  const isWork = activeMode === "work";
+  const ActionIcon = isWork ? FolderPlus : NotePencil;
 
   useEffect(() => {
     window.atelier
@@ -52,38 +59,25 @@ export function AppSidebar({
       </SidebarHeader>
 
       <SidebarContent>
-        <SidebarGroup>
+        <div className="px-2 pt-2">
+          <ModeSwitcher activeMode={activeMode} onModeChange={onModeChange} />
+        </div>
+
+        <div className="px-2 pt-1">
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton
-                tooltip="New chat"
+                tooltip={isWork ? "New work" : "New chat"}
                 className="text-primary hover:text-primary font-medium"
               >
-                <NotePencil weight="bold" />
-                <span>New chat</span>
+                <ActionIcon weight="bold" />
+                <span>{isWork ? "New work" : "New chat"}</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>
-        </SidebarGroup>
+        </div>
 
-        <SidebarGroup>
-          <SidebarGroupLabel>Conversations</SidebarGroupLabel>
-          <SidebarMenu>
-            {conversations.map((conversation) => (
-              <SidebarMenuItem key={conversation.id}>
-                <SidebarMenuButton
-                  isActive={conversation.id === activeId}
-                  onClick={() => onSelect(conversation.id)}
-                  tooltip={conversation.title}
-                >
-                  <ChatCircle />
-                  <span>{conversation.title}</span>
-                </SidebarMenuButton>
-                <SidebarMenuBadge>{conversation.updatedAt}</SidebarMenuBadge>
-              </SidebarMenuItem>
-            ))}
-          </SidebarMenu>
-        </SidebarGroup>
+        <SessionList mode={activeMode} sessions={sessions} activeId={activeId} onSelect={onSelect} />
       </SidebarContent>
 
       <SidebarFooter>

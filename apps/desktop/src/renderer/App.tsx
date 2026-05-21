@@ -5,26 +5,51 @@ import { AppSidebar } from "./components/app-sidebar";
 import { SidebarInset, SidebarProvider } from "./components/ui/sidebar";
 import { ChatView } from "./features/chat/ChatView";
 import { WorkspacePanel } from "./features/workspace/WorkspacePanel";
-import { activeConversationId, conversations } from "./lib/mock-data";
+import {
+  defaultSessionIds,
+  sessionsForMode,
+  type SessionMode,
+} from "./lib/mock-data";
 
 export function App() {
-  const [activeId, setActiveId] = useState(activeConversationId);
+  const [activeMode, setActiveMode] = useState<SessionMode>("chat");
+  const [activeSessionByMode, setActiveSessionByMode] =
+    useState<Record<SessionMode, string>>(defaultSessionIds);
   const [workspaceOpen, setWorkspaceOpen] = useState(true);
 
-  const conversation = conversations.find((c) => c.id === activeId) ?? conversations[0];
+  const visibleSessions = sessionsForMode(activeMode);
+  const activeId = activeSessionByMode[activeMode];
+  const activeSession =
+    visibleSessions.find((session) => session.id === activeId) ?? visibleSessions[0];
+
+  function selectMode(mode: SessionMode) {
+    setActiveMode(mode);
+  }
+
+  function selectSession(id: string) {
+    setActiveSessionByMode((current) => ({ ...current, [activeMode]: id }));
+  }
 
   return (
     <ThemeProvider>
       <SidebarProvider className="h-svh">
-        <AppSidebar activeId={activeId} onSelect={setActiveId} />
+        <AppSidebar
+          activeMode={activeMode}
+          activeId={activeSession.id}
+          sessions={visibleSessions}
+          onModeChange={selectMode}
+          onSelect={selectSession}
+        />
         <SidebarInset className="min-w-0">
           <ChatView
-            conversation={conversation}
+            session={activeSession}
             workspaceOpen={workspaceOpen}
             onToggleWorkspace={() => setWorkspaceOpen((o) => !o)}
           />
         </SidebarInset>
-        {workspaceOpen && <WorkspacePanel onClose={() => setWorkspaceOpen(false)} />}
+        {workspaceOpen && (
+          <WorkspacePanel session={activeSession} onClose={() => setWorkspaceOpen(false)} />
+        )}
       </SidebarProvider>
     </ThemeProvider>
   );
