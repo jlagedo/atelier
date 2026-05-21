@@ -1,23 +1,31 @@
-import { useEffect, useState } from "react";
-import { ChatView } from "./features/ChatView";
+import { useState } from "react";
+
+import { ThemeProvider } from "./components/theme-provider";
+import { AppSidebar } from "./components/app-sidebar";
+import { SidebarInset, SidebarProvider } from "./components/ui/sidebar";
+import { ChatView } from "./features/chat/ChatView";
+import { WorkspacePanel } from "./features/workspace/WorkspacePanel";
+import { activeConversationId, conversations } from "./lib/mock-data";
 
 export function App() {
-  const [version, setVersion] = useState("…");
+  const [activeId, setActiveId] = useState(activeConversationId);
+  const [workspaceOpen, setWorkspaceOpen] = useState(true);
 
-  useEffect(() => {
-    window.atelier
-      .getVersion()
-      .then(setVersion)
-      .catch(() => setVersion("unknown"));
-  }, []);
+  const conversation = conversations.find((c) => c.id === activeId) ?? conversations[0];
 
   return (
-    <div className="flex h-screen flex-col bg-neutral-950 text-neutral-100">
-      <header className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
-        <h1 className="text-sm font-semibold tracking-wide">Atelier</h1>
-        <span className="text-xs text-neutral-500">v{version}</span>
-      </header>
-      <ChatView />
-    </div>
+    <ThemeProvider>
+      <SidebarProvider className="h-svh">
+        <AppSidebar activeId={activeId} onSelect={setActiveId} />
+        <SidebarInset className="min-w-0">
+          <ChatView
+            conversation={conversation}
+            workspaceOpen={workspaceOpen}
+            onToggleWorkspace={() => setWorkspaceOpen((o) => !o)}
+          />
+        </SidebarInset>
+        {workspaceOpen && <WorkspacePanel onClose={() => setWorkspaceOpen(false)} />}
+      </SidebarProvider>
+    </ThemeProvider>
   );
 }

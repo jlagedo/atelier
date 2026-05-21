@@ -8,7 +8,7 @@ function createWindow(): void {
     width: 1200,
     height: 800,
     title: "Atelier",
-    backgroundColor: "#0a0a0a",
+    backgroundColor: "#0A0F1E",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       sandbox: true,
