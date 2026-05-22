@@ -99,18 +99,33 @@ func (b *Broker) jail(rel string) (string, error) {
 	return abs, nil
 }
 
-// AttachWorkspaceParams shares host folder Path into VM ID at /workspace.
+// AttachWorkspaceParams shares host folder Path into VM ID. Without Tag it is the
+// legacy single share at /workspace (swap-replaced; the Files-door jail root).
+// With Tag (+ Target) it is one of several concurrent per-session shares (S6.1):
+// mounted at Target, added alongside others. Port 0 lets the broker allocate.
 type AttachWorkspaceParams struct {
 	ID       string `json:"id"`
 	Path     string `json:"path"`
 	ReadOnly bool   `json:"readOnly,omitempty"`
+	Target   string `json:"target,omitempty"`
+	Tag      string `json:"tag,omitempty"`
+	Port     int    `json:"port,omitempty"`
 }
 
-// attachWorkspace shares a host folder into the running VM at /workspace and
-// makes it the Files-door jail root (design.md §10 — S3.1). Host side: grant +
-// add the Plan9 share via ModifyComputeSystem. Guest side: tell guestd to mount
-// it. Swappable at runtime — if a workspace is already attached it is detached
-// first, so no VM reboot is needed to change folders.
+// DetachWorkspaceParams removes a share from VM ID. Empty Tag removes the legacy
+// /workspace share.
+type DetachWorkspaceParams struct {
+	ID  string `json:"id"`
+	Tag string `json:"tag,omitempty"`
+}
+
+// attachWorkspace shares a host folder into the running VM and tells guestd to
+// mount it (design.md §10 — S3.1; concurrent per-session shares — S6.1). Host
+// side: grant + add the Plan9 share via ModifyComputeSystem. Guest side: guestd
+// mounts it. Legacy mode (no Tag) mounts at /workspace, swap-replacing any prior
+// default share and setting the Files-door jail root. Multi mode (Tag set) mounts
+// at Target and is added alongside other shares — the basis for many sessions in
+// one VM.
 func (b *Broker) attachWorkspace(ctx context.Context, params json.RawMessage) (any, error) {
 	if err := b.authorize(ctx, "attachWorkspace", "files"); err != nil {
 		return nil, err
@@ -127,74 +142,103 @@ func (b *Broker) attachWorkspace(ctx context.Context, params json.RawMessage) (a
 		return nil, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "workspace path: " + err.Error()}
 	}
 
-	// Swap: drop any currently-attached workspace first (best-effort).
-	if b.currentWorkspace() != "" {
-		if err := b.guestUnmount(ctx, p.ID); err != nil {
-			b.log.Warn("attachWorkspace: prior guest unmount failed", "err", err)
+	tag := strings.TrimSpace(p.Tag)
+	target := strings.TrimSpace(p.Target)
+	legacy := tag == ""
+	port := uint32(p.Port)
+	if legacy {
+		tag = vsock.WorkspaceShareTag
+		target = workspaceGuestPath
+		if port == 0 {
+			port = vsock.WorkspacePlan9Port
 		}
-		if err := b.vms.DetachWorkspace(ctx, p.ID); err != nil {
-			b.log.Warn("attachWorkspace: prior host detach failed", "err", err)
-		}
-		b.setWorkspace("")
+	}
+	if target == "" {
+		return nil, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "target is required when tag is set"}
 	}
 
-	if err := b.vms.AttachWorkspace(ctx, p.ID, root, p.ReadOnly); err != nil {
+	// Re-attach/swap: if this tag is already mounted, drop it first (best-effort).
+	if old, ok := b.removeMount(tag); ok {
+		_ = b.guestUnmount(ctx, p.ID, old.guestPath)
+		_ = b.vms.DetachWorkspace(ctx, p.ID, old.tag, old.port)
+		if legacy {
+			b.setWorkspace("")
+		}
+	}
+
+	m := b.addMount(mountInfo{hostPath: root, guestPath: target, tag: tag, port: port, readOnly: p.ReadOnly})
+
+	if err := b.vms.AttachWorkspace(ctx, p.ID, root, p.ReadOnly, m.tag, m.port); err != nil {
+		b.removeMount(tag)
 		return nil, &rpc.Error{Code: rpc.CodeInternal, Message: err.Error()}
 	}
-	if err := b.guestMount(ctx, p.ID); err != nil {
-		_ = b.vms.DetachWorkspace(ctx, p.ID) // roll back the host share
+	if err := b.guestMount(ctx, p.ID, m); err != nil {
+		_ = b.vms.DetachWorkspace(ctx, p.ID, m.tag, m.port) // roll back the host share
+		b.removeMount(tag)
 		return nil, err
 	}
-	b.setWorkspace(root)
+	if legacy {
+		b.setWorkspace(root)
+	}
 	return nil, nil
 }
 
-// detachWorkspace unmounts the workspace in the guest and removes the host share,
-// closing the Files door.
+// detachWorkspace unmounts a share in the guest and removes the host share,
+// closing that Files door. Empty Tag detaches the legacy /workspace share.
 func (b *Broker) detachWorkspace(ctx context.Context, params json.RawMessage) (any, error) {
 	if err := b.authorize(ctx, "detachWorkspace", "files"); err != nil {
 		return nil, err
 	}
-	var p VMRef
+	var p DetachWorkspaceParams
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, &rpc.Error{Code: rpc.CodeInvalidParams, Message: err.Error()}
 	}
 	if p.ID == "" {
 		return nil, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "id is required"}
 	}
-	if err := b.guestUnmount(ctx, p.ID); err != nil {
+	tag := strings.TrimSpace(p.Tag)
+	if tag == "" {
+		tag = vsock.WorkspaceShareTag
+	}
+	m, ok := b.removeMount(tag)
+	if !ok {
+		return nil, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "no such workspace share: " + tag}
+	}
+	if err := b.guestUnmount(ctx, p.ID, m.guestPath); err != nil {
 		return nil, err
 	}
-	if err := b.vms.DetachWorkspace(ctx, p.ID); err != nil {
+	if err := b.vms.DetachWorkspace(ctx, p.ID, m.tag, m.port); err != nil {
 		return nil, &rpc.Error{Code: rpc.CodeInternal, Message: err.Error()}
 	}
-	b.setWorkspace("")
+	if tag == vsock.WorkspaceShareTag {
+		b.setWorkspace("")
+	}
 	return nil, nil
 }
 
-// guestMount tells guestd to mount the workspace share (the guest half of attach).
-func (b *Broker) guestMount(ctx context.Context, id string) error {
+// guestMount tells guestd to mount share m (the guest half of attach).
+func (b *Broker) guestMount(ctx context.Context, id string, m mountInfo) error {
 	conn, err := b.vms.DialGuest(ctx, id)
 	if err != nil {
 		return &rpc.Error{Code: rpc.CodeInternal, Message: err.Error()}
 	}
 	defer conn.Close()
 	return rpc.NewClient(conn).Call(ctx, "mount", map[string]any{
-		"port":   vsock.WorkspacePlan9Port,
-		"tag":    vsock.WorkspaceShareTag,
-		"target": workspaceGuestPath,
+		"port":   m.port,
+		"tag":    m.tag,
+		"target": m.guestPath,
 	}, nil)
 }
 
-// guestUnmount tells guestd to unmount the workspace share (guest half of detach).
-func (b *Broker) guestUnmount(ctx context.Context, id string) error {
+// guestUnmount tells guestd to unmount the share at target (guest half of detach).
+func (b *Broker) guestUnmount(ctx context.Context, id, target string) error {
 	conn, err := b.vms.DialGuest(ctx, id)
 	if err != nil {
 		return &rpc.Error{Code: rpc.CodeInternal, Message: err.Error()}
 	}
 	defer conn.Close()
 	return rpc.NewClient(conn).Call(ctx, "unmount", map[string]any{
-		"target": workspaceGuestPath,
+		"target": target,
 	}, nil)
 }
 

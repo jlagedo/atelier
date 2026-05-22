@@ -4,7 +4,20 @@
 
 export type Role = "user" | "assistant";
 export type SessionMode = "chat" | "work";
-export type SessionStatus = "idle" | "running" | "waiting" | "done" | "error";
+// Chat/mock statuses plus the live WORK lifecycle (S6.1): starting/active are the
+// loop being brought up / ready, resuming/hibernating are transient, inactive is
+// dormant (no loop). "running" marks a turn in flight.
+export type SessionStatus =
+  | "idle"
+  | "running"
+  | "waiting"
+  | "done"
+  | "error"
+  | "starting"
+  | "active"
+  | "resuming"
+  | "hibernating"
+  | "inactive";
 
 export type ToolCall = {
   id: string;
@@ -14,20 +27,23 @@ export type ToolCall = {
   output: string;
 };
 
-export type Approval = {
+// A display-only policy decision (S6.1): there is no interactive approval — the
+// baked enterprise policy decides. Allowed actions run (audited); denied actions
+// don't run, warn the user, and are logged.
+export type PolicyDecision = {
   id: string;
   action: string;
-  target: string;
-  detail: string;
-  status: "pending" | "approved" | "denied";
+  target?: string;
+  decision: "allow" | "deny";
+  reason: string;
 };
 
 export type ChatItem =
   | { kind: "message"; id: string; role: Role; content: string }
   | { kind: "tool"; id: string; tool: ToolCall }
-  | { kind: "approval"; id: string; approval: Approval };
+  | { kind: "policy"; id: string; policy: PolicyDecision };
 
-export type FileKind = "csv" | "xlsx" | "md" | "py" | "txt" | "json" | "folder" | "ts";
+export type FileKind = "csv" | "xlsx" | "md" | "py" | "txt" | "json" | "folder" | "ts" | "other";
 
 export type WorkspaceFile = {
   name: string;
@@ -37,11 +53,15 @@ export type WorkspaceFile = {
   status?: "new" | "modified";
 };
 
+// What the fixed cage policy permits (S6.1, no "ask"): in-cage file + shell tools
+// are allowed; egress-bound tools (network) are denied. Reflects seams/policy.ts.
 export type WorkAccess = {
-  read: "allowed";
-  write: "ask";
-  shell: "ask";
+  files: "allowed" | "denied";
+  shell: "allowed" | "denied";
+  network: "allowed" | "denied";
 };
+
+export const CAGE_ACCESS: WorkAccess = { files: "allowed", shell: "allowed", network: "denied" };
 
 export type ChangedFile = {
   path: string;
@@ -184,7 +204,7 @@ export const workSessions: WorkSession[] = [
     status: "running",
     folderName: "atelier",
     folderPath: "E:\\dev\\atelier",
-    access: { read: "allowed", write: "ask", shell: "ask" },
+    access: { files: "allowed", shell: "allowed", network: "denied" },
     files: atelierFiles,
     changedFiles: [
       { path: "apps/desktop/src/renderer/App.tsx", status: "modified" },
@@ -231,14 +251,14 @@ export const workSessions: WorkSession[] = [
         },
       },
       {
-        kind: "approval",
+        kind: "policy",
         id: "awa1",
-        approval: {
+        policy: {
           id: "awa1",
           action: "Write",
           target: "apps/desktop/src/renderer",
-          detail: "mock Chat / Work UI changes",
-          status: "pending",
+          decision: "allow",
+          reason: "in-cage coding tool permitted by policy",
         },
       },
     ],
@@ -252,7 +272,7 @@ export const workSessions: WorkSession[] = [
     status: "waiting",
     folderName: "invoices-may",
     folderPath: "E:\\finance\\invoices-may",
-    access: { read: "allowed", write: "ask", shell: "ask" },
+    access: { files: "allowed", shell: "allowed", network: "denied" },
     files: invoiceFiles,
     changedFiles: [{ path: "mismatches.md", status: "created" }],
     backgroundTasks: [{ id: "task-invoice-approval", label: "approval to write mismatch report", status: "waiting" }],
@@ -280,7 +300,7 @@ export const workSessions: WorkSession[] = [
     status: "done",
     folderName: "client-brief",
     folderPath: "E:\\clients\\brief",
-    access: { read: "allowed", write: "ask", shell: "ask" },
+    access: { files: "allowed", shell: "allowed", network: "denied" },
     files: briefFiles,
     changedFiles: [{ path: "brief.md", status: "modified" }],
     backgroundTasks: [{ id: "task-brief", label: "rewrite brief sections", status: "done" }],

@@ -1,7 +1,7 @@
 import { ChatHeader } from "./ChatHeader";
 import { MessageBubble } from "./MessageBubble";
 import { ToolCallCard } from "./ToolCallCard";
-import { ApprovalPrompt } from "./ApprovalPrompt";
+import { PolicyDecisionCard } from "./PolicyDecisionCard";
 import { Composer } from "./Composer";
 import { EmptyState } from "./EmptyState";
 import type { Session } from "@/lib/mock-data";
@@ -10,10 +10,16 @@ export function ChatView({
   session,
   workspaceOpen,
   onToggleWorkspace,
+  onSubmit,
+  composerDisabled,
+  composerHint,
 }: {
   session: Session;
   workspaceOpen: boolean;
   onToggleWorkspace: () => void;
+  onSubmit?: (text: string) => void;
+  composerDisabled?: boolean;
+  composerHint?: string;
 }) {
   const isEmpty = session.items.length === 0;
 
@@ -38,15 +44,15 @@ export function ChatView({
                   return <MessageBubble key={item.id} role={item.role} content={item.content} />;
                 case "tool":
                   return <ToolCallCard key={item.id} tool={item.tool} />;
-                case "approval":
-                  return <ApprovalPrompt key={item.id} approval={item.approval} />;
+                case "policy":
+                  return <PolicyDecisionCard key={item.id} policy={item.policy} />;
               }
             })}
           </div>
         </div>
       )}
 
-      <Composer mode={session.mode} />
+      <Composer mode={session.mode} onSubmit={onSubmit} disabled={composerDisabled} hint={composerHint} />
     </div>
   );
 }

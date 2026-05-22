@@ -311,6 +311,17 @@ Reverse-engineered from the Go symbol table of **`cowork-svc.exe`** (package `gi
 
 **Other verified facts:** file share = **Plan9/9p** (`vm.Plan9ShareInfo`), *not* virtiofs · HCS lifecycle via `vm.CreateComputeSystem`/`ModifyComputeSystem`/`ComputeSystemSummary` · initrd boot via `vm.SetInitrdPath` · named pipes via `Microsoft/go-winio`.
 
+> **S6.1 update — concurrent per-session mounts + a host→guest input channel.** To run **many WORK sessions
+> in ONE shared VM** (a VM-per-session would blow up host memory), the control plane gained two extensions:
+> (1) **concurrent multi-share 9p mounts** — `attachWorkspace` takes a per-session `tag`/`port`/`target` (the
+> broker tracks a `mounts` map and allocates vsock ports from a session pool above the default 564), so each
+> session's host folder mounts at its own `/sessions/<id>` alongside the others (`ModifyComputeSystem` Add/
+> Remove by tag); and (2) **`execInput`** — `exec` accepts a `sessionId` that registers the child's stdin in
+> guestd; a new `execInput` RPC pushes bytes (a new user turn, or an `export_context`/`close` control) into
+> that already-running process. Together these let each session run its **own persistent in-guest agent loop**
+> (`cli-guest --serve`, NDJSON over stdio) that the host can feed, hibernate (export context → kill → detach),
+> and resume (`query({resume})`).
+
 > ✅ **Why Go — DECIDED (switched from Rust; this evidence is the reason).** The whole host stack is **turnkey in Go**: HCS via `microsoft/hcsshim`, pipes + hvsocket via `Microsoft/go-winio`, user-mode network via `containers/gvisor-tap-vsock` + `inetaf/tcpproxy`, SSH via `golang.org/x/crypto/ssh`. Rust *can* do HCS (`windows-rs`) and SSH (`russh`) but has **no gvisor-tap-vsock equivalent** — the no-NIC network would be a from-scratch build. **Don't fight the ecosystem: Go for the host service.** *Bonus:* the no-NIC user-mode-network egress model is now on the table for free — though **M4 may still start with the simpler restricted-NIC + allowlist proxy** and adopt gvisor-tap-vsock once the basics work. *(Author has never written Go — accepted; Go is a weekend for a systems dev, and standing on the exact libs Anthropic/Docker/MS use removes far more unknowns than the new language adds.)*
 
 ### Languages — two, by component (locked)
@@ -349,11 +360,21 @@ The agent loop's *location* is the one big runtime choice. Both topologies run t
 
 ## 10. The Three Doors — detail
 
+> **S6.1 update — no interactive approval (enterprise-fixed, user-proof, policy-guided).** The "explicit
+> approval" language below described an earlier consent model. The shipped agent path has **no runtime
+> approval and no override**: policy is pre-baked by the operator (and, in the product, distributed/updated
+> centrally), then enforced + audited automatically. Allowed actions run and are audited; **denied actions
+> don't run, warn the user, and are logged** (shown as display-only *policy-decision cards*). The goal is an
+> agent that is USER-proof and policy-guided. Enforcement lives in the policy seam
+> (`packages/agent/src/seams/policy.ts`, `mode:"guest"`) via the SDK `canUseTool` hook; the broker remains
+> the wire-level gate/audit point. For Topology B (the in-guest loop) the cage boundary is the **VM**: in-cage
+> file + shell tools are allowed; egress-bound tools (network) are denied.
+
 ### Files
 - Read/list **auto-allowed** within the workspace.
-- Writes / overwrites / deletes → **diff + explicit approval**.
+- Writes / overwrites / deletes → audited by the **fixed policy** (no interactive approval; see the S6.1 note
+  above). In-cage writes land in the sandbox; the *path jail* still applies for the host-side Files door.
 - **Jail:** canonicalize every path against the workspace root; reject `..` and symlinks that escape.
-- **Copy vs overwrite is NOT hardcoded** — decided at runtime by the agent's proposal + the approval UI.
 - Every action → **audit log** (who/what/when/which file).
 
 ### Network

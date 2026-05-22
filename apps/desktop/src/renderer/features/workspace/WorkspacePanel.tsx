@@ -79,6 +79,18 @@ function TaskIcon({ status }: { status: BackgroundTask["status"] }) {
   return <CheckCircle weight="fill" className="text-muted-foreground size-3.5" />;
 }
 
+function AccessRow({ label, value, icon }: { label: string; value: "allowed" | "denied"; icon?: boolean }) {
+  const denied = value === "denied";
+  return (
+    <div className="bg-sidebar-accent/50 flex items-center justify-between rounded-md px-2 py-1.5 text-xs">
+      <span className="text-muted-foreground flex items-center gap-1.5">
+        {icon && <LockKey className="size-3.5" />} {label}
+      </span>
+      <span className={cn("font-medium", denied ? "text-muted-foreground/70" : "text-primary")}>{value}</span>
+    </div>
+  );
+}
+
 function PanelHeader({ session, onClose }: { session: Session; onClose: () => void }) {
   const isWork = session.mode === "work";
 
@@ -153,22 +165,14 @@ function WorkContextPanel({ session }: { session: WorkSession }) {
       <ScrollArea className="flex-1">
         <div className="space-y-5 p-3">
           <section>
-            <h2 className="text-sidebar-foreground mb-2 text-xs font-medium">Access</h2>
+            <div className="mb-2 flex items-center gap-1.5">
+              <h2 className="text-sidebar-foreground text-xs font-medium">Access</h2>
+              <span className="text-muted-foreground/70 text-[10px]">fixed by policy</span>
+            </div>
             <div className="grid gap-1.5">
-              <div className="bg-sidebar-accent/50 flex items-center justify-between rounded-md px-2 py-1.5 text-xs">
-                <span className="text-muted-foreground flex items-center gap-1.5">
-                  <LockKey className="size-3.5" /> Read
-                </span>
-                <span className="text-primary font-medium">{session.access.read}</span>
-              </div>
-              <div className="bg-sidebar-accent/50 flex items-center justify-between rounded-md px-2 py-1.5 text-xs">
-                <span className="text-muted-foreground">Write</span>
-                <span className="text-muted-foreground font-medium">{session.access.write}</span>
-              </div>
-              <div className="bg-sidebar-accent/50 flex items-center justify-between rounded-md px-2 py-1.5 text-xs">
-                <span className="text-muted-foreground">Shell</span>
-                <span className="text-muted-foreground font-medium">{session.access.shell}</span>
-              </div>
+              <AccessRow label="Files" value={session.access.files} icon />
+              <AccessRow label="Shell" value={session.access.shell} />
+              <AccessRow label="Network" value={session.access.network} />
             </div>
           </section>
 

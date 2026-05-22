@@ -174,11 +174,13 @@ func defaultCmdLine(c DocConfig) string {
 // addressed by ModifyComputeSystem to add/remove shares on a running VM.
 const plan9ShareResourcePath = "VirtualMachine/Devices/Plan9/Shares"
 
-// MakePlan9AddRequest builds the ModifyComputeSystem document that adds the
-// /workspace 9p share (host folder hostPath) to a running VM (Files door, S3.1).
-// It carries only the host-side Settings — no GuestRequest — because we run no
-// GCS: the guest (guestd) mounts the share itself over our control plane.
-func MakePlan9AddRequest(hostPath string, readOnly bool) ([]byte, error) {
+// MakePlan9AddRequest builds the ModifyComputeSystem document that adds a 9p
+// share (host folder hostPath, share name/AccessName tag, served on vsock port)
+// to a running VM (Files door, S3.1; concurrent per-session shares, S6.1). It
+// carries only the host-side Settings — no GuestRequest — because we run no GCS:
+// the guest (guestd) mounts the share itself over our control plane. tag/port
+// must be unique among a VM's live shares so several can coexist.
+func MakePlan9AddRequest(hostPath string, readOnly bool, tag string, port uint32) ([]byte, error) {
 	flags := plan9FlagLinuxMetadata
 	if readOnly {
 		flags |= plan9FlagReadOnly
@@ -187,10 +189,10 @@ func MakePlan9AddRequest(hostPath string, readOnly bool) ([]byte, error) {
 		ResourcePath: plan9ShareResourcePath,
 		RequestType:  "Add",
 		Settings: Plan9Share{
-			Name:       vsock.WorkspaceShareTag,
-			AccessName: vsock.WorkspaceShareTag,
+			Name:       tag,
+			AccessName: tag,
 			Path:       hostPath,
-			Port:       int32(vsock.WorkspacePlan9Port),
+			Port:       int32(port),
 			Flags:      flags,
 			ReadOnly:   readOnly,
 		},
@@ -198,15 +200,15 @@ func MakePlan9AddRequest(hostPath string, readOnly bool) ([]byte, error) {
 }
 
 // MakePlan9RemoveRequest builds the ModifyComputeSystem document that removes the
-// /workspace 9p share from a running VM (the host side of detach).
-func MakePlan9RemoveRequest() ([]byte, error) {
+// 9p share identified by tag/port from a running VM (the host side of detach).
+func MakePlan9RemoveRequest(tag string, port uint32) ([]byte, error) {
 	return json.Marshal(modifySettingRequest{
 		ResourcePath: plan9ShareResourcePath,
 		RequestType:  "Remove",
 		Settings: Plan9Share{
-			Name:       vsock.WorkspaceShareTag,
-			AccessName: vsock.WorkspaceShareTag,
-			Port:       int32(vsock.WorkspacePlan9Port),
+			Name:       tag,
+			AccessName: tag,
+			Port:       int32(port),
 		},
 	})
 }

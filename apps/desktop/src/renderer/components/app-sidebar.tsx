@@ -22,12 +22,14 @@ export function AppSidebar({
   sessions,
   onModeChange,
   onSelect,
+  onNewSession,
 }: {
   activeMode: SessionMode;
   activeId: string;
   sessions: Session[];
   onModeChange: (mode: SessionMode) => void;
   onSelect: (id: string) => void;
+  onNewSession: () => void;
 }) {
   const [version, setVersion] = useState("…");
   const isWork = activeMode === "work";
@@ -68,6 +70,7 @@ export function AppSidebar({
             <SidebarMenuItem>
               <SidebarMenuButton
                 tooltip={isWork ? "New work" : "New chat"}
+                onClick={onNewSession}
                 className="text-primary hover:text-primary font-medium"
               >
                 <ActionIcon weight="bold" />

@@ -23,8 +23,16 @@ const GuestRPCPort uint32 = 5000
 const WorkspacePlan9Port uint32 = 564
 
 // WorkspaceShareTag is the 9p share name: the host doc's Plan9Share AccessName
-// and the `aname=` the guest passes when mounting. Both ends share it.
+// and the `aname=` the guest passes when mounting. Both ends share it. It is the
+// default (legacy single-share) tag; concurrent per-session shares (S6.1) use
+// distinct tags + ports allocated by the broker off the bases below.
 const WorkspaceShareTag = "workspace"
+
+// SessionPlan9PortBase is the first vsock port the broker hands out for
+// concurrent per-session 9p shares (S6.1): slot N uses Base+N. It sits above the
+// default workspace port (564) and below the egress link (1024), leaving room for
+// many simultaneous session mounts in the one shared VM.
+const SessionPlan9PortBase uint32 = 600
 
 // EgressLinkPort is the vsock port carrying the guest's user-mode network link
 // (design.md §8 Hop 3 channel 2, §10 Network door — S4.1). The guest's

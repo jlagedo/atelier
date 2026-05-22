@@ -15,6 +15,7 @@ import (
 	"github.com/jlagedo/atelier/services/internal/netjail"
 	"github.com/jlagedo/atelier/services/internal/rpc"
 	"github.com/jlagedo/atelier/services/internal/vm"
+	"github.com/jlagedo/atelier/services/internal/vsock"
 )
 
 // Version is the host service version.
@@ -33,13 +34,25 @@ type Broker struct {
 	// object the network enforces — no reboot to change policy.
 	egress *netjail.Allowlist
 
-	// mu guards workspace, the canonicalized host folder currently attached as the
-	// Files-door root (design.md §10 — S3.1): the jail root readFile/writeFile
-	// resolve against, set by attachWorkspace and cleared by detachWorkspace.
-	// Empty means no workspace is attached (the door is closed). A single root
-	// today; this generalizes to a per-session map later.
+	// mu guards workspace + mounts. workspace is the canonicalized host folder of
+	// the default (legacy single) share — the Files-door jail root readFile/
+	// writeFile resolve against (design.md §10 — S3.1); empty = door closed.
+	// mounts is the S6.1 generalization: every live 9p share keyed by its tag, so
+	// many per-session folders can be attached to the one shared VM at once
+	// (the default share, if any, is also tracked here under WorkspaceShareTag).
 	mu        sync.Mutex
 	workspace string
+	mounts    map[string]mountInfo
+}
+
+// mountInfo records one live 9p share so detach can remove the exact host-side
+// Plan9 share (tag/port) and unmount the right guest path (S6.1).
+type mountInfo struct {
+	hostPath  string
+	guestPath string
+	tag       string
+	port      uint32
+	readOnly  bool
 }
 
 // New returns a Broker. A nil logger uses slog.Default(); a nil gate uses the
@@ -53,7 +66,14 @@ func New(log *slog.Logger, gate Gate) *Broker {
 		gate = AllowAll{log: log}
 	}
 	egress := netjail.NewAllowlist(log)
-	return &Broker{start: time.Now(), log: log, gate: gate, vms: vm.NewManager(log, egress), egress: egress}
+	return &Broker{
+		start:  time.Now(),
+		log:    log,
+		gate:   gate,
+		vms:    vm.NewManager(log, egress),
+		egress: egress,
+		mounts: make(map[string]mountInfo),
+	}
 }
 
 // currentWorkspace returns the attached Files-door root, or "" if none.
@@ -70,6 +90,50 @@ func (b *Broker) setWorkspace(root string) {
 	b.workspace = root
 }
 
+// addMount registers a live share (S6.1) and allocates a free vsock port when
+// m.port is 0. Returns the stored mountInfo (with the resolved port).
+func (b *Broker) addMount(m mountInfo) mountInfo {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if m.port == 0 {
+		m.port = b.allocPortLocked()
+	}
+	b.mounts[m.tag] = m
+	return m
+}
+
+// removeMount drops a share by tag, returning it (and whether it existed).
+func (b *Broker) removeMount(tag string) (mountInfo, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	m, ok := b.mounts[tag]
+	if ok {
+		delete(b.mounts, tag)
+	}
+	return m, ok
+}
+
+// hasMount reports whether a share with this tag is attached.
+func (b *Broker) hasMount(tag string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	_, ok := b.mounts[tag]
+	return ok
+}
+
+// allocPortLocked returns the lowest free per-session 9p port (caller holds mu).
+func (b *Broker) allocPortLocked() uint32 {
+	used := make(map[uint32]bool, len(b.mounts))
+	for _, m := range b.mounts {
+		used[m.port] = true
+	}
+	for p := vsock.SessionPlan9PortBase; ; p++ {
+		if !used[p] {
+			return p
+		}
+	}
+}
+
 // Register wires the broker's methods onto the RPC server. The taxonomy mirrors
 // Cowork's broker (design.md §8): lifecycle + file passthrough. Only getStatus is
 // implemented in this scaffold; the rest are gated, audited stubs.
@@ -79,6 +143,7 @@ func (b *Broker) Register(s *rpc.Server) {
 	s.Register("startVM", b.startVM)
 	s.Register("stopVM", b.stopVM)
 	s.Register("exec", b.exec)
+	s.Register("execInput", b.execInput)
 	s.Register("attachWorkspace", b.attachWorkspace)
 	s.Register("detachWorkspace", b.detachWorkspace)
 	s.Register("readFile", b.readFile)
@@ -152,12 +217,24 @@ func (b *Broker) stopVM(ctx context.Context, params json.RawMessage) (any, error
 }
 
 // ExecParams asks to run a command inside VM ID. Args/Cwd/Env are optional.
+// SessionID, when set, registers the child's stdin in the guest so execInput can
+// feed later turns into a long-lived loop (S6.1); empty = legacy one-shot exec.
 type ExecParams struct {
-	ID   string            `json:"id"`
-	Cmd  string            `json:"cmd"`
-	Args []string          `json:"args,omitempty"`
-	Cwd  string            `json:"cwd,omitempty"`
-	Env  map[string]string `json:"env,omitempty"`
+	ID        string            `json:"id"`
+	Cmd       string            `json:"cmd"`
+	SessionID string            `json:"sessionId,omitempty"`
+	Args      []string          `json:"args,omitempty"`
+	Cwd       string            `json:"cwd,omitempty"`
+	Env       map[string]string `json:"env,omitempty"`
+}
+
+// ExecInputParams pushes a base64 chunk into a running exec session's stdin
+// (S6.1): the host feeds a new user turn (or control message) into a persistent
+// in-guest loop identified by SessionID.
+type ExecInputParams struct {
+	ID        string `json:"id"`
+	SessionID string `json:"sessionId"`
+	Data      string `json:"data"`
 }
 
 // ExecResult is the command's exit status. stdout/stderr are streamed before it
@@ -196,7 +273,7 @@ func (b *Broker) exec(ctx context.Context, params json.RawMessage) (any, error) 
 	gc := rpc.NewClient(conn)
 	var res ExecResult
 	err = gc.CallStream(ctx, "exec",
-		map[string]any{"cmd": p.Cmd, "args": p.Args, "cwd": p.Cwd, "env": p.Env},
+		map[string]any{"cmd": p.Cmd, "sessionId": p.SessionID, "args": p.Args, "cwd": p.Cwd, "env": p.Env},
 		&res,
 		func(method string, np json.RawMessage) {
 			if host != nil {
@@ -207,6 +284,31 @@ func (b *Broker) exec(ctx context.Context, params json.RawMessage) (any, error) 
 		return nil, err
 	}
 	return res, nil
+}
+
+// execInput forwards a stdin chunk to a persistent in-guest exec session (S6.1).
+// The streaming exec holds its own connection, so this opens a fresh, short-lived
+// guest connection to deliver the input out-of-band.
+func (b *Broker) execInput(ctx context.Context, params json.RawMessage) (any, error) {
+	if err := b.authorize(ctx, "execInput", "compute"); err != nil {
+		return nil, err
+	}
+	var p ExecInputParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "execInput: " + err.Error()}
+	}
+	if p.SessionID == "" {
+		return nil, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "execInput: sessionId is required"}
+	}
+
+	conn, err := b.vms.DialGuest(ctx, p.ID)
+	if err != nil {
+		return nil, &rpc.Error{Code: rpc.CodeInternal, Message: err.Error()}
+	}
+	defer conn.Close()
+
+	return nil, rpc.NewClient(conn).Call(ctx, "execInput",
+		map[string]any{"sessionId": p.SessionID, "data": p.Data}, nil)
 }
 
 // Status is the getStatus result.

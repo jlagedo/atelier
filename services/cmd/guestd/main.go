@@ -42,10 +42,11 @@ func main() {
 	superviseEgress(log)
 
 	srv := rpc.NewServer(log)
-	g := &guest{log: log}
+	g := &guest{log: log, stdins: make(map[string]io.WriteCloser)}
 	srv.Register("exec", g.exec)
-	srv.Register("mount", g.mount)     // Files door (S3.1): mount a host 9p share
-	srv.Register("unmount", g.unmount) // Files door (S3.1): unmount a share
+	srv.Register("execInput", g.execInput) // S6.1: feed stdin of a running exec session
+	srv.Register("mount", g.mount)         // Files door (S3.1): mount a host 9p share
+	srv.Register("unmount", g.unmount)     // Files door (S3.1): unmount a share
 
 	if err := srv.Serve(context.Background(), ln); err != nil {
 		log.Error("rpc serve stopped", "err", err)
@@ -57,13 +58,49 @@ func main() {
 // block parks the (PID 1) goroutine forever. guestd must never return to init.
 func block() { select {} }
 
-type guest struct{ log *slog.Logger }
+type guest struct {
+	log *slog.Logger
+	// stdins maps an exec session id → the running child's stdin writer (S6.1),
+	// so a later execInput call can push input (e.g. a new user turn) into a
+	// long-lived process. Guarded by mu.
+	mu     sync.Mutex
+	stdins map[string]io.WriteCloser
+}
+
+func (g *guest) setStdin(id string, w io.WriteCloser) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.stdins[id] = w
+}
+
+func (g *guest) getStdin(id string) (io.WriteCloser, bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	w, ok := g.stdins[id]
+	return w, ok
+}
+
+func (g *guest) delStdin(id string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	delete(g.stdins, id)
+}
 
 type execParams struct {
-	Cmd  string            `json:"cmd"`
-	Args []string          `json:"args,omitempty"`
-	Cwd  string            `json:"cwd,omitempty"`
-	Env  map[string]string `json:"env,omitempty"`
+	Cmd string `json:"cmd"`
+	// SessionID, when set, registers the child's stdin so execInput can feed it
+	// (S6.1 persistent loops). Empty = no stdin channel (legacy one-shot exec).
+	SessionID string            `json:"sessionId,omitempty"`
+	Args      []string          `json:"args,omitempty"`
+	Cwd       string            `json:"cwd,omitempty"`
+	Env       map[string]string `json:"env,omitempty"`
+}
+
+// execInputParams pushes a chunk to a running exec session's stdin (S6.1). Data is
+// base64 (std), matching the binary-safe discipline of exec/output.
+type execInputParams struct {
+	SessionID string `json:"sessionId"`
+	Data      string `json:"data"` // base64-encoded
 }
 
 // outputParams is the payload of an "exec/output" notification: a chunk of the
@@ -112,6 +149,20 @@ func (g *guest) exec(ctx context.Context, raw json.RawMessage) (any, error) {
 	if err != nil {
 		return nil, &rpc.Error{Code: rpc.CodeInternal, Message: "stderr pipe: " + err.Error()}
 	}
+	// When a sessionId is given, keep a handle to the child's stdin so execInput
+	// can push later turns into a long-lived loop (S6.1). Registered before Start
+	// and torn down after Wait.
+	if p.SessionID != "" {
+		stdin, perr := cmd.StdinPipe()
+		if perr != nil {
+			return nil, &rpc.Error{Code: rpc.CodeInternal, Message: "stdin pipe: " + perr.Error()}
+		}
+		g.setStdin(p.SessionID, stdin)
+		defer func() {
+			g.delStdin(p.SessionID)
+			_ = stdin.Close()
+		}()
+	}
 	if err := cmd.Start(); err != nil {
 		return nil, &rpc.Error{Code: rpc.CodeInternal, Message: "start: " + err.Error()}
 	}
@@ -132,6 +183,30 @@ func (g *guest) exec(ctx context.Context, raw json.RawMessage) (any, error) {
 		}
 	}
 	return execResult{ExitCode: code}, nil
+}
+
+// execInput writes a base64 chunk to a running exec session's stdin (S6.1): the
+// host pushes a new user turn (or a control message) into a persistent loop.
+func (g *guest) execInput(_ context.Context, raw json.RawMessage) (any, error) {
+	var p execInputParams
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "bad params: " + err.Error()}
+	}
+	if p.SessionID == "" {
+		return nil, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "sessionId is required"}
+	}
+	w, ok := g.getStdin(p.SessionID)
+	if !ok {
+		return nil, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "no such exec session: " + p.SessionID}
+	}
+	data, err := base64.StdEncoding.DecodeString(p.Data)
+	if err != nil {
+		return nil, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "data must be base64: " + err.Error()}
+	}
+	if _, err := w.Write(data); err != nil {
+		return nil, &rpc.Error{Code: rpc.CodeInternal, Message: "write stdin: " + err.Error()}
+	}
+	return nil, nil
 }
 
 // mountParams asks guestd to mount a host 9p share (Files door, S3.1): dial the

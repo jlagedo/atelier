@@ -5,14 +5,32 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import type { SessionMode } from "@/lib/mock-data";
 
-export function Composer({ mode }: { mode: SessionMode }) {
+export function Composer({
+  mode,
+  onSubmit,
+  disabled = false,
+  hint,
+}: {
+  mode: SessionMode;
+  onSubmit?: (text: string) => void;
+  disabled?: boolean;
+  hint?: string;
+}) {
   const [value, setValue] = useState("");
   const isWork = mode === "work";
+  const live = typeof onSubmit === "function";
 
   function submit() {
-    // Mock — no agent connected. Just clear the field.
+    const text = value.trim();
+    if (text.length === 0 || disabled) return;
+    if (live) onSubmit?.(text);
+    // Chat mode (mock) just clears; WORK mode sends to the in-guest loop.
     setValue("");
   }
+
+  const defaultHint = isWork
+    ? "Connected to the in-guest agent · file + shell tools allowed, network denied by policy."
+    : "Mock interface — no agent connected. Chat sessions do not map a work folder.";
 
   return (
     <div className="border-border bg-background border-t px-4 py-3">
@@ -29,6 +47,7 @@ export function Composer({ mode }: { mode: SessionMode }) {
         <Textarea
           rows={1}
           value={value}
+          disabled={disabled}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
@@ -44,17 +63,13 @@ export function Composer({ mode }: { mode: SessionMode }) {
           size="icon"
           className="size-8 shrink-0 rounded-xl"
           aria-label="Send message"
-          disabled={value.trim().length === 0}
+          disabled={value.trim().length === 0 || disabled}
           onClick={submit}
         >
           <PaperPlaneRight weight="fill" />
         </Button>
       </div>
-      <p className="text-muted-foreground/70 mt-2 text-center text-[11px]">
-        {isWork
-          ? "Mock interface — folder access, tool calls, and approvals are static."
-          : "Mock interface — no agent connected. Chat sessions do not map a work folder."}
-      </p>
+      <p className="text-muted-foreground/70 mt-2 text-center text-[11px]">{hint ?? defaultHint}</p>
     </div>
   );
 }

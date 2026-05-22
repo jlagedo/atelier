@@ -61,6 +61,9 @@ type instance struct {
 	// runtimeID is the VM's hvsock partition GUID (the compute system's
 	// RuntimeId), cached lazily on the first DialGuest. Empty until then.
 	runtimeID string
+	// shares tracks the VM's live 9p shares by tag → vsock port (S6.1: several
+	// per-session shares can coexist in one VM). Guarded by Manager.mu.
+	shares map[string]uint32
 }
 
 // NewManager returns a Manager backed by the platform HCS driver. egress is the
@@ -173,42 +176,56 @@ func (m *Manager) Stop(ctx context.Context, id string) error {
 	return err
 }
 
-// AttachWorkspace shares hostPath into the running VM as the /workspace 9p share
-// (Files door, S3.1): it grants the VM-worker account access to the folder, then
-// adds the Plan9 share via ModifyComputeSystem. The guest still has to mount it
-// (the broker drives guestd over Hop 3) — this is only the host half.
-func (m *Manager) AttachWorkspace(ctx context.Context, id, hostPath string, readOnly bool) error {
-	if _, ok := m.get(id); !ok {
+// AttachWorkspace shares hostPath into the running VM as a 9p share named tag,
+// served on vsock port (Files door, S3.1; concurrent per-session shares, S6.1):
+// it grants the VM-worker account access to the folder, then adds the Plan9 share
+// via ModifyComputeSystem. The guest still has to mount it (the broker drives
+// guestd over Hop 3) — this is only the host half. Several shares (distinct
+// tag/port) can coexist in one VM.
+func (m *Manager) AttachWorkspace(ctx context.Context, id, hostPath string, readOnly bool, tag string, port uint32) error {
+	inst, ok := m.get(id)
+	if !ok {
 		return fmt.Errorf("vm: %q not found", id)
 	}
 	if err := hcs.GrantVMAccess(id, hostPath); err != nil {
 		m.log.Warn("grant vm access (workspace)", "vm", id, "path", hostPath, "err", err)
 	}
-	doc, err := hcs.MakePlan9AddRequest(hostPath, readOnly)
+	doc, err := hcs.MakePlan9AddRequest(hostPath, readOnly, tag, port)
 	if err != nil {
 		return err
 	}
 	if err := m.drv.Modify(ctx, id, doc); err != nil {
 		return err
 	}
-	m.log.Info("workspace attached", "vm", id, "path", hostPath, "readOnly", readOnly)
+	m.mu.Lock()
+	if inst.shares == nil {
+		inst.shares = make(map[string]uint32)
+	}
+	inst.shares[tag] = port
+	m.mu.Unlock()
+	m.log.Info("workspace attached", "vm", id, "path", hostPath, "tag", tag, "port", port, "readOnly", readOnly)
 	return nil
 }
 
-// DetachWorkspace removes the /workspace 9p share from the running VM (the host
-// half of detach; the guest unmounts separately, driven by the broker).
-func (m *Manager) DetachWorkspace(ctx context.Context, id string) error {
-	if _, ok := m.get(id); !ok {
+// DetachWorkspace removes the 9p share named tag (served on port) from the running
+// VM (the host half of detach; the guest unmounts separately, driven by the
+// broker).
+func (m *Manager) DetachWorkspace(ctx context.Context, id, tag string, port uint32) error {
+	inst, ok := m.get(id)
+	if !ok {
 		return fmt.Errorf("vm: %q not found", id)
 	}
-	doc, err := hcs.MakePlan9RemoveRequest()
+	doc, err := hcs.MakePlan9RemoveRequest(tag, port)
 	if err != nil {
 		return err
 	}
 	if err := m.drv.Modify(ctx, id, doc); err != nil {
 		return err
 	}
-	m.log.Info("workspace detached", "vm", id)
+	m.mu.Lock()
+	delete(inst.shares, tag)
+	m.mu.Unlock()
+	m.log.Info("workspace detached", "vm", id, "tag", tag)
 	return nil
 }
 

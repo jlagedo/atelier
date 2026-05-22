@@ -21,6 +21,9 @@ const mapParts = (t) => {
   const i = inner.indexOf(",");
   return [inner.slice(0, i).trim(), inner.slice(i + 1).trim()];
 };
+// A trailing "?" marks an optional field: TS emits `k?:`, Go adds `,omitempty`.
+const optional = (t) => t.endsWith("?");
+const baseType = (t) => (optional(t) ? t.slice(0, -1) : t);
 const tsType = (t) => {
   if (t.endsWith("[]")) return `${tsType(t.slice(0, -2))}[]`;
   if (t.startsWith("map<") && t.endsWith(">")) {
@@ -46,7 +49,8 @@ function genTS(schema) {
   const lines = [banner("packages/protocol/schema/protocol.json"), ""];
   for (const [name, fields] of Object.entries(schema.types)) {
     lines.push(`export interface ${name} {`);
-    for (const [k, t] of Object.entries(fields)) lines.push(`  ${k}: ${tsType(t)};`);
+    for (const [k, t] of Object.entries(fields))
+      lines.push(`  ${k}${optional(t) ? "?" : ""}: ${tsType(baseType(t))};`);
     lines.push("}", "");
   }
   lines.push("export const RpcMethod = {");
@@ -61,7 +65,7 @@ function genGo(schema) {
   for (const [name, fields] of Object.entries(schema.types)) {
     lines.push(`type ${name} struct {`);
     for (const [k, t] of Object.entries(fields)) {
-      lines.push(`\t${pascal(k)} ${goType(t)} \`json:"${k}"\``);
+      lines.push(`\t${pascal(k)} ${goType(baseType(t))} \`json:"${k}${optional(t) ? ",omitempty" : ""}"\``);
     }
     lines.push("}", "");
   }

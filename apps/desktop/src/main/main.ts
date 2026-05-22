@@ -1,7 +1,9 @@
 import { app, BrowserWindow } from "electron";
 import path from "node:path";
 import { installCsp } from "./security";
-import { registerIpcHandlers } from "./ipc/handlers";
+import { registerIpcHandlers, type IpcBackend } from "./ipc/handlers";
+
+let backend: IpcBackend | undefined;
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -26,7 +28,7 @@ function createWindow(): void {
 
 void app.whenReady().then(() => {
   installCsp();
-  registerIpcHandlers();
+  backend = registerIpcHandlers();
   createWindow();
 
   app.on("activate", () => {
@@ -36,4 +38,10 @@ void app.whenReady().then(() => {
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
+});
+
+// Best-effort teardown: stop live loops + the shared VM (design.md §8). Electron
+// won't await async quit handlers, so this is fire-and-forget.
+app.on("will-quit", () => {
+  void backend?.shutdown();
 });

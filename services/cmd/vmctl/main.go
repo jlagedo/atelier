@@ -10,7 +10,8 @@
 //	vmctl createVM -id vm0 -kernel C:\path\vmlinuz -rootfs E:\path\rootfs.vhd [-initrd C:\path\initrd -mem 2048 -cpu 2]
 //	vmctl startVM  -id vm0
 //	vmctl stopVM   -id vm0
-//	vmctl exec     -id vm0 [-cwd /tmp] [-env K=V ...] -- ls -la /
+//	vmctl exec     -id vm0 [-cwd /tmp] [-env K=V ...] [-session s1] -- ls -la /
+//	vmctl execInput -id vm0 -session s1 [-content "..."]  (else reads stdin; feeds the session's stdin)
 //	vmctl attachWorkspace -id vm0 -path E:\path\folder   (share folder at /workspace)
 //	vmctl detachWorkspace -id vm0
 //	vmctl readFile  -path notes.txt                      (prints to stdout)
@@ -102,6 +103,10 @@ func main() {
 	path := fs.String("path", "", "workspace-relative file path (readFile/writeFile)")
 	content := fs.String("content", "", "file content (writeFile; if unset, read from stdin)")
 	allow := fs.String("allow", "", "comma-separated egress allowlist host suffixes (setEgressPolicy; empty = deny all)")
+	target := fs.String("target", "", "guest mount path for a per-session share (attachWorkspace; e.g. /sessions/a)")
+	tag := fs.String("tag", "", "9p share tag/name for a per-session share (attach/detachWorkspace)")
+	wsport := fs.Uint64("wsport", 0, "vsock port for a per-session share (attachWorkspace; 0 = broker allocates)")
+	session := fs.String("session", "", "exec session id: registers a stdin channel (exec) / targets one (execInput)")
 	_ = fs.Parse(args)
 
 	conn, err := rpc.Dial(*addr)
@@ -122,13 +127,37 @@ func main() {
 			os.Exit(2)
 		}
 		params := map[string]any{
-			"id":   *id,
-			"cmd":  cmdv[0],
-			"args": cmdv[1:],
-			"cwd":  *cwd,
-			"env":  map[string]string(env),
+			"id":        *id,
+			"cmd":       cmdv[0],
+			"sessionId": *session,
+			"args":      cmdv[1:],
+			"cwd":       *cwd,
+			"env":       map[string]string(env),
 		}
 		os.Exit(execStream(client, params))
+	}
+
+	// execInput feeds a chunk into a persistent exec session's stdin (S6.1). Data
+	// comes from -content or stdin and travels base64-encoded.
+	if method == "execInput" {
+		var raw []byte
+		if *content != "" {
+			raw = []byte(*content)
+		} else {
+			var err error
+			if raw, err = io.ReadAll(os.Stdin); err != nil {
+				fmt.Fprintf(os.Stderr, "execInput: read stdin: %v\n", err)
+				os.Exit(1)
+			}
+		}
+		p := map[string]any{"id": *id, "sessionId": *session, "data": base64.StdEncoding.EncodeToString(raw)}
+		var result json.RawMessage
+		if err := client.Call(context.Background(), "execInput", p, &result); err != nil {
+			fmt.Fprintf(os.Stderr, "execInput: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("ok (execInput %s)\n", *session)
+		return
 	}
 
 	// agent (S5b.1) runs the agent loop INSIDE the guest (Topology B). We open
@@ -245,10 +274,12 @@ func main() {
 			"memoryMB":   *mem,
 			"cpuCount":   *cpu,
 		}
-	case "startVM", "stopVM", "detachWorkspace":
+	case "startVM", "stopVM":
 		params = map[string]any{"id": *id}
+	case "detachWorkspace":
+		params = map[string]any{"id": *id, "tag": *tag}
 	case "attachWorkspace":
-		params = map[string]any{"id": *id, "path": *path}
+		params = map[string]any{"id": *id, "path": *path, "target": *target, "tag": *tag, "port": *wsport}
 	case "setEgressPolicy":
 		var allowList []string
 		for _, h := range strings.Split(*allow, ",") {

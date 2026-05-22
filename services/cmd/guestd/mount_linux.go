@@ -3,8 +3,8 @@
 package main
 
 import (
-	"errors"
 	"fmt"
+	"os"
 
 	"golang.org/x/sys/unix"
 )
@@ -22,7 +22,9 @@ const vmaddrCIDHost = 2
 // is why this lives in guestd. Invoked by the broker over our control plane
 // after it adds the share to the running VM via ModifyComputeSystem.
 func mountShare(port uint32, tag, target string) error {
-	if err := unix.Mkdir(target, 0o755); err != nil && !errors.Is(err, unix.EEXIST) {
+	// MkdirAll: a per-session target like /sessions/<id> needs its parent created
+	// too (S6.1), and an existing dir is fine.
+	if err := os.MkdirAll(target, 0o755); err != nil {
 		return fmt.Errorf("mkdir %s: %w", target, err)
 	}
 

@@ -507,7 +507,7 @@ Tiny but blocking. No product code; just make the toolchain usable.
 
 ## Phase 4 — The product (M6)
 
-> Status: `☐ S6.1` `☐ S6.2`
+> Status: `◐ S6.1 (implemented + static-verified; live E2E pending)` `☐ S6.2`
 >
 > Only now does the Electron shell become the top of the stack (§6 — Electron is *last*).
 
@@ -523,6 +523,30 @@ Tiny but blocking. No product code; just make the toolchain usable.
   runs python, and surfaces an approval the user accepts — all on the real VM.
 - **Exit:** the product works end-to-end through the UI.
 - **Depends:** S5a.1 (at minimum).  **Risk:** streaming UX; approval modal wiring.
+- **Result (2026-05-21):** ◐ Implemented and statically verified (Go build/vet/test; agent typecheck +
+  tests; desktop typecheck + tests + lint); the in-guest `--serve` loop was **runtime-smoke-verified** on the
+  host (real API: multi-turn + hibernate-style export + `--resume` recall). **Live E2E in the UI is the one
+  remaining gate** (needs the elevated broker + bundle + a vm0 boot with the rootfs rebuilt to ship the new
+  `cli-guest.ts`). Three design points reshaped the slice from its original text:
+  - **No interactive approval (enterprise-fixed, user-proof, policy-guided).** The "inline approval prompts"
+    became **display-only policy-decision cards**: allowed actions run + audit (quiet badge); denied actions
+    don't run, **warn the user**, and are logged. No override (`features/chat/PolicyDecisionCard.tsx`,
+    `seams/policy.ts`).
+  - **One shared VM, many concurrent persistent sessions (not VM-per-session).** Each WORK session gets its
+    own folder mounted at `/sessions/<id>` and its **own long-lived in-guest agent loop**; new composer
+    messages feed the SAME running loop (SDK streaming input). Required **two backend extensions**:
+    (1) **concurrent multi-share 9p mounts** in one VM (broker `mounts` map + per-session vsock port pool;
+    `hcs`/`vm`/`vsock`/`guestd` parameterized by tag/port), and (2) a **host→guest input channel**
+    (`execInput`: guestd stdin registry + broker route) to push turns into a running loop.
+  - **Hibernate/resume to bound memory.** A host-owned state machine caps live loops: an idle timer + a
+    max-active LRU **hibernate** a session (export its context → durable store → kill loop → detach mount);
+    selecting a dormant session **resumes** it (re-mount + `query({resume})`). Built on the SDK's
+    `session_id` + `resume` (verified). `apps/desktop/src/main/sessions/{manager,store}.ts`.
+  - **Touched:** `packages/protocol` (+`sessionId`/`execInput`, optional-field codegen), `services/internal/
+    {broker,vm,hcs,vsock}`, `services/cmd/{guestd,vmctl}`, `packages/agent/src/cli-guest.ts`,
+    `apps/desktop/src/main/{host-client,sessions,workspace,ipc}/*`, `src/preload`, `src/renderer/*`.
+  - **Deferred:** chat-mode wiring (stays mock); user-turn persistence in the rebuilt transcript;
+    surviving a vm0 reboot for *live* sessions; per-session OS isolation inside the shared VM.
 
 ### S6.2 — M6: Ship
 - **Goal:** install like Cowork — no per-run UAC (§9).
