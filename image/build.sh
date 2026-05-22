@@ -53,10 +53,12 @@ stage_context() {
 
 cmd_check() {
   log "tool readiness:"
-  for t in docker go mke2fs qemu-img sha256sum; do
+  for t in docker go qemu-img sha256sum; do
     if have "$t"; then printf '  ok    %s\n' "$t"; else printf '  MISSING %s\n' "$t"; fi
   done
-  log "all stages need docker + go (guest daemon); rootfs also needs mke2fs (+ qemu-img for VHD/VHDX)."
+  log "all stages need docker + go; the ext4 is populated inside a Linux 'imager'"
+  log "container (mke2fs runs there, not on the host) so file perms survive; qemu-img"
+  log "converts the resulting blob to VHD/VHDX."
 }
 
 # ensure_tree builds the rootfs container and exports its filesystem into
@@ -75,34 +77,41 @@ ensure_tree() {
   log "building rootfs container image ($ROOTFS_TAG)"
   docker build -t "$ROOTFS_TAG" "$WORK/ctx"
 
-  log "exporting container filesystem"
+  log "exporting container filesystem (tar preserves perms; the ext4 is built from it in Linux)"
   cid="$(docker create "$ROOTFS_TAG")"
   trap 'docker rm -f "$cid" >/dev/null 2>&1 || true' RETURN
+  docker export -o "$WORK/rootfs.tar" "$cid"
+
+  # Host-side extraction is ONLY to pull /boot (vmlinuz+initrd) and /lib/modules in
+  # cmd_kernel/cmd_initrd — opaque blobs whose perms don't matter, so the loss on a
+  # Windows fs is fine. The BOOTABLE rootfs ext4 is populated from rootfs.tar INSIDE
+  # Linux (cmd_rootfs) so its ownership/modes are correct — the CRIT-05 fix.
   rm -rf "$WORK/rootfs"; mkdir -p "$WORK/rootfs"
-  docker export "$cid" | tar -x -C "$WORK/rootfs"
+  tar -x -C "$WORK/rootfs" -f "$WORK/rootfs.tar"
 
-  log "installing guest init"
-  install -D -m 0755 guest/init.sh "$WORK/rootfs/sbin/init"
-
-  # Cross-compile the guest daemon (design.md §8 Hop 3) and inject it like init.
-  # CGO_ENABLED=0 => a fully static binary (no glibc/loader coupling in the rootfs).
+  # Cross-compile the guest daemon (design.md §8 Hop 3). CGO_ENABLED=0 => fully static.
+  # The binaries are staged in $WORK/bin and installed into the ext4 by the imager step
+  # (cmd_rootfs), not into the host tree (which is only used for /boot extraction).
   have go || die "go not found (needed to cross-compile the guest daemon, services/cmd/guestd)"
+  mkdir -p "$WORK/bin"
   log "building guest daemon (guestd, linux/amd64 static)"
-  local out; out="$(pwd)/$WORK/guestd"
-  ( cd ../services && env GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o "$out" ./cmd/guestd )
-  install -D -m 0755 "$out" "$WORK/rootfs/usr/sbin/guestd"
+  local gout; gout="$(pwd)/$WORK/bin/guestd"
+  ( cd ../services && env GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o "$gout" ./cmd/guestd )
 
   # Guest network forwarder (gvforwarder, design.md §8 Hop 3 channel 2 — S4.1):
-  # the Network door's guest half. It is gvisor-tap-vsock's cmd/vm; build it at the
-  # exact version services/go.mod pins (go install pkg@version resolves against the
-  # library's own module, independent of our go.mod). guestd supervises it at boot.
+  # gvisor-tap-vsock's cmd/vm at the exact version services/go.mod pins (go install
+  # pkg@version resolves against the library's own module, independent of our go.mod).
+  # guestd supervises it at boot, now with -preexisting since networking is static (S4.1).
   local gvbin gvver
   gvver="$(cd ../services && go list -m -f '{{.Version}}' github.com/containers/gvisor-tap-vsock)"
   log "building guest network forwarder (gvforwarder ${gvver}, linux/amd64 static)"
   gvbin="$(pwd)/$WORK/bin"
   ( env GOBIN="$gvbin" GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
       go install -trimpath "github.com/containers/gvisor-tap-vsock/cmd/vm@${gvver}" )
-  install -D -m 0755 "$gvbin/vm" "$WORK/rootfs/usr/sbin/gvforwarder"
+  mv -f "$gvbin/vm" "$gvbin/gvforwarder"
+
+  log "building imager image (e2fsprogs) for in-Linux ext4 population"
+  docker build -t atelier-imager imager
 
   TREE_READY=1
 }
@@ -119,14 +128,38 @@ kver() {
 }
 
 cmd_rootfs() {
-  have mke2fs || die "mke2fs not found (e2fsprogs; needed to build the ext4 image)"
   ensure_tree
 
-  # mke2fs -d populates an ext4 image from a directory WITHOUT mounting (no root).
-  # 4G leaves headroom for the matched /lib/modules(+extra) the kernel installs.
-  log "building ext4 image (base, read-only at runtime; overlay added per-session)"
-  mke2fs -q -t ext4 -L atelier-root -d "$WORK/rootfs" -r 1 -N 0 -m 1 \
-    "$WORK/rootfs.ext4" 4G
+  # Populate the ext4 INSIDE Linux (CRIT-05 fix): extract the exported rootfs tar to a
+  # container-internal path (perms preserved), install the guest init + daemons, normalize
+  # sensitive perms + bake the static resolv.conf, then mke2fs -d. Inputs go in via
+  # `docker cp`; only the opaque rootfs.ext4 blob is copied back out — no perm round-trip
+  # through the Windows fs. mke2fs -d needs no mount/loop/privilege. 4G leaves headroom for
+  # the matched /lib/modules(+extra) the kernel installs.
+  log "building ext4 image inside Linux (perms preserved; root mounted read-only at runtime)"
+  local build='set -eu
+mkdir -p /rootfs
+tar -x -C /rootfs -f /rootfs.tar
+install -D -m 0755 /init.sh     /rootfs/sbin/init
+install -D -m 0755 /guestd      /rootfs/usr/sbin/guestd
+install -D -m 0755 /gvforwarder /rootfs/usr/sbin/gvforwarder
+printf "nameserver 192.168.127.1\n" > /rootfs/etc/resolv.conf
+chmod 0755 /rootfs/usr /rootfs/usr/bin /rootfs/usr/sbin /rootfs/bin /rootfs/sbin /rootfs/etc
+chmod 0644 /rootfs/etc/passwd
+chmod 0640 /rootfs/etc/shadow
+chown -R 0:0 /rootfs/usr /rootfs/etc
+mke2fs -q -t ext4 -L atelier-root -d /rootfs -r 1 -N 0 -m 1 /rootfs.ext4 4G'
+  local icid; icid="$(docker create atelier-imager bash -c "$build")"
+  docker cp "$WORK/rootfs.tar"      "$icid:/rootfs.tar"
+  docker cp "$WORK/bin/guestd"      "$icid:/guestd"
+  docker cp "$WORK/bin/gvforwarder" "$icid:/gvforwarder"
+  docker cp guest/init.sh           "$icid:/init.sh"
+  if ! docker start -a "$icid"; then
+    docker rm -f "$icid" >/dev/null 2>&1 || true
+    die "imager failed to build the ext4"
+  fi
+  docker cp "$icid:/rootfs.ext4" "$WORK/rootfs.ext4"
+  docker rm -f "$icid" >/dev/null 2>&1 || true
 
   if have qemu-img; then
     log "converting ext4 -> VHD (hcsshim PreferredRootFSType=vhd, design.md §7)"

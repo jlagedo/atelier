@@ -43,3 +43,28 @@ const SessionPlan9PortBase uint32 = 600
 // (winio.VsockServiceID(EgressLinkPort)); the guest uses the raw port. Both ends
 // import it so they can never drift. 1024 is gvforwarder's default link port.
 const EgressLinkPort uint32 = 1024
+
+// Guest network parameters (design.md §10 Network door — S4.1). The host's user-mode
+// network (internal/netjail) and the guest's static bring-up (cmd/guestd/egress_linux)
+// both import these so they can never drift. Values mirror gvisor-tap-vsock's canonical
+// gvproxy defaults: the gateway owns .1, the guest has a reserved static lease at .2, and
+// there is no general DHCP/NAT (egress only, jailed). Networking is configured statically
+// in the guest — guestd brings tap0 up with these values and runs gvforwarder with
+// -preexisting (so no DHCP client is needed in the image).
+const (
+	// NetworkCIDR is the guest subnet in CIDR form (host side parses it for the netstack).
+	NetworkCIDR = "192.168.127.0/24"
+	// GatewayIP is the host-side gateway/router and the only DNS resolver address.
+	GatewayIP = "192.168.127.1"
+	// GatewayMAC is the gateway's link address (the host gvisor endpoint).
+	GatewayMAC = "5a:94:ef:e4:0c:dd"
+	// GuestStaticIP is the guest's reserved address on tap0.
+	GuestStaticIP = "192.168.127.2"
+	// GuestStaticCIDR is GuestStaticIP with the subnet prefix, for `ip addr add` on tap0.
+	GuestStaticCIDR = "192.168.127.2/24"
+	// GuestMAC is the guest tap0 MAC (gvforwarder's default; reserved host-side so the
+	// static lease matches). guestd sets it explicitly since -preexisting skips linkUp.
+	GuestMAC = "5a:94:ef:e4:0c:ee"
+	// NetworkMTU is the link MTU for tap0 and the host endpoint.
+	NetworkMTU = 1500
+)

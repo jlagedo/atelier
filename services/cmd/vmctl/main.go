@@ -200,7 +200,12 @@ func main() {
 			"DISABLE_AUTOUPDATER":                      "1",
 			"DISABLE_TELEMETRY":                        "1",
 			"DISABLE_ERROR_REPORTING":                  "1",
-			"HOME":                                     "/root",
+			// Non-root agent (CRIT-01): HOME/TMPDIR/cache must point at writable tmpfs
+			// paths — the agent runs as uid 1001 and /opt is read-only. /home/atelier is a
+			// tmpfs owned by 1001 and /tmp is a tmpfs (image/guest/init.sh).
+			"HOME":           "/home/atelier",
+			"TMPDIR":         "/tmp",
+			"XDG_CACHE_HOME": "/home/atelier/.cache",
 		}
 		// Forward provider knobs if set (model override, Eliza base URL).
 		for _, k := range []string{"ATELIER_MODEL", "ANTHROPIC_BASE_URL"} {

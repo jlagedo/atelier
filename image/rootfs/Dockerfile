@@ -17,11 +17,13 @@ ENV DEBIAN_FRONTEND=noninteractive
 # ext4/overlay/fuse). initramfs-tools is explicit (the kernel meta only recommends
 # it, and --no-install-recommends would drop it) so the kernel postinst generates
 # /boot/initrd.img-<ver>. image/build.sh extracts vmlinuz + initrd from /boot.
-# isc-dhcp-client (dhclient): the guest network forwarder (gvforwarder, S4.1) runs
-# it on the tap interface to take a DHCP lease from the host's user-mode network
-# (gvisor-tap-vsock) — it configures the address, default route, and resolv.conf.
-# iproute2 + curl are for exercising/inspecting egress from the guest. gnupg + curl
-# are also what the NodeSource setup script needs to add its apt repo.
+# Networking is static (CRIT-01/05 hardening): guestd configures tap0 itself
+# (192.168.127.2/24, gateway .1) and runs gvforwarder with -preexisting, so no DHCP
+# client is needed. iproute2 brings the interface up (and inspects egress); curl
+# exercises it. bubblewrap (bwrap) sandboxes the in-guest agent as a non-root user
+# (CRIT-01). openssh-server is intentionally NOT installed (no inbound service runs;
+# it only left world-readable host keys behind). gnupg + curl are also what the
+# NodeSource setup script needs to add its apt repo.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       busybox-static \
       python3 \
@@ -30,8 +32,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ripgrep \
       ca-certificates \
       gnupg \
-      openssh-server \
-      isc-dhcp-client \
+      bubblewrap \
       iproute2 \
       curl \
       initramfs-tools \
@@ -58,5 +59,16 @@ RUN cd /opt/atelier/packages/agent \
     && npm ci --omit=dev \
     && npm cache clean --force
 
+# Non-root agent user (CRIT-01): the in-guest agent drops to uid 1001 via bwrap. /opt
+# stays root-owned (the agent only reads/execs it, and root is read-only at runtime); the
+# agent's writable HOME is /home/atelier (a tmpfs at boot — see image/guest/init.sh).
+# /sessions is the parent of per-session 9p mount points (also a tmpfs at boot), so
+# guestd can mkdir under it on the read-only root.
+RUN useradd -u 1001 -m -d /home/atelier -s /usr/sbin/nologin atelier \
+    && mkdir -p /sessions
+
 # init + guest config are installed by image/build.sh from image/guest/.
+# Sensitive permissions (/etc/shadow, etc.) and the static /etc/resolv.conf are
+# normalized by the imager step in image/build.sh, which also builds the ext4 inside
+# Linux so file ownership/modes are preserved (the CRIT-05 fix).
 CMD ["/bin/bash"]

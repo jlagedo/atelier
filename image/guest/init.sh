@@ -16,6 +16,23 @@ mount -t sysfs    sysfs    /sys   2>/dev/null || true
 mount -t devtmpfs devtmpfs /dev   2>/dev/null || true
 mount -t tmpfs    tmpfs    /tmp   2>/dev/null || true
 
+# Read-only root (CRIT-05): the rootfs is mounted read-only, so the few paths that need
+# runtime writes are tmpfs (ephemeral, per-boot; sized to bound RAM). /run and /var/tmp are
+# general runtime scratch; /sessions is the parent for per-session 9p mount points (guestd
+# mkdirs under it — so it MUST be writable on a ro root); /home/atelier is the non-root
+# agent's writable HOME (CRIT-01), chowned to that uid after the tmpfs is mounted. Tolerate
+# "already mounted" (initramfs may have done some) so a re-mount never wedges PID 1.
+# Explicit mode= on every tmpfs: tmpfs defaults its root dir to 1777 (world-writable,
+# like /tmp), which would re-introduce world-writable system paths — the very thing
+# CRIT-05 set out to remove — just on tmpfs instead of the ext4. /run and /sessions are
+# root-owned runtime dirs (0755); /var/tmp keeps the conventional 1777 sticky scratch;
+# /home/atelier is the agent's private HOME (0700) chowned to its uid after mounting.
+mount -t tmpfs -o size=64m,mode=0755  tmpfs /run          2>/dev/null || true
+mount -t tmpfs -o size=64m,mode=1777  tmpfs /var/tmp      2>/dev/null || true
+mount -t tmpfs -o size=16m,mode=0755  tmpfs /sessions     2>/dev/null || true
+mount -t tmpfs -o size=512m,mode=0700 tmpfs /home/atelier 2>/dev/null || true
+chown 1001:1001 /home/atelier 2>/dev/null || true
+
 # /workspace: the only persistent mount, shared from the host over 9p
 # (design.md §8, §10 — Plan9/9p, not virtiofs). HCS serves the share over hvsock,
 # so the mount needs a connected AF_VSOCK fd (trans=fd) — which a shell can't pass

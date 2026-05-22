@@ -324,6 +324,13 @@ func hcsTerminateComputeSystem(system hcsSystem, options string) error {
 }
 
 // hcsCloseComputeSystem releases a system handle (does not stop the VM).
+//
+// HcsCloseComputeSystem returns void (computecore API — "Return Values: None"), so
+// there is no HRESULT to read. The syscall return register holds leftover garbage;
+// feeding it to hresultError intermittently surfaced a high-bit-set value
+// (e.g. 0x8f3a51f0 — a bogus HRESULT facility, not a real 0x8037xxxx HCS code) as a
+// spurious "close failed", even though the handle was released fine. Make the call
+// and return nil.
 func hcsCloseComputeSystem(system hcsSystem) error {
 	if system == 0 {
 		return nil
@@ -331,6 +338,6 @@ func hcsCloseComputeSystem(system hcsSystem) error {
 	if err := procHcsCloseComputeSystem.Find(); err != nil {
 		return err
 	}
-	r0, _, _ := syscall.SyscallN(procHcsCloseComputeSystem.Addr(), uintptr(system))
-	return hresultError("HcsCloseComputeSystem", r0, "")
+	_, _, _ = syscall.SyscallN(procHcsCloseComputeSystem.Addr(), uintptr(system))
+	return nil
 }

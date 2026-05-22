@@ -43,6 +43,16 @@ type Broker struct {
 	mu        sync.Mutex
 	workspace string
 	mounts    map[string]mountInfo
+
+	// opLocks serializes the multi-step attach/detach sequence per VM (files.go):
+	// each call drives HCS (async ModifyComputeSystem, which rejects duplicate
+	// Plan9 share names) + guestd + the mounts map across several awaits, so two
+	// concurrent calls for the same VM must not interleave — otherwise a failing
+	// add rolls back and orphans a share, or a swap unmounts one mid-use. This is
+	// separate from mu (which only guards the mounts map for the fast readFile/
+	// writeFile path). Lock order is always opLock → mu, never the reverse.
+	opmu    sync.Mutex
+	opLocks map[string]*sync.Mutex
 }
 
 // mountInfo records one live 9p share so detach can remove the exact host-side
@@ -67,12 +77,13 @@ func New(log *slog.Logger, gate Gate) *Broker {
 	}
 	egress := netjail.NewAllowlist(log)
 	return &Broker{
-		start:  time.Now(),
-		log:    log,
-		gate:   gate,
-		vms:    vm.NewManager(log, egress),
-		egress: egress,
-		mounts: make(map[string]mountInfo),
+		start:   time.Now(),
+		log:     log,
+		gate:    gate,
+		vms:     vm.NewManager(log, egress),
+		egress:  egress,
+		mounts:  make(map[string]mountInfo),
+		opLocks: make(map[string]*sync.Mutex),
 	}
 }
 
@@ -113,12 +124,40 @@ func (b *Broker) removeMount(tag string) (mountInfo, bool) {
 	return m, ok
 }
 
+// removeMountIf drops the share under tag only if it is exactly m. This is the
+// rollback path's identity check: a failed attach must undo only the entry it
+// added, never a different live share that already holds the tag — otherwise a
+// concurrent winner gets clobbered and its host/guest share is orphaned.
+func (b *Broker) removeMountIf(tag string, m mountInfo) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if cur, ok := b.mounts[tag]; ok && cur == m {
+		delete(b.mounts, tag)
+		return true
+	}
+	return false
+}
+
 // hasMount reports whether a share with this tag is attached.
 func (b *Broker) hasMount(tag string) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	_, ok := b.mounts[tag]
 	return ok
+}
+
+// vmOpLock returns the per-VM mutex that serializes attach/detach for id (see
+// Broker.opLocks). Held for the whole control sequence; the mounts-map mu is
+// taken only briefly inside, so the lock order stays opLock → mu.
+func (b *Broker) vmOpLock(id string) *sync.Mutex {
+	b.opmu.Lock()
+	defer b.opmu.Unlock()
+	mu, ok := b.opLocks[id]
+	if !ok {
+		mu = &sync.Mutex{}
+		b.opLocks[id] = mu
+	}
+	return mu
 }
 
 // allocPortLocked returns the lowest free per-session 9p port (caller holds mu).

@@ -1,31 +1,50 @@
 # AGENTS.md
 
 Contributor + agent guide for **Atelier** — a Cowork-style desktop AI workspace: a Go host
-service drives a Linux utility VM on Windows HCS, a TypeScript agent loop runs the AI, and an
-Electron/React app is the UI. Full design, decisions, and glossary: [`docs/design.md`](docs/design.md).
+service drives a Linux utility VM on Windows HCS, a TypeScript agent loop runs the AI *inside*
+that VM (Topology B), and an Electron/React app is the UI. The point is letting an AI agent work
+on local files safely by **containment** (the VM is the cage), not per-click consent. Full design,
+decisions, and glossary: [`docs/design.md`](docs/design.md); slice-by-slice build order and progress:
+[`docs/implementation-plan.md`](docs/implementation-plan.md); the end-to-end run guide is the root
+[`README`](README).
 
 This file is the source of truth for how to build, run, test, and what conventions to follow.
-Per-directory placeholder READMEs were removed from initialized areas in favor of this file.
 
 ## Repo layout
 
 | Dir | What | State |
 |---|---|---|
-| `apps/desktop` | Electron/React desktop UI (the shell) | scaffolded (feature 0) |
-| `services` | One Go module — host broker, in-VM daemon, dev CLI | scaffolded (Hop-2 seam) |
-| `packages` | Shared TS libs — agent loop, protocol, provider seam, UI | skeleton |
-| `image` | VM image build — kernel + initrd + rootfs bundle | scaffolded (build pipeline) |
-| `skills` | Skill distribution (DXT/`.mcpb` analog) | skeleton |
-| `tools/protogen` | Protocol codegen (schema → TS + Go) | scaffolded |
-| `docs` | Design & architecture docs | `design.md` |
+| `apps/desktop` | Electron/React desktop UI (the shell) | WORK mode wired to the broker; chat mode mock |
+| `services` | One Go module — host broker (`host`), in-VM daemon (`guestd`), dev CLI (`vmctl`) | full substrate (boot/exec/files/net) |
+| `packages/agent` | The Claude Agent SDK loop — host (`cli.ts`) and in-guest (`cli-guest.ts`) | both topologies; in-guest is the live path |
+| `packages/provider` | Provider seam — resolves model + env for the loop | Anthropic API now, Eliza later |
+| `packages/protocol` | Generated Hop-2 protocol bindings (schema is canonical) | generated, gitignored |
+| `image` | VM image build — kernel + initrd + rootfs bundle; bakes in the agent | build pipeline |
+| `tools/protogen` | Protocol codegen (schema → TS + Go) | working |
+| `docs` | Design & architecture docs | `design.md`, `implementation-plan.md` |
 
 Generated/build output is gitignored: `apps/desktop/.vite`, `apps/desktop/out`, `**/node_modules`,
-`packages/protocol/src`, `services/pkg/protocol`, Go binaries.
+`packages/protocol/src`, `services/pkg/protocol`, `services/bin`, `image/.work`, `image/bundle`.
+
+## Build the whole stack
+
+The three trees build independently; the only cross-cut is the generated protocol (TS + Go) which
+both `services` and the agent need. Top-level orchestration:
+
+```sh
+.\scripts\build-go.ps1                            # regen protocol -> services\bin\{host,vmctl}.exe
+(cd image && ./build.sh check && ./build.sh all)  # WSL — bakes guestd + the in-guest agent into rootfs
+npm --prefix apps/desktop install                 # desktop deps (agent deps are baked into the rootfs)
+```
+
+Then run the broker (`services\bin\host`, elevated) and the app (`npm run dev`). See the root
+[`README`](README) for the full Windows run + the `vmctl` terminal path + dev-without-HCS.
 
 ## Desktop app — `apps/desktop` (TypeScript / Electron)
 
 Stack: Electron Forge + `@electron-forge/plugin-vite`, Vite, React 19, TypeScript, Tailwind v4,
-oxlint/oxfmt, vitest.
+shadcn/ui (Radix + cva + tailwind-merge), `react-markdown`/`remark-gfm`, Phosphor icons, IBM Plex
+fonts, oxlint/oxfmt, vitest.
 
 ```sh
 cd apps/desktop
@@ -38,6 +57,15 @@ npm test             # vitest
 npm run package      # full Forge build (no window)
 ```
 
+Process layout:
+- `src/main` — Node main process. `host-client/` is the Hop-2 named-pipe JSON-RPC client to the Go
+  broker; `sessions/` is the **Session Manager** (`manager.ts`) + durable `store.ts` — the
+  host-owned state machine that brings up `vm0` once and runs **concurrent persistent per-session
+  in-guest loops** (`cli-guest --serve`), with idle/LRU **hibernate→resume** to bound guest memory;
+  `workspace/` reads + watches the session folder to mirror deliverables back to the UI.
+- `src/renderer` — sandboxed React. `features/{chat,sessions,workspace}` (chat view + composer,
+  session list/mode/status, file panel), `components/ui` (shadcn primitives).
+
 Conventions:
 - Renderer is hardened (design §2): `sandbox: true`, `contextIsolation: true`,
   `nodeIntegration: false`, strict CSP (`src/main/security.ts` — dev-relaxed for HMR, prod-strict).
@@ -45,28 +73,70 @@ Conventions:
 - IPC channel names are centralized in `src/main/ipc/channels.ts` (shared by main + preload).
 - Tailwind v4: no `postcss.config`/`tailwind.config`; wired via `@tailwindcss/vite` +
   `@import "tailwindcss"` / `@plugin` in `src/renderer/index.css`.
+- WORK mode drives the real broker; chat mode is still mock (`renderer/lib/mock-data.ts`).
+- Env knobs: `ATELIER_BUNDLE_DIR` (default `image\bundle`), `ATELIER_IDLE_MS` (hibernate-after-idle,
+  default 10 min), `ATELIER_MAX_ACTIVE` (live loops before LRU hibernate, default 3),
+  `ATELIER_BOOT_TIMEOUT_MS` (default 120 000). The model call needs `ANTHROPIC_API_KEY` in the
+  environment that launches the app.
 
 ## Host services — `services` (Go)
 
 Module: `github.com/jlagedo/atelier/services`. Protocol (Hop 2, design §8): JSON-RPC 2.0 with
-Content-Length framing, over a named pipe on Windows / a unix socket for dev.
+Content-Length framing, over a named pipe on Windows / a unix socket for dev. Three binaries under
+`cmd/`: **`host`** (the privileged broker), **`guestd`** (the in-VM daemon, cross-compiled into the
+rootfs by `image/build.sh`), **`vmctl`** (dev CLI).
 
 ```sh
 cd services
 go build ./... && go test ./... && go vet ./... && gofmt -l .
 GOOS=windows go build ./...     # verify the Windows named-pipe / HCS paths compile
 
-# dev end-to-end (unix socket):
+# dev end-to-end (unix socket, no VM):
 go run ./cmd/host  -addr /tmp/atelier-host.sock &
 go run ./cmd/vmctl -addr /tmp/atelier-host.sock getStatus
 ```
 
+`internal/` packages: `broker` (policy gate + audit + Files/Network doors), `hcs` (our own
+`computecore.dll` bindings + compute-system doc), `vm` (lifecycle + guest/console wiring), `rpc`
+(JSON-RPC codec/transport/notifications), `vsock` (hvsocket dialing), `netjail` (default-deny egress
+via gvisor-tap-vsock). The 11 doors live in `pkg/protocol` (generated): `getStatus`, `createVM`,
+`startVM`, `stopVM`, `exec`, `execInput`, `attachWorkspace`, `detachWorkspace`, `readFile`,
+`writeFile`, `setEgressPolicy`.
+
 Conventions:
-- Windows-only code lives behind `//go:build windows` with a `!windows` stub sibling
-  (e.g. `internal/rpc/transport_*.go`, `internal/hcs/hcs_*.go`) so `go build ./...` works on Linux.
+- Windows/Linux-only code lives behind `//go:build` tags with a sibling stub
+  (e.g. `internal/rpc/transport_*.go`, `internal/hcs/hcs_*.go`, `cmd/guestd/*_linux.go` +
+  `*_other.go`) so `go build ./...` works on either host.
 - `internal/broker` is the containment chokepoint: every capability use passes the policy gate
-  (allow/ask/deny) + audit log before acting (design §10).
+  (allow/ask/deny) + audit log before acting (design §10). The Files door is workspace-relative and
+  jails paths (rejects `..` and escaping symlinks).
 - `go.mod` `go` directive is pinned to the installed toolchain (1.24); latest stable is Go 1.26.
+
+## Agent loop — `packages/agent` (TypeScript)
+
+Hosts `@anthropic-ai/claude-agent-sdk`. Two entry points sharing the same provider + policy seams:
+- `cli.ts` — **Topology A** (host loop): the SDK's "hands" are an in-process MCP server whose tools
+  route to the broker over Hop 2→3 (`seams/tools.ts`, `broker/client.ts`).
+- `cli-guest.ts` — **Topology B** (in-guest loop, the live path): the loop runs *in the cage*, so its
+  hands are the SDK's built-in coding tools (Bash/Read/Write/Edit/Glob/Grep) acting directly on the
+  guest fs — no broker round-trip for tools; only the model call escapes via the egress jail. Has a
+  one-shot mode (`--task`, drives `vmctl agent`) and a persistent `--serve` mode (NDJSON over
+  stdin/stdout, driven by the Session Manager; `--resume <id>` for hibernate→resume).
+
+The policy gate (`seams/policy.ts`, wired as the SDK's `canUseTool`) audits **every** tool call in
+both topologies. `packages/provider` (`resolveProvider`) picks model + env.
+
+```sh
+cd packages/agent
+npm install
+npm run typecheck    # tsc --noEmit
+npm test             # vitest run
+npm run dev          # tsx src/cli.ts        (Topology A)
+npm run start:guest  # tsx src/cli-guest.ts  (Topology B)
+```
+
+The in-guest agent (with its `node_modules` for linux/amd64) is baked into the rootfs by
+`image/build.sh`, so the desktop app does not install or ship it separately.
 
 ## Protocol codegen — `tools/protogen`
 
@@ -83,17 +153,20 @@ TODO: emit Zod schemas alongside the TS interfaces.
 
 ## VM image build — `image/`
 
-Builds the utility-VM bundle (kernel + initrd + ext4 rootfs VHD), Cowork's
-`claudevm.bundle` analog (design §7). Sources are tracked under
-`image/{rootfs,initrd,kernel,guest}`; build output goes to `image/bundle/` (gitignored).
-Big artifacts (multi-GB VHDs) are **not** committed — they're produced here and stored
-externally (registry / release assets), not in git/LFS.
+Builds the utility-VM bundle (kernel + initrd + ext4 rootfs VHD), Cowork's `claudevm.bundle`
+analog (design §7). Sources are tracked under `image/{rootfs,initrd,kernel,guest}`; build output
+goes to `image/bundle/` (gitignored). The matched kernel + `/lib/modules` + boot initramfs all come
+from one Ubuntu 22.04 Docker build (so the §7 coupling holds by construction); the same build
+cross-compiles `guestd` and bakes the in-guest agent (`stage_context` assembles a small Docker
+context from `packages/{agent,provider,protocol}` source and runs `npm install` inside the
+linux/amd64 build). Big artifacts (multi-GB VHDs) are **not** committed — produced here and stored
+externally, not in git/LFS.
 
 ```sh
 cd image
 ./build.sh check        # tool readiness (docker, mke2fs, qemu-img)
-./build.sh rootfs       # docker export ubuntu:22.04 -> ext4 (mke2fs -d, no root) -> VHD
-./build.sh all          # kernel (TODO M1) + rootfs + initrd (TODO M1) + bundle
+./build.sh rootfs       # docker export -> ext4 (mke2fs -d, no root) -> VHD
+./build.sh all          # kernel + rootfs + initrd + bundle -> bundle/{vmlinuz,initrd,rootfs.vhd}
 ```
 
 ## Versions
@@ -102,13 +175,28 @@ This scaffold deliberately uses **latest stable** libraries, diverging from `doc
 §11's Cowork pins (Tailwind 3.4 → 4, React 18 → 19, Electron 41 → 42, etc.). Divergences are
 documented inline where they matter.
 
+## Library docs — use Context7
+
+Because this stack runs **latest-stable** libraries (see Versions), training data is often
+stale here. When you need current API syntax, configuration, setup steps, version-migration
+details, or library-specific debugging for any third-party library/framework/SDK/CLI in the
+repo — Electron 42, React 19, Tailwind v4, shadcn/Radix, Vite, vitest, Go 1.24,
+`@anthropic-ai/claude-agent-sdk`, gvisor-tap-vsock, HCS, etc. — reach for the **Context7 MCP**
+(`resolve-library-id` → `query-docs`) instead of relying on memory or web search. Do this
+proactively, even when you think you know the answer; the user shouldn't have to say "use
+context7" first.
+
+Skip it for: refactoring, writing scripts from scratch, debugging this repo's own business
+logic, code review, and general programming concepts.
+
 ## Environment & verification
 
-The dev environment is **headless Linux**; the desktop's real target is **Windows**.
+The dev environment is **headless Linux**; the desktop's real target is **Windows**, and the real
+VM (boot/exec/files/net) needs **Windows 11 + HCS**. The image build needs **WSL2 + Docker**.
 - TS: verify with typecheck + lint + vitest + `package`; use `xvfb-run` to boot a real window.
 - Go: verify with build + test, plus a `GOOS=windows` cross-compile for the Windows paths.
-- State clearly when something can't be verified here (no display, restricted network) rather
-  than claiming success.
+- State clearly when something can't be verified here (no display, no HCS, restricted network)
+  rather than claiming success.
 
 ## Housekeeping
 

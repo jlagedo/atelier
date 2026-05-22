@@ -98,6 +98,12 @@ func (m *Manager) Create(ctx context.Context, cfg VMConfig) error {
 		MemoryMB:       cfg.MemoryMB,
 		ProcessorCount: cfg.CPUCount,
 		ConsolePipe:    pipe,
+		// Root is immutable (CRIT-05): attach the rootfs read-only and boot `ro`. The
+		// agent's writable surfaces are the 9p workspace/session shares and the boot-time
+		// tmpfs mounts (image/guest/init.sh); the freshly-built ext4 is clean so a
+		// read-only mount needs no journal recovery. A read-only image can also be shared
+		// by several VMs. (Flip to false only for local rootfs debugging.)
+		RootFSReadOnly: true,
 	})
 	if err != nil {
 		return err

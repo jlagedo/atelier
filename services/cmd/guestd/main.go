@@ -94,6 +94,11 @@ type execParams struct {
 	Args      []string          `json:"args,omitempty"`
 	Cwd       string            `json:"cwd,omitempty"`
 	Env       map[string]string `json:"env,omitempty"`
+	// Privileged skips the bubblewrap sandbox and runs the command directly as root —
+	// an operator/debug escape hatch. Default false: every exec is sandboxed as the
+	// non-root agent user (CRIT-01), enforced here at the privileged boundary so a client
+	// can't opt out.
+	Privileged bool `json:"privileged,omitempty"`
 }
 
 // execInputParams pushes a chunk to a running exec session's stdin (S6.1). Data is
@@ -129,7 +134,7 @@ func (g *guest) exec(ctx context.Context, raw json.RawMessage) (any, error) {
 	}
 	notifier, _ := rpc.NotifierFromContext(ctx)
 
-	cmd := exec.CommandContext(ctx, p.Cmd, p.Args...)
+	cmd := sandboxedCommand(ctx, p)
 	if p.Cwd != "" {
 		cmd.Dir = p.Cwd
 	}

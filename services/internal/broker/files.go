@@ -137,6 +137,14 @@ func (b *Broker) attachWorkspace(ctx context.Context, params json.RawMessage) (a
 	if p.ID == "" || p.Path == "" {
 		return nil, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "id and path are required"}
 	}
+
+	// Serialize attach/detach for this VM: the steps below drive HCS (async, and
+	// it rejects duplicate Plan9 share names) + guestd + the mounts map across
+	// several awaits, so two concurrent calls for the same tag must not interleave.
+	opLock := b.vmOpLock(p.ID)
+	opLock.Lock()
+	defer opLock.Unlock()
+
 	root, err := canonicalRoot(p.Path)
 	if err != nil {
 		return nil, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "workspace path: " + err.Error()}
@@ -169,12 +177,12 @@ func (b *Broker) attachWorkspace(ctx context.Context, params json.RawMessage) (a
 	m := b.addMount(mountInfo{hostPath: root, guestPath: target, tag: tag, port: port, readOnly: p.ReadOnly})
 
 	if err := b.vms.AttachWorkspace(ctx, p.ID, root, p.ReadOnly, m.tag, m.port); err != nil {
-		b.removeMount(tag)
+		b.removeMountIf(tag, m)
 		return nil, &rpc.Error{Code: rpc.CodeInternal, Message: err.Error()}
 	}
 	if err := b.guestMount(ctx, p.ID, m); err != nil {
 		_ = b.vms.DetachWorkspace(ctx, p.ID, m.tag, m.port) // roll back the host share
-		b.removeMount(tag)
+		b.removeMountIf(tag, m)
 		return nil, err
 	}
 	if legacy {
@@ -196,6 +204,13 @@ func (b *Broker) detachWorkspace(ctx context.Context, params json.RawMessage) (a
 	if p.ID == "" {
 		return nil, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "id is required"}
 	}
+
+	// Same per-VM serialization as attachWorkspace: detach must not interleave
+	// with a concurrent (re)attach of the same tag.
+	opLock := b.vmOpLock(p.ID)
+	opLock.Lock()
+	defer opLock.Unlock()
+
 	tag := strings.TrimSpace(p.Tag)
 	if tag == "" {
 		tag = vsock.WorkspaceShareTag

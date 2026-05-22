@@ -50,13 +50,16 @@ type Network struct {
 // guest gets 192.168.127.2 (its gvforwarder MAC has a static lease) and
 // routes/resolves via the gateway .1. We deliberately omit NAT/host-virtual-IPs
 // so the guest cannot reach host loopback services — egress only, jailed.
+// Network parameters live in internal/vsock now (shared with the guest's static
+// bring-up in cmd/guestd, so the two halves can never drift). Aliased here as consts so
+// the rest of this file reads unchanged.
 const (
-	netSubnet     = "192.168.127.0/24"
-	netGatewayIP  = "192.168.127.1"
-	netGatewayMA  = "5a:94:ef:e4:0c:dd"
-	guestStaticIP = "192.168.127.2"
-	guestMAC      = "5a:94:ef:e4:0c:ee" // gvforwarder's default MAC
-	netMTU        = 1500
+	netSubnet     = vsock.NetworkCIDR
+	netGatewayIP  = vsock.GatewayIP
+	netGatewayMA  = vsock.GatewayMAC
+	guestStaticIP = vsock.GuestStaticIP
+	guestMAC      = vsock.GuestMAC // gvforwarder's default MAC
+	netMTU        = vsock.NetworkMTU
 	dnsPort       = 53
 )
 
