@@ -1,4 +1,0 @@
-# .github
-
-GitHub config.
-
