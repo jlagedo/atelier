@@ -2,9 +2,13 @@
 
 > **Name:** **Atelier** — a workshop where a craftsperson works on their own materials, in their own space; fitting for a contained, local AI workspace. *(Was "theparser", a throwaway working name.)*
 >
-> **Status:** Design / discovery. No code yet.
-> **Stack:** **Go** (host service / HCS broker, via hcsshim) + **TypeScript/Node** (agent loop, via `@anthropic-ai/claude-agent-sdk`) + **Electron/React** (UI). See §8.
-> **Last updated:** 2026-05-20
+> **Status:** Design and decision record. The code now implements the main Topology B path; use
+> [`implementation-status.md`](implementation-status.md) for build history and
+> [`runtime-architecture.md`](runtime-architecture.md) for the concrete process/protocol map.
+> **Stack:** **Go** (host broker / HCS driver, with thin `computecore.dll` bindings) +
+> **TypeScript/Node** (agent loop via `@anthropic-ai/claude-agent-sdk`) + **Electron/React** (UI).
+> See §8.
+> **Last updated:** 2026-05-22
 
 ---
 
@@ -256,10 +260,10 @@ All three of `vmlinuz`/`initrd`/`rootfs.vhdx` carry a `.origin` marker with the 
 ```
 Renderer (Chromium UI, sandboxed JS)
         │  Hop 1: Electron IPC (ipcRenderer ⇄ ipcMain) — built into Electron
-Main process (Node) ── conductor; in Topology A the agent loop (TS) lives HERE
+Main process (Node) ── conductor/session manager; Topology A CLI can run HERE
         │  Hop 2: named pipe, JSON — you design this
-Go service ── HCS driver (hcsshim) + BROKER (policy/approval/audit · LLM proxy · MCP proxy) · LocalSystem
-        │  Hop 3: hvsocket/vsock · HCS · 9p/virtiofs — you design this
+Go service ── HCS driver (own computecore bindings) + BROKER (policy/audit · files/net/compute)
+        │  Hop 3: hvsocket/vsock · HCS · 9p — you design this
 Linux utility VM ── kernel + rootfs + Node + python + tools
                     in Topology B the agent loop (TS) lives HERE
 ```
@@ -305,7 +309,7 @@ Reverse-engineered from the Go symbol table of **`cowork-svc.exe`** (package `gi
 |---|---|---|---|
 | 1 | **Custom hvsocket RPC** | `vm.RPCServer` over `vm.HVSocketConn`/`HVSockAddr`/`HVSocketListener`; methods `Start`/`acceptLoop`/`handleConnection`/`handleMessage`/`handleResponse`/`handleEvent`/`SendGuestResponse` | **Control plane** to the in-guest `cowork-daemon`. Async, bidirectional request/response **+ events** over a single AF_HYPERV socket. Comes up first; bootstraps the rest. |
 | 2 | **User-mode network over hvsocket** | `github.com/containers/gvisor-tap-vsock` (`pkg/tap` IP-pool/DHCP, `services/dns`/`dhcp`/`forwarder`, `virtualnetwork`, `types.ExposeRequest`/`UnexposeRequest`) + `inetaf/tcpproxy` | Guest has **no real Hyper-V NIC**; the host process *is* the guest's entire network in user space → DNS/DHCP/forward/**allowlist** all host-controlled. **This is the egress jail, by construction.** |
-| 3 | **SSH over the vsock network** | `golang.org/x/crypto/ssh` + `gvisor-tap-vsock/pkg/sshclient` + `ssh-tunnel`, `*ssh.Client/Channel/Conn`, `SSH-2.0-`/`ssh-ed25519` | **Exec/file plane** — host SSHes into an sshd in the guest (tunneled over channel 2) to run commands & move files. Almost certainly how agent tools execute in the guest. |
+| 3 | **Exec/file plane** | Cowork symbols suggest SSH over the vsock network; Atelier instead uses guestd RPC for exec/`execInput` and Plan9/9p for files. | **Our implementation:** no sshd in the guest; guestd streams stdout/stderr as JSON-RPC notifications, and host folders mount over 9p. |
 
 **The console pipe** `\\.\pipe\cowork-daemon-console-<vmid>` = the **guest serial console only** (`vm.ConsoleReader`/`readConsole`/`writeConsole`, bridged via `Microsoft/go-winio`). Boot log + daemon stdout/diagnostics — **not** control, **not** exec.
 
@@ -322,25 +326,35 @@ Reverse-engineered from the Go symbol table of **`cowork-svc.exe`** (package `gi
 > (`cli-guest --serve`, NDJSON over stdio) that the host can feed, hibernate (export context → kill → detach),
 > and resume (`query({resume})`).
 
-> ✅ **Why Go — DECIDED (switched from Rust; this evidence is the reason).** The whole host stack is **turnkey in Go**: HCS via `microsoft/hcsshim`, pipes + hvsocket via `Microsoft/go-winio`, user-mode network via `containers/gvisor-tap-vsock` + `inetaf/tcpproxy`, SSH via `golang.org/x/crypto/ssh`. Rust *can* do HCS (`windows-rs`) and SSH (`russh`) but has **no gvisor-tap-vsock equivalent** — the no-NIC network would be a from-scratch build. **Don't fight the ecosystem: Go for the host service.** *Bonus:* the no-NIC user-mode-network egress model is now on the table for free — though **M4 may still start with the simpler restricted-NIC + allowlist proxy** and adopt gvisor-tap-vsock once the basics work. *(Author has never written Go — accepted; Go is a weekend for a systems dev, and standing on the exact libs Anthropic/Docker/MS use removes far more unknowns than the new language adds.)*
+> ✅ **Why Go — DECIDED (switched from Rust; this evidence is the reason).** The host stack is
+> strongest in Go: `Microsoft/go-winio` covers named pipes and hvsockets,
+> `containers/gvisor-tap-vsock` provides the no-NIC user-mode network, and hcsshim is the best
+> public reference for HCS document shape. We still wrote our own thin `computecore.dll` bindings
+> because hcsshim's reusable boot path is not usable for our non-GCS guest.
 
 ### Languages — two, by component (locked)
 | Component | Language | Why |
 |---|---|---|
-| **Host service + broker** | **Go** | *Don't fight the ecosystem* — the entire reference stack is Go. **HCS** via **`microsoft/hcsshim`** (the actual lib Cowork/Docker/MS use), **pipes + hvsocket** via **`Microsoft/go-winio`**, **user-mode net** via **`containers/gvisor-tap-vsock`**, **SSH** via **`golang.org/x/crypto/ssh`**. New stack for the author — chosen deliberately. |
+| **Host service + broker** | **Go** | *Don't fight the ecosystem* — the reference stack is Go. **HCS** via our own thin `computecore.dll` bindings, **pipes + hvsocket** via **`Microsoft/go-winio`**, **user-mode net** via **`containers/gvisor-tap-vsock`** + `inetaf/tcpproxy`. New stack for the author — chosen deliberately. |
 | **Agent loop / CLI (the brain)** | **TypeScript / Node** | Anthropic SDK is first-class in TS (streaming, tool-use, prompt caching). **Claude Code is itself Node**, and Cowork runs it inside the VM — so "TS agent in the guest" *is* the reference. |
 
 > **Don't hand-write the loop — use `@anthropic-ai/claude-agent-sdk`** (verified: Cowork ships this exact public npm package, v0.3.142, as its agent loop). The SDK gives the tool-use loop, streaming, MCP wiring, and approval hooks out of the box. Our job is to **host** it and supply the seams (`executeTool` → guest, `callModel` → provider, approvals → broker), not to reimplement it. This shrinks M5 from "build an agent loop" to "wire the SDK's seams."
 
 Write the agent loop as a **standalone Node module/CLI**, *not* welded to Electron internals, so the **same code** runs in Electron's main process (Topology A) and as a Node CLI in the guest (Topology B). **Host-Node → guest-Node = same runtime, no cross-compile.**
 
-**`microsoft/hcsshim` (Go) is now our PRIMARY dependency**, not just a reading reference — the clearest map of the HCS call sequence + VM JSON doc *and* the library we build on. Read/use `internal/uvm` (boots a Linux UVM), `internal/hcs` (lifecycle), and the public `hcs`/`hcsoci` packages. We write Go against it.
+**HCS implementation update:** hcsshim remains the best reference for the compute-system document
+shape, but the repo now uses its own thin `computecore.dll` bindings for lifecycle operations and
+`Microsoft/go-winio` for named pipes and hvsockets. This avoids importing hcsshim `internal/`
+packages and avoids its GCS-specific LCOW boot path.
 
 ### Agent topology: A → B (decided)
 The agent loop's *location* is the one big runtime choice. Both topologies run the **same TS code**; only two seams differ — `executeTool` and the `callModel`/MCP transport.
 
 - **Topology A — agent OUTSIDE.** Loop runs in Electron's main (Node); `executeTool` sends commands across Hop 3 into the VM. *Brain outside, hands inside (puppeteer).* Easy to build & debug.
-- **Topology B — agent INSIDE.** Same loop runs as a Node CLI in the guest; `callModel`/MCP/approvals tunnel out over hvsocket to the host broker. *Brain + hands in the cage; host holds the keys.* Stronger containment = Cowork parity.
+- **Topology B — agent INSIDE.** Same loop runs as a Node CLI in the guest; its tools act directly
+  on the guest filesystem through the SDK's built-in coding tools, and model calls leave through
+  the host-enforced egress jail. Today the Anthropic key is still injected into the guest process;
+  a host-side model proxy is tracked in [`vm-hardening.md`](vm-hardening.md).
 
 **Decision: build A first, then migrate to B.** Not because A is throwaway — **the loop is reused** — but to **debug the agent and the hypervisor separately** instead of fighting both unknowns at once. Then merge two known-good halves.
 
@@ -454,16 +468,18 @@ Study Claude Desktop **Desktop Extensions** (`.dxt` / `.mcpb` one-click MCP bund
 
 ## 14. Milestone Ladder (each is a real "it works" moment)
 
-Same Electron app, file-jail, MCP layer, and approval UI throughout; the **compute door** is the thing being built up. **Build the VM plumbing first, prove it with the agent OUTSIDE (Topology A), then move the agent INSIDE (B).**
+Historical milestone ladder. The main path is now implemented through S6.1, with live UI E2E,
+service installation, pipe ACLs, and packaging still open. See
+[`implementation-status.md`](implementation-status.md) for details.
 
 - **M0 — Boot someone else's UVM.** Use hcsshim `uvmboot` / LCOW to boot a Linux utility VM and get a guest shell. Confirm Hyper-V + HCS work on the box. Read `internal/uvm`.
-- **M1 — Drive HCS yourself.** Author the VM JSON compute-system doc, point at kernel + ext4 rootfs, `HcsCreateComputeSystem` + `Start` (via hcsshim). *Your* VM boots.
+- **M1 — Drive HCS yourself.** Author the VM JSON compute-system doc, point at kernel + ext4 rootfs, `HcsCreateComputeSystem` + `Start` (via our `computecore.dll` bindings). *Your* VM boots.
 - **M2 — Host↔guest bridge.** Over **hvsocket/vsock**: run a command in the guest, stream stdout back to the host.
-- **M3 — Mount the workspace.** **9p/virtiofs** share at `/workspace` (expect the bad-address fights from Cowork's bug threads).
-- **M4 — Lock egress.** HNS + allowlist proxy, or no-NIC + hvsocket-only broker. Now it's a jail.
+- **M3 — Mount the workspace.** **Plan9/9p** share at `/workspace`, later generalized to per-session mounts at `/sessions/<id>`.
+- **M4 — Lock egress.** No-NIC user-mode network over hvsocket with a broker-owned allowlist. Now it's a jail.
 - **M5a — Agent loop on the HOST (Topology A).** Host **`@anthropic-ai/claude-agent-sdk`** in Electron's main (Node); wire its `executeTool` seam to `exec` into the guest over Hop 3. First working end-to-end agent on a real sandbox — wiring seams, not writing a loop.
-- **M5b — Move the loop INTO the guest (Topology B, Cowork parity).** Same SDK-hosted module runs as a Node CLI in the rootfs; its LLM/MCP/approval calls tunnel out over hvsocket to the host broker.
-- **M6 — Electron shell.** UI ⇄ sidecar ⇄ guest; provider seam; approval UI; audit log; skills registry; sidecar installed as a **LocalSystem service**.
+- **M5b — Move the loop INTO the guest (Topology B).** Same SDK-hosted module runs as a Node CLI in the rootfs; tools act in the cage and model calls use the egress jail.
+- **M6 — Electron shell.** UI ⇄ broker ⇄ guest; provider seam; fixed policy/audit cards; sidecar installed as a **LocalSystem service**.
 
 > **M0–M2 alone** will teach you more about Cowork than almost anyone outside Anthropic.
 
@@ -481,12 +497,11 @@ Same Electron app, file-jail, MCP layer, and approval UI throughout; the **compu
 - HCS Reference **Tutorial** — MicrosoftDocs/Virtualization-Documentation.
 - `aka.ms/hcsadmin` — Hyper-V Administrators group.
 
-**Open-source Go libs the host service is built from** (all public; verified via the binary's symbol table)
-- `microsoft/hcsshim` (MIT) — HCS driver.
+**Open-source Go libs the host service is built from or mirrors**
+- `microsoft/hcsshim` (MIT) — reference for HCS document shape and Plan9 conventions; not imported as the lifecycle driver.
 - `Microsoft/go-winio` (MIT) — named pipes + hvsocket.
 - `containers/gvisor-tap-vsock` (Apache-2.0) — user-mode network over vsock.
 - `inetaf/tcpproxy` (Apache-2.0) — TCP forwarding.
-- `golang.org/x/crypto/ssh` (BSD) — SSH client/server.
 - *(Anthropic's own `cowork-win32-service` is **closed** — 404 on GitHub; only the deps above are public.)*
 
 **Cowork architecture / behavior**
@@ -506,9 +521,9 @@ Same Electron app, file-jail, MCP layer, and approval UI throughout; the **compu
 - ~~**Rootfs distro**~~ → **DECIDED: Ubuntu 22.04 (glibc).** Mirrors Cowork; Python wheels just work. Alpine rejected (musl → wheel pain). See §7.
 - ~~**Kernel**~~ → **DECIDED: generic Ubuntu kernel, matched to the Ubuntu userland** (keep kernel ↔ `/lib/modules` coupled). **Do NOT hand-compile.** M0 uses the tooling's **matched LCOW pair** as a throwaway bootstrap only. WSL2 kernel rejected (mismatch with userland). See §7.
 - ~~**initramfs**~~ → **DECIDED: yes — a matching boot initramfs** (the generic Ubuntu kernel ships drivers as modules, so it's required; confirmed by the on-disk `initrd`). Built with `mkinitramfs` against the kernel version; ship `/lib/modules/<ver>` in the rootfs. See §7. **Verified (S0a, 2026-05-20):** unpacked Cowork's `initrd` — it's a textbook `initramfs-tools` boot initramfs (stock `/init`, `scripts/`, `conf/`, `cryptroot/`; ~482 MB once decompressed = modules+firmware), whose only job is to mount `rootfs.vhdx` and pivot. Exactly our S1.3 model.
-- ~~**HCS access strategy** (own `vmcompute.dll` bindings vs vendor hcsshim `internal/` vs shell-out to `uvmboot`)~~ → **DECIDED (S0a spike, 2026-05-20): (a) roll our own thin `vmcompute.dll` bindings + author our own compute-system JSON doc.** Evidence: HCS confirmed working (uvmboot created+started a UVM, `Running` in `hcsdiag`); hcsshim's `internal/{uvm,hcs,gcs}` can't be imported from our module (Go internal rule — uvmboot only builds *inside* hcsshim); and hcsshim's LCOW path is **welded to Microsoft's GCS** (cmdline `… /bin/vsockexec … /bin/gcs …`, entropy/log hvsockets), so it can't boot our own-agent guest. Our surface is small (~4 calls: `HcsCreateComputeSystem`/`Start`/`Open`/`Terminate`) via `golang.org/x/sys/windows`, same technique as go-winio. Doc template captured from hcsshim `makeLCOWDoc` (SchemaVersion 2.1 · `Chipset.LinuxKernelDirect` · `Devices.{Scsi,HvSocket,Plan9}`), minus the gcs/vsockexec cmdline tail. See implementation-plan S0a → S1.2. **Implemented & PROVEN (S1.2, 2026-05-20):** our own bindings boot our own rootfs. Refined the DLL choice — bind **`computecore.dll`**, not `vmcompute.dll`: only computecore exports the documented *operation-based* async surface (`HcsCreateOperation` → `HcsCreateComputeSystem(…, operation, …)` → `HcsWaitForOperationResult` blocks for completion), giving clean synchronous waits with **no callbacks and no polling** (vmcompute.dll has the legacy sync+GCS-callback API and lacks the operation calls — confirmed by probing exports on the box). Surface used: `HcsCreateOperation`/`HcsCloseOperation`/`HcsWaitForOperationResult`/`HcsCreateComputeSystem`/`HcsOpenComputeSystem`/`HcsStartComputeSystem`/`HcsTerminateComputeSystem`/`HcsCloseComputeSystem` + **`HcsGrantVmAccess`** (required so the VM-worker virtual account can open our rootfs VHD). Serial console = a **host-as-server named pipe** (`Devices.ComPorts`→`winio.ListenPipe`, HCS dials in). Booted the WSL2 built-in-driver kernel with our ext4 `rootfs.vhd` as `/dev/sda`, no initrd, reaching our `/sbin/init`.
+- ~~**HCS access strategy** (own bindings vs vendor hcsshim `internal/` vs shell-out to `uvmboot`)~~ → **DECIDED and implemented:** roll our own thin `computecore.dll` bindings + author our own compute-system JSON doc. hcsshim remains the reference for document shape, but its `internal/` packages are not importable and its LCOW path is welded to Microsoft's GCS guest. See `implementation-status.md` S0a → S1.2.
 - ~~**File share:** virtiofs vs Plan9/9p~~ → **RESOLVED (lean Plan9/9p).** Cowork uses **Plan9** (`vm.Plan9ShareInfo`), not virtiofs — matches the Windows virtiofs bug threads. See §8 Hop 3.
-- **Egress design:** allowlist proxy vs no-NIC + host-network. Cowork does **no-NIC + user-mode network (gvisor-tap-vsock)** — **now available to us since we picked Go.** → **Still start simple at M4 (restricted NIC + allowlist proxy); adopt gvisor-tap-vsock for Cowork-exact no-NIC isolation once basics work.** See §8 Hop 3.
+- ~~**Egress design**~~ → **DECIDED and implemented:** no-NIC user-mode network over hvsocket using `containers/gvisor-tap-vsock`, with a broker-owned default-deny hostname allowlist and DNS pinning. See `implementation-status.md` S4.1.
 - **Skill registry:** naming + bundle format. (Cowork's analog = **DXT / `.mcpb`** desktop-extension bundles — strong prior art; see §11.)
 - ~~**App rename** away from "theparser."~~ → **DECIDED: Atelier.**
 - **Component library:** **shadcn/ui (Radix)** as an accelerator *vs* roll-your-own on Tailwind (what Cowork does). Lean shadcn for speed; revisit if the look diverges. See §11.
@@ -527,7 +542,8 @@ Quick decoder for the jargon in this doc. Grouped by area; one line each.
 - **WHP (Windows Hypervisor Platform)** — public API (`WinHvPlatform.dll`, `WHvCreatePartition`) for 3rd-party hypervisors (VirtualBox, QEMU). Not used here.
 - **vmcompute** — the HCS service/process that actually does the work; runs as SYSTEM.
 - **vmwp.exe** — VM Worker Process; one per running VM, hosts that VM's virtual devices.
-- **hcsshim** — Microsoft's open-source **Go** library wrapping HCS; *our primary host-side dependency*.
+- **hcsshim** — Microsoft's open-source **Go** library wrapping HCS; our primary reference for HCS
+  document shape and Plan9 conventions, not our lifecycle driver.
 - **LCOW (Linux Containers on Windows)** — running Linux under HCS by direct-booting a kernel + rootfs (no full installer). Our boot model.
 - **UVM (Utility VM)** — a lightweight, purpose-built VM (like Cowork's) — not a general-purpose desktop VM.
 - **GCS (Guest Compute Service) / OpenGCS** — Microsoft's in-guest Linux agent that talks to HCS. Cowork ships its *own* daemon instead — **confirmed (S0a, 2026-05-20): `coworkd`**, a Go binary on `smol-bin.vhdx` (no GCS/`vsockexec` present), talking over `hv_sock`, with built-in egress control (`cowork-egress-blocked`) and an inner `bwrap` sandbox. This forces our **own-bindings** HCS path (§16) and is the model for our `guestd` (§8 Hop 3).

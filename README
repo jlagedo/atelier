@@ -6,7 +6,8 @@ app is the UI. The whole point is letting an AI agent work on **local files** sa
 containment (the VM is the cage), not per-click consent.
 
 > Full design, decisions, and a glossary live in **[`docs/design.md`](docs/design.md)**; the
-> slice-by-slice build order and progress in **[`docs/implementation-plan.md`](docs/implementation-plan.md)**.
+> slice-by-slice implementation history and current milestone status live in
+> **[`docs/implementation-status.md`](docs/implementation-status.md)**.
 > Per-directory build/run/test detail and conventions live in **[`AGENTS.md`](AGENTS.md)**.
 
 ## Status
@@ -14,7 +15,7 @@ containment (the VM is the cage), not per-click consent.
 The whole stack is wired end-to-end: our own Go bindings to Windows HCS boot our own Linux VM, the
 host drives the guest over hvsocket, the agent loop runs **inside** the VM (Topology B), and the
 Electron app drives it all. Work follows the milestone ladder in
-[`docs/implementation-plan.md`](docs/implementation-plan.md).
+[`docs/implementation-status.md`](docs/implementation-status.md).
 
 - **Host service** (`services`) — a Go broker speaking JSON-RPC 2.0 (Content-Length framed) over a
   named pipe (Windows) / unix socket (dev). Every capability passes a policy gate + audit log.
@@ -26,8 +27,8 @@ Electron app drives it all. Work follows the milestone ladder in
     `/workspace`, plus **concurrent per-session shares** at `/sessions/<id>` (one VM, many folders);
     `readFile`/`writeFile` are broker-mediated and jailed (reject `..` and escaping symlinks).
   - **Network door** — a no-NIC user-mode network (gvisor-tap-vsock) with a default-deny egress
-    allowlist + pinning DNS resolver; `setEgressPolicy` swaps the allowlist at runtime. *Code
-    complete, live-verify pending.*
+    allowlist + pinning DNS resolver; `setEgressPolicy` swaps the allowlist at runtime. Verified
+    live through `vmctl`; the remaining live gate is the desktop UI E2E run.
 - **Agent loop** (`packages/agent`) — the Claude Agent SDK loop, running **in the guest**
   (`cli-guest.ts`): one-shot (`vmctl agent`) or a persistent multi-turn `--serve` loop driven over
   stdin/stdout NDJSON. The policy gate (`canUseTool`) audits every tool call; tools act on the guest
@@ -46,7 +47,7 @@ Electron app drives it all. Work follows the milestone ladder in
 |---|---|
 | Real VM (boot / exec / files / net) | **Windows 11 + HCS** — Hyper-V Administrators membership *or* run the broker elevated |
 | Image-bundle build | **WSL2 + Docker** (plus `mke2fs`, `qemu-img`) — `image/build.sh` is bash |
-| Host broker + guest daemon | **Go 1.24+** (toolchain pinned in `services/go.mod`) |
+| Host broker + guest daemon | **Go 1.25+** (toolchain pinned in `services/go.mod`) |
 | Desktop app, agent, codegen | **Node ≥ 22.12** |
 | The model call | **`ANTHROPIC_API_KEY`** in the environment that launches the desktop app (or `vmctl agent`) |
 
@@ -120,11 +121,10 @@ Per-package dev/test/lint commands and conventions are in **[`AGENTS.md`](AGENTS
 |---|---|
 | `apps/desktop` | Electron/React desktop UI (chat-forward shell; WORK mode wired to the broker) |
 | `services` | Go module — privileged host broker, in-VM daemon (`guestd`), dev CLI (`vmctl`) |
-| `packages` | Shared TS libs — agent loop, protocol, provider seam *(+ UI skeleton)* |
+| `packages` | Shared TS libs — agent loop, protocol, provider seam |
 | `image` | VM image build pipeline — kernel + initrd + rootfs bundle |
-| `skills` | Skill distribution (DXT/`.mcpb` analog) *(skeleton)* |
 | `tools/protogen` | Protocol codegen — schema → TS + Go |
-| `docs` | Design & architecture docs |
+| `docs` | Design, runtime architecture, implementation, and security docs |
 
 ## Architecture at a glance
 

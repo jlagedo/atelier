@@ -1,4 +1,4 @@
-# Atelier Architecture — UI to In-Guest Agent
+# Runtime Architecture — UI to In-Guest Agent
 
 This document maps every component from the desktop UI down to the agent running
 inside the sandbox VM, with the communication protocols and concrete names/ports
@@ -44,11 +44,11 @@ Four processes, three hops (plus the guestd↔agent stdio channel).
         ╚════════════════════════════════════════════════════════════╝
                                      │
 ┌───────────────────────────────────┴───────────────────────────────────────--─┐
-│ PROCESS 3 — HOST BROKER  cmd/host  (Go, ships as LocalSystem service)          │
+│ PROCESS 3 — HOST BROKER  cmd/host  (Go, planned LocalSystem service)           │
 │   rpc.Server  →  broker.Register(...)                                          │
 │   authorize(method, door) ── Gate (policy.go) + audit log (audit.go)          │
 │        doors: compute | files | network                                       │
-│   vm.Manager ── HCS via hcsshim/own bindings (Create/ModifyComputeSystem)     │
+│   vm.Manager ── HCS via own computecore.dll bindings + go-winio hvsock        │
 │   netjail.Allowlist ── default-deny egress policy (live, no reboot)           │
 └───────┬───────────────────────────┬───────────────────────────────┬─────────┘
         │ CONTROL plane             │ FILES door                    │ NETWORK door

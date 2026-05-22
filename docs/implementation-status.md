@@ -1,20 +1,20 @@
-# Atelier — Implementation Plan
+# Atelier — Implementation Status
 
 > **Companion to [`design.md`](design.md).** That doc decides *what* and *why*; this one
-> decides *in what order* and *how to know each step works*. Section references like
-> "§8" point at `design.md`.
+> records the slice order, current milestone status, and verification notes. Section references
+> like "§8" point at `design.md`.
 >
-> **Status:** active. **Last updated:** 2026-05-20.
+> **Status:** active implementation log. **Last updated:** 2026-05-22.
 
 ---
 
 ## How to use this doc
 
-- The work is cut into **thin vertical slices**. A slice is the *smallest* change that
+- The work was cut into **thin vertical slices**. A slice is the *smallest* change that
   adds an **observable capability** and leaves the system **runnable**. One slice ≈ one PR.
-- **Don't start a slice until the previous slice's Exit criteria are met.** No half-built
-  layers waiting on each other.
-- We go **depth-first along the critical path** (HCS boot → guest bridge) before breadth.
+- Treat the Result blocks as the source of truth for what was actually implemented; some older
+  Goal/Work text preserves the plan before the implementation taught us more.
+- The work goes **depth-first along the critical path** (HCS boot → guest bridge) before breadth.
   Breadth (the three doors, the UI) comes after the substrate exists.
 - **"Vertical" early ≠ "reaches the UI."** `design.md` §6 accepts that Electron is the
   *last* milestone, not the first. So early slices are vertical through the stack *that
@@ -26,7 +26,17 @@
 
 ---
 
-## Baseline — what already exists (verified 2026-05-20)
+## Current Status — 2026-05-22
+
+| Area | State |
+|---|---|
+| Go host substrate | HCS boot, guest exec, 9p files, egress jail, and multi-session mounts implemented |
+| Guest agent | Topology B is the live path; `cli-guest --serve` supports persistent turns and resume |
+| Desktop | WORK mode wired to broker and Session Manager; chat mode still mock |
+| Security remediation | Agent runs as uid/gid 1001 in bubblewrap; rootfs read-only; seccomp/key proxy still open |
+| Shipping | LocalSystem service, pipe ACL, packaging, and live UI E2E remain open |
+
+## Original Baseline — verified 2026-05-20
 
 The scaffold went **wide and shallow**: every layer has a seam, almost no depth.
 
@@ -47,13 +57,13 @@ Go installed but **not on PATH** (`C:\Program Files\Go\bin`); **Node v24**; **Do
 
 ---
 
-## Pivotal unknowns — resolve before/within M0–M1
+## Historical Pivotal Unknowns — resolved during M0–M1
 
-These are **not** settled in `design.md` and gate the early slices:
+These were **not** settled in the original design and gated the early slices:
 
 1. ~~**hcsshim's UVM-boot code lives in `internal/`** → Go forbids importing it from our
-   module.~~ → **RESOLVED in S0a (2026-05-20): (a) roll our own thin `vmcompute.dll`
-   bindings + author the JSON doc.** Confirmed both blockers empirically: the internal-import
+   module.~~ → **RESOLVED in S0a/S1.2 (2026-05-20): roll our own thin HCS bindings
+   (implemented with `computecore.dll`) + author the JSON doc.** Confirmed both blockers empirically: the internal-import
    rule (uvmboot only builds *inside* hcsshim) **and** that hcsshim's `uvm` LCOW path is
    welded to Microsoft's GCS guest (so vendoring/shelling-out can't boot our own-agent
    guest). (b)/(c) rejected. Doc template captured from hcsshim `makeLCOWDoc`. See S0a

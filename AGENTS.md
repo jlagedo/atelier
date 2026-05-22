@@ -4,8 +4,8 @@ Contributor + agent guide for **Atelier** — a Cowork-style desktop AI workspac
 service drives a Linux utility VM on Windows HCS, a TypeScript agent loop runs the AI *inside*
 that VM (Topology B), and an Electron/React app is the UI. The point is letting an AI agent work
 on local files safely by **containment** (the VM is the cage), not per-click consent. Full design,
-decisions, and glossary: [`docs/design.md`](docs/design.md); slice-by-slice build order and progress:
-[`docs/implementation-plan.md`](docs/implementation-plan.md); the end-to-end run guide is the root
+decisions, and glossary: [`docs/design.md`](docs/design.md); slice-by-slice implementation status:
+[`docs/implementation-status.md`](docs/implementation-status.md); the end-to-end run guide is the root
 [`README`](README).
 
 This file is the source of truth for how to build, run, test, and what conventions to follow.
@@ -21,7 +21,7 @@ This file is the source of truth for how to build, run, test, and what conventio
 | `packages/protocol` | Generated Hop-2 protocol bindings (schema is canonical) | generated, gitignored |
 | `image` | VM image build — kernel + initrd + rootfs bundle; bakes in the agent | build pipeline |
 | `tools/protogen` | Protocol codegen (schema → TS + Go) | working |
-| `docs` | Design & architecture docs | `design.md`, `implementation-plan.md` |
+| `docs` | Design, runtime architecture, implementation, and security docs | see `docs/README.md` |
 
 Generated/build output is gitignored: `apps/desktop/.vite`, `apps/desktop/out`, `**/node_modules`,
 `packages/protocol/src`, `services/pkg/protocol`, `services/bin`, `image/.work`, `image/bundle`.
@@ -110,7 +110,7 @@ Conventions:
 - `internal/broker` is the containment chokepoint: every capability use passes the policy gate
   (allow/ask/deny) + audit log before acting (design §10). The Files door is workspace-relative and
   jails paths (rejects `..` and escaping symlinks).
-- `go.mod` `go` directive is pinned to the installed toolchain (1.24); latest stable is Go 1.26.
+- `go.mod` `go` directive is pinned to the installed toolchain (1.25); latest stable is Go 1.26.
 
 ## Agent loop — `packages/agent` (TypeScript)
 
@@ -180,7 +180,7 @@ documented inline where they matter.
 Because this stack runs **latest-stable** libraries (see Versions), training data is often
 stale here. When you need current API syntax, configuration, setup steps, version-migration
 details, or library-specific debugging for any third-party library/framework/SDK/CLI in the
-repo — Electron 42, React 19, Tailwind v4, shadcn/Radix, Vite, vitest, Go 1.24,
+repo — Electron 42, React 19, Tailwind v4, shadcn/Radix, Vite, vitest, Go 1.25,
 `@anthropic-ai/claude-agent-sdk`, gvisor-tap-vsock, HCS, etc. — reach for the **Context7 MCP**
 (`resolve-library-id` → `query-docs`) instead of relying on memory or web search. Do this
 proactively, even when you think you know the answer; the user shouldn't have to say "use

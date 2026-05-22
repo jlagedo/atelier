@@ -1,4 +1,4 @@
-# VM Security Assessment Report
+# VM Security Assessment
 
 **Date:** 2026-05-22  
 **Time:** 01:52 UTC  
@@ -109,6 +109,10 @@ DNS-sinkhole + TCP allowlist is unchanged; egress allow/deny was re-verified
 ---
 
 ## Environment
+
+This table captures the original audited VM environment. The remediation status above notes the
+post-audit changes, including the agent's uid/gid 1001 bubblewrap launch path and the read-only
+root filesystem.
 
 | Property | Value |
 |----------|-------|
