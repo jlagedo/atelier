@@ -3,7 +3,7 @@
 > **Companion to [`macos-port-plan.md`](./macos-port-plan.md).** That doc decides *what*
 > and *why* (architecture, API validation, framework mapping). This doc is the **execution
 > tracker**: it cuts the port into thin, reviewable, demoable slices and records progress.
-> **Last updated:** 2026-05-23.
+> **Last updated:** 2026-05-23 (S5 landed).
 
 ## How to use this doc
 
@@ -31,7 +31,7 @@
 | S2 | arm64 guest bundle (`darwin-arm64-vz`, raw ext4) | M2 | ☑ `2d2db72` | — |
 | S3 | desktop bundle/arch resolution | M2 | ☑ `c0ca554` | — |
 | S4 | dev signing + macOS boot spike (Create/Start/Stop) | M3 | ☑ | — |
-| S5 | guest control plane — `DialGuest` + `exec` | M4 | ☐ | |
+| S5 | guest control plane — `DialGuest` + `exec` | M4 | ☑ | — |
 | S6 | virtio-fs single workspace share | M5 | ☐ | |
 | S7 | runtime add/remove + multi-session smoke test | M5 | ☐ | |
 | S8 | agent loop end-to-end (NAT crutch allowed) | M6 | ☐ | |
@@ -189,7 +189,7 @@ S4 NAT crutch for egress until S9 replaces it.
 
 ---
 
-### S5 — guest control plane — `DialGuest` + `exec`  ☐
+### S5 — guest control plane — `DialGuest` + `exec`  ☑
 
 - **Goal:** reach `guestd` over vsock and run a command in the guest.
 - **Work:**
@@ -206,6 +206,35 @@ S4 NAT crutch for egress until S9 replaces it.
   connections; queue discipline preserved for the connect call.
 - **Depends:** S4.
 - **Risk:** Medium. vsock connection lifecycle + framing over the adapter.
+- **Landed:** two small changes; the whole exec path downstream was already
+  transport-agnostic over the `net.Conn` from `DialGuest`, so no broker/RPC/vmctl/guestd
+  code changed.
+  - **Host** (`driver_darwin.go`): `DialGuest` uses the `*vz.VirtioSocketDevice` cached on
+    `Start` and calls `Connect(port)` — `*vz.VirtioSocketConnection` already satisfies
+    `net.Conn`, so it's returned directly (no adapter). A bounded retry
+    (`dialGuestRetries=40` × `dialGuestRetryWait=250ms`, ~10s) loops on the
+    `*vz.NSError` `ECONNRESET` that `Connect` returns until `guestd` binds its listener;
+    any other error is terminal, and `ctx` is honored between attempts. No hand-rolled
+    queue — the binding marshals `Connect` onto the device's own dispatch queue
+    (validation #3).
+  - **Guest** (`image/guest/init.sh`): the S4 boundary was the guest loading only the
+    Hyper-V `hv_sock` transport, so `guestd` panicked on `open /dev/vsock`. Fixed by also
+    `modprobe vmw_vsock_virtio_transport` (additive + tolerant `|| true`, so the Hyper-V
+    bundle is unaffected — its virtio modprobe just no-ops). That module pulls in the
+    `vsock` core, registering `/dev/vsock`. Doc-only: `vsock_linux.go`'s comment is now
+    transport-neutral.
+  - **Verified end-to-end** on Apple Silicon: rebuilt the `darwin-arm64-vz` bundle (the
+    kernel ships `vmw_vsock_virtio_transport.ko`), re-signed the broker, then
+    `createVM`/`startVM`/`exec`/`stopVM`. Serial shows `NET: Registered PF_VSOCK protocol
+    family` then `atelier-guestd listening transport=vsock port=5000` (no more
+    `/dev/vsock` panic). `exec` ran `uname -a` (aarch64), `id` (non-root `atelier`
+    uid 1001), `python3 --version`, and a `sh -c "exit 7"` whose exit code propagated
+    correctly. `stopVM` clean, `vmCount → 0`. `go test/vet`, `gofmt`, and
+    `GOOS=windows go build ./...` all green (vz excluded from non-darwin builds).
+  - **S9 boundary surfaced (not a regression):** `gvforwarder` restart-loops trying to
+    reach the host egress listener at `vsock://2:1024` because darwin `StartEgress` is
+    still `ErrUnsupported`; the S4 NAT crutch carries real egress meanwhile. That's S9's
+    "network containment" work, out of S5 scope.
 
 ---
 

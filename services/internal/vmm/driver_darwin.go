@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net"
 	"sync"
+	"syscall"
 	"time"
 
 	vz "github.com/Code-Hex/vz/v3"
@@ -26,6 +27,13 @@ const (
 	defaultCPUCount uint   = 2
 	startTimeout           = 30 * time.Second
 	stopTimeout            = 15 * time.Second
+	// DialGuest retry budget. Start only waits for the hypervisor "running" state,
+	// not guest userspace, so the first dial after startVM can outrun guestd binding
+	// its vsock listener. We retry on ECONNRESET ("guest not listening yet") across
+	// ~10s — wider than the Windows hvsock dialer's 8×250ms because a darwin cold
+	// boot (kernel + init + guestd) can take longer to reach a bound port.
+	dialGuestRetries   = 40
+	dialGuestRetryWait = 250 * time.Millisecond
 	// darwinKernelCmdLine boots our bundle under Virtualization.framework. It
 	// differs from the Windows cmdline (internal/hcs/doc.go) in two ways that are
 	// hard boot blockers if wrong: the rootfs is virtio-blk (/dev/vda, not the
@@ -253,9 +261,48 @@ func (d *darwinDriver) shutdown(ctx context.Context, vm *vz.VirtualMachine) erro
 	return fmt.Errorf("vm: cannot stop (state %v)", vm.State())
 }
 
-// DialGuest reaches guestd over the virtio-socket device. Implemented in S5.
-func (*darwinDriver) DialGuest(context.Context, string, uint32) (net.Conn, error) {
-	return nil, ErrUnsupported
+// DialGuest opens a control-plane connection to guestd over the VM's virtio-socket
+// device (validation #8, host CID 2 / guest CID 3). VZVirtioSocketConnection already
+// satisfies net.Conn, so it is returned directly — no adapter. The vz binding marshals
+// Connect onto the device's own dispatch queue, so no hand-rolled queue is needed here
+// (validation #3). A bounded retry absorbs the race between Start returning (VM at the
+// hypervisor "running" state) and guestd binding its vsock listener inside the still-
+// booting guest: until guestd listens, Connect fails with ECONNRESET, which we retry.
+func (d *darwinDriver) DialGuest(ctx context.Context, id string, port uint32) (net.Conn, error) {
+	inst := d.instance(id)
+	if inst == nil {
+		return nil, fmt.Errorf("vm: %q not found", id)
+	}
+	d.mu.Lock()
+	sock := inst.socket
+	d.mu.Unlock()
+	if sock == nil {
+		return nil, fmt.Errorf("vm: %q has no socket device (not started?)", id)
+	}
+
+	var lastErr error
+	for attempt := 0; attempt < dialGuestRetries; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		conn, err := sock.Connect(port)
+		if err == nil {
+			return conn, nil
+		}
+		lastErr = err
+		// ECONNRESET means guestd hasn't bound the port yet — retry. Any other
+		// error is terminal (no device, framework failure, etc.).
+		var nserr *vz.NSError
+		if !errors.As(err, &nserr) || nserr.Code != int(syscall.ECONNRESET) {
+			return nil, fmt.Errorf("vm: dial guest %q (vsock %d): %w", id, port, err)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(dialGuestRetryWait):
+		}
+	}
+	return nil, fmt.Errorf("vm: dial guest %q (vsock %d): %w", id, port, lastErr)
 }
 
 // AttachWorkspace mounts a host folder over virtio-fs. Implemented in S6.

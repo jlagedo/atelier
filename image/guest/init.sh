@@ -51,9 +51,14 @@ else
 fi
 
 # Hand off to the guest daemon (design.md §8 Hop 3): the AF_VSOCK JSON-RPC server
-# that the host control plane talks to. It binds hv_sock, so make sure the
-# transport is loaded (tolerant: it may be built in, or already auto-loaded).
+# the host control plane talks to. AF_VSOCK is backed by a hypervisor-specific
+# transport — hv_sock under Hyper-V (Windows), virtio-vsock under Apple's
+# Virtualization.framework (macOS). Load both tolerantly: the one matching this
+# host registers /dev/vsock, the other no-ops (it may also be built in or already
+# auto-loaded). vmw_vsock_virtio_transport pulls in the vsock core + _common, which
+# is what creates /dev/vsock for guestd to bind (S5).
 modprobe hv_sock 2>/dev/null || true
+modprobe vmw_vsock_virtio_transport 2>/dev/null || true
 
 # guestd becomes the long-running PID 1. Fall back to a shell if it isn't shipped
 # (e.g. a bundle built without it) so the VM still boots and stays debuggable.
