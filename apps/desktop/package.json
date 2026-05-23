@@ -19,9 +19,9 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@fontsource-variable/hanken-grotesk": "^5.2.8",
     "@fontsource/fraunces": "^5.2.9",
     "@fontsource/ibm-plex-mono": "^5.2.7",
-    "@fontsource/ibm-plex-sans": "^5.2.8",
     "@fontsource/ibm-plex-serif": "^5.2.7",
     "@phosphor-icons/react": "^2.1.10",
     "@radix-ui/react-avatar": "^1.1.11",
