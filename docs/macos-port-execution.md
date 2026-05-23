@@ -29,7 +29,7 @@
 | S0 | Driver seam (Driver/Manager, build tags) | M0 | ☑ `03a78ae` | — |
 | S1 | darwin build-tag split + compiling stub | M3 (pre) | ☑ `cc094d6` | — |
 | S2 | arm64 guest bundle (`darwin-arm64-vz`, raw ext4) | M2 | ☑ | _pending commit_ |
-| S3 | desktop bundle/arch resolution | M2 | ☐ | |
+| S3 | desktop bundle/arch resolution | M2 | ☑ | _pending commit_ |
 | S4 | dev signing + macOS boot spike (Create/Start/Stop) | M3 | ☐ | |
 | S5 | guest control plane — `DialGuest` + `exec` | M4 | ☐ | |
 | S6 | virtio-fs single workspace share | M5 | ☐ | |
@@ -102,7 +102,7 @@ S4 NAT crutch for egress until S9 replaces it.
 
 ---
 
-### S3 — desktop bundle/arch resolution  ☐
+### S3 — desktop bundle/arch resolution  ☑
 
 - **Goal:** Electron main picks the right bundle and disk format **by platform**, with no
   hardcoded Windows paths.
@@ -114,7 +114,9 @@ S4 NAT crutch for egress until S9 replaces it.
     `vmlinuz`/`initrd` names unchanged (`:307`/`:308`).
   - Default the host address by platform (Windows `\\.\pipe\atelier-host`; macOS/Linux dev a
     unix socket). Rename "pipe" wording → "host address" where low-risk.
-- **Touches:** `apps/desktop/src/main/sessions/manager.ts`.
+- **Touches:** `apps/desktop/src/main/sessions/bundle.ts` *(new — pure resolver)*,
+  `…/sessions/manager.ts`, `…/ipc/handlers.ts` (injects the platform base dir),
+  `…/host-client/index.ts` (`defaultHostAddress`), `…/sessions/bundle.test.ts` *(new)*.
 - **Verify:** unit/manual — on `process.platform === "darwin"` the resolver returns the
   `darwin-arm64-vz` dir + `rootfs.raw`; `ATELIER_BUNDLE_DIR` still overrides; Windows still
   resolves the existing path + `.vhd`.
@@ -123,6 +125,10 @@ S4 NAT crutch for egress until S9 replaces it.
   regression; host-address default sane on each platform.
 - **Depends:** S0 (artifacts from S2 needed only at runtime, S8).
 - **Risk:** Low.
+- **Landed:** pure `bundle.ts` (`bundleTarget`/`rootfsFileName`/`resolveBundleDir`) +
+  `defaultHostAddress`; `handlers.ts` injects packaged-vs-dev base dir (`process.resourcesPath/bundle`
+  is a placeholder until S10 packaging). `ATELIER_HOST_ADDR` added; `ATELIER_HOST_PIPE` kept for
+  back-compat. Verified: `npm run typecheck && lint && test` green (16 tests).
 
 ---
 

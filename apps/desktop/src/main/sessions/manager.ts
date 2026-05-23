@@ -15,6 +15,7 @@ import path from "node:path";
 import { HostClient, type ExecRun, type OutputStream } from "../host-client";
 import type { LoopControl, LoopEvent } from "../host-client/types";
 import { WorkspaceWatcher, type WorkspaceUpdate } from "../workspace/watcher";
+import { resolveBundleDir, rootfsFileName } from "./bundle";
 import { SessionStore } from "./store";
 
 export type SessionLifecycle = "starting" | "active" | "hibernating" | "inactive" | "resuming" | "error";
@@ -38,6 +39,9 @@ export interface ManagerEmitter {
 export interface ManagerOptions {
   vmId?: string;
   bundleDir?: string;
+  bundleBaseDir?: string; // parent of the per-target bundle subdir (injected by handlers.ts)
+  platform?: NodeJS.Platform; // override for tests
+  arch?: string; // override for tests
   egressAllow?: string[];
   bootTimeoutMs?: number;
   idleMs?: number;
@@ -76,6 +80,7 @@ export class SessionManager {
   private readonly live = new Map<string, LiveSession>();
   private readonly vmId: string;
   private readonly bundleDir: string;
+  private readonly rootfsName: string;
   private readonly egressAllow: string[];
   private readonly bootTimeoutMs: number;
   private readonly idleMs: number;
@@ -89,7 +94,14 @@ export class SessionManager {
     opts: ManagerOptions = {},
   ) {
     this.vmId = opts.vmId ?? "vm0";
-    this.bundleDir = opts.bundleDir ?? process.env.ATELIER_BUNDLE_DIR ?? String.raw`E:\dev\atelier\image\bundle`;
+    const platform = opts.platform ?? process.platform;
+    this.bundleDir = resolveBundleDir({
+      optsBundleDir: opts.bundleDir,
+      baseDir: opts.bundleBaseDir ?? path.join(process.cwd(), "image", "bundle"),
+      platform,
+      arch: opts.arch,
+    });
+    this.rootfsName = rootfsFileName(platform);
     this.egressAllow = opts.egressAllow ?? ["api.anthropic.com"];
     this.bootTimeoutMs = opts.bootTimeoutMs ?? (Number(process.env.ATELIER_BOOT_TIMEOUT_MS) || 120_000);
     this.idleMs = opts.idleMs ?? (Number(process.env.ATELIER_IDLE_MS) || 10 * 60_000);
@@ -306,7 +318,7 @@ export class SessionManager {
         id: this.vmId,
         kernelPath: path.join(this.bundleDir, "vmlinuz"),
         initrdPath: path.join(this.bundleDir, "initrd"),
-        rootfsPath: path.join(this.bundleDir, "rootfs.vhd"),
+        rootfsPath: path.join(this.bundleDir, this.rootfsName),
         memoryMB: 0,
         cpuCount: 0,
       });

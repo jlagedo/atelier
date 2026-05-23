@@ -16,8 +16,13 @@ import type {
   Status,
 } from "./types";
 
-/** The broker's named pipe (design.md §8 — Hop 2). */
-export const DEFAULT_PIPE = String.raw`\\.\pipe\atelier-host`;
+/** The broker's host address (design.md §8 — Hop 2): a named pipe on Windows, a unix
+ *  socket for macOS/Linux dev. `net.createConnection({ path })` handles both. */
+export function defaultHostAddress(platform: NodeJS.Platform = process.platform): string {
+  return platform === "win32"
+    ? String.raw`\\.\pipe\atelier-host`
+    : "/tmp/atelier-host.sock"; // matches the Go broker dev default (README §"Dev without HCS")
+}
 
 export type OutputStream = "stdout" | "stderr";
 
@@ -30,11 +35,15 @@ export interface ExecRun {
 }
 
 export class HostClient {
-  constructor(private readonly pipe: string = process.env.ATELIER_HOST_PIPE || DEFAULT_PIPE) {}
+  constructor(
+    private readonly address: string = process.env.ATELIER_HOST_ADDR ??
+      process.env.ATELIER_HOST_PIPE ??
+      defaultHostAddress(),
+  ) {}
 
   // withConn opens a fresh connection, runs fn, and always closes it.
   private async withConn<T>(fn: (c: PipeClient) => Promise<T>): Promise<T> {
-    const c = new PipeClient(this.pipe);
+    const c = new PipeClient(this.address);
     try {
       await c.ready();
       return await fn(c);
@@ -92,7 +101,7 @@ export class HostClient {
    * feed it; the run resolves when the loop exits.
    */
   execStream(p: ExecParams, onOutput: (stream: OutputStream, data: Buffer) => void): ExecRun {
-    const c = new PipeClient(this.pipe);
+    const c = new PipeClient(this.address);
     const result = (async () => {
       await c.ready();
       try {

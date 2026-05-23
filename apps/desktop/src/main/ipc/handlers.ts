@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import path from "node:path";
 import { IpcChannel } from "./channels";
 import { HostClient } from "../host-client";
 import { SessionStore } from "../sessions/store";
@@ -29,7 +30,12 @@ export function registerIpcHandlers(): IpcBackend {
     files: (appId, update) => broadcast(IpcChannel.WorkFiles, { appId, update }),
     host: (up) => broadcast(IpcChannel.WorkHost, { up }),
   };
-  const manager = new SessionManager(host, store, emit);
+  // Where the per-target VM bundle lives: packaged app keeps it under Resources (wired by
+  // S10 packaging); in dev it's the repo's image/bundle, with app root = apps/desktop.
+  const bundleBaseDir = app.isPackaged
+    ? path.join(process.resourcesPath, "bundle")
+    : path.join(app.getAppPath(), "..", "..", "image", "bundle");
+  const manager = new SessionManager(host, store, emit, { bundleBaseDir });
   void manager.init();
 
   ipcMain.handle(IpcChannel.WorkListSessions, () => manager.listSessions());
