@@ -207,7 +207,7 @@ func main() {
 			"TMPDIR":         "/tmp",
 			"XDG_CACHE_HOME": "/home/atelier/.cache",
 		}
-		// Forward provider knobs if set (model override, Eliza base URL).
+		// Forward provider knobs if set (model override, base URL).
 		for _, k := range []string{"ATELIER_MODEL", "ANTHROPIC_BASE_URL"} {
 			if v := os.Getenv(k); v != "" {
 				genv[k] = v

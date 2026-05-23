@@ -47,7 +47,7 @@
 
 ## 1. Vision & Why
 
-An **Electron desktop app**: a chat client for an internal AI stack (**BNY Eliza AI**) that lets **non-technical operations users** run **skills and agents safely** against the company AI — and, crucially, **work directly on their local files**.
+An **Electron desktop app**: a chat client for an AI stack that lets **non-technical operations users** run **skills and agents safely** against the company AI — and, crucially, **work directly on their local files**.
 
 ### The problem we're solving
 Ops users already have a great **browser-based AI agent** with company-wide data access and subagents. What it *can't* do is touch local files without friction:
@@ -61,7 +61,7 @@ A desktop "workspace" app removes that treadmill: the agent reads/generates/upda
 
 ### Two goals (be honest about both)
 - **Personal (the real driver):** learn to build an Electron desktop app, and understand **Cowork-grade VM isolation on Windows** at a deep level.
-- **Work (the framing):** a prototype/proposal for BNY to give ops users safe access to the internal AI stack.
+- **Work (the framing):** a prototype to give ops users safe access to the internal AI stack.
 
 ---
 
@@ -105,7 +105,7 @@ Nice side effect: because the compute door has **no direct network**, the agent 
 
 **Cowork** (Anthropic, Jan 2026; Windows Feb 10 2026) is essentially the consumer version of this project: a Claude Desktop agent for **non-technical users** that works in local files ("Claude Code for people who don't code"). This is great news — the concept is validated, and we have a proven architecture to study.
 
-> **Pitch reframe:** we're not inventing a category. We're enterprise-izing a validated one — *"Cowork, but pointed at BNY Eliza, with our auth, audit, and a skills registry."*
+> **Pitch reframe:** we're not inventing a category. We're enterprise-izing a validated one — *"Cowork, but with our auth, audit, and a skills registry."*
 
 ### How Cowork sandboxes (defense in depth)
 - **Hard isolation:** a **full local Linux VM** via **HCS** (Host Compute System) — *not* a normal Hyper-V Manager VM (see §5).
@@ -459,8 +459,8 @@ Study Claude Desktop **Desktop Extensions** (`.dxt` / `.mcpb` one-click MCP bund
 
 ## 13. Provider Seam & Data Residency
 
-- **Provider seam:** for the experiment, hit the **Anthropic API** directly; design a thin provider abstraction so **Eliza** (Claude-API-shaped + corp auth/logging) can drop in later. Don't let provider-specifics leak past the seam.
-- **Data residency caveat:** to reason about a file, its **contents are sent to the model**. With **Eliza (in-house datacenter)** data stays in the bank. With the **Anthropic experiment** it leaves the bank — **don't demo with real client data**.
+- **Provider seam:** hit the **Anthropic API** directly; the thin provider abstraction lets an in-house endpoint drop in later. Don't let provider-specifics leak past the seam.
+- **Data residency caveat:** to reason about a file, its **contents are sent to the model**. With an **in-house endpoint** data stays in the datacenter. With the **Anthropic API** it leaves — **don't demo with real client data**.
 
 ---
 
@@ -601,8 +601,7 @@ Quick decoder for the jargon in this doc. Grouped by area; one line each.
 - **MCP (Model Context Protocol)** — the open standard for connecting models to tools/data; our network door = connected MCP servers.
 - **DXT / `.mcpb`** — Desktop Extensions: one-click MCP-server bundles; prior art for our skills registry.
 - **Cowork** — Anthropic's consumer "Claude Code for non-coders" desktop agent; our reference architecture.
-- **Eliza** — BNY's in-house, Claude-API-shaped AI stack; the eventual provider behind the seam.
-- **provider seam** — the thin abstraction that lets us swap Anthropic API ↔ Eliza without leaking provider specifics.
+- **provider seam** — the thin abstraction that lets us swap Anthropic API ↔ an in-house endpoint without leaking provider specifics.
 - **prompt injection** — malicious instructions hidden in content the model reads; the core reason for containment.
 - **ambient authority** — implicit power a process has just by running; containment = **removing** it (the agent acts only through gated capabilities).
 - **RFB / VNC** — remote-framebuffer screen streaming; how Cowork shows the VM's GUI (we likely skip it).
@@ -613,7 +612,7 @@ Quick decoder for the jargon in this doc. Grouped by area; one line each.
 - **Content-Length framing** — LSP/DAP-style message delimiting by byte-length header (robust vs newline-delimited).
 - **OpenTelemetry (OTel)** — tracing/metrics standard; Cowork instruments every RPC with it.
 - **Zod / serde / encoding/json** — schema-validation/serialization (TS / Rust / Go respectively).
-- **OIDC** — OpenID Connect; the corporate user-auth (BNY-provided, out of scope here).
+- **OIDC** — OpenID Connect; the corporate user-auth (out of scope here).
 - **Topology A / B** — agent loop **outside** the VM (host) vs **inside** the VM; we do A then B.
 - **broker** — the policy/approval/audit gate in the privileged service; *the* containment chokepoint.
 - **egress / allowlist** — outbound network control; only approved destinations (the network jail).

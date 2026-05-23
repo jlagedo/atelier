@@ -53,7 +53,7 @@ export function AppSidebar({
               </div>
               <div className="flex flex-col gap-0.5 leading-none">
                 <span className="font-display text-base font-semibold tracking-tight">Atelier</span>
-                <span className="text-muted-foreground text-[11px]">Eliza workspace</span>
+                <span className="text-muted-foreground text-[11px]">workspace</span>
               </div>
             </SidebarMenuButton>
           </SidebarMenuItem>

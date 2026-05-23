@@ -458,7 +458,7 @@ Tiny but blocking. No product code; just make the toolchain usable.
 - **Goal:** first end-to-end agent on the real sandbox — brain outside, hands inside.
 - **Work:** `packages/agent` hosts `@anthropic-ai/claude-agent-sdk`. Wire seams:
   `executeTool` → broker `exec`/file methods (Hop 2 → guest Hop 3); `callModel` →
-  `packages/provider` seam (Anthropic API now, Eliza-shaped later, §13); approvals → broker
+  `packages/provider` seam (§13); approvals → broker
   policy gate. Standalone Node CLI, **not** welded to Electron (so S5b reuses it verbatim).
 - **Touches:** `packages/agent/*`, `packages/provider/*`, `protocol.json` (tool/approval verbs).
 - **Verify:** a task — *"read `/workspace/orders.csv`, compute totals in Python, write
@@ -471,7 +471,7 @@ Tiny but blocking. No product code; just make the toolchain usable.
   MCP server (`shell`/`read_file`/`write_file`) over a new TS Hop-2 client (`src/broker/client.ts`:
   named pipe + Content-Length + JSON-RPC 2.0, base64 exec/file framing matching `vmctl`);
   **callModel** = `packages/provider` (model `claude-sonnet-4-6` + `ANTHROPIC_API_KEY` from env,
-  `ANTHROPIC_BASE_URL` reserved for Eliza); **approvals** = a pre-baked policy via the SDK's
+  `ANTHROPIC_BASE_URL` for endpoint override); **approvals** = a pre-baked policy via the SDK's
   `canUseTool` (no end-user prompt — enterprise-shaped, audited). Live run against `vm0`: agent did
   read_file → shell python → write_file and produced `/workspace/summary.csv` (grand total 37.50),
   each call audited; a write to `/etc/...` was **denied** by policy. Notes: the broker Files door is

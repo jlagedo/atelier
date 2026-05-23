@@ -10,6 +10,11 @@ vendor/
 .vite/
 out/
 
+# playwright
+apps/desktop/e2e/report/
+apps/desktop/e2e/screenshots/
+apps/desktop/test-results/
+
 # binaries / test
 /bin/
 *.exe

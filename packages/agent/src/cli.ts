@@ -2,7 +2,7 @@
 // We host @anthropic-ai/claude-agent-sdk and supply the three seams; the SDK IS
 // the loop. Standalone CLI (not welded to Electron) so S5b.1 reuses it verbatim.
 //
-//   provider seam  → model + env (Anthropic now, Eliza later)        [packages/provider]
+//   provider seam  → model + env                                      [packages/provider]
 //   executeTool    → in-process MCP tools that call the broker        [seams/tools.ts]
 //   approvals      → pre-baked policy via the canUseTool callback      [seams/policy.ts]
 //

@@ -1,12 +1,10 @@
-// Provider seam (design.md §13): the one place provider specifics live. Today we
-// hit the Anthropic API directly (key from the environment). Later, Eliza is a
-// Claude-API-shaped endpoint behind corporate auth — swap the base URL + auth
-// HERE only; nothing in the agent loop changes.
+// Provider seam (design.md §13): the one place provider specifics live. Swap the
+// base URL + auth HERE only; nothing in the agent loop changes.
 
 export interface ProviderConfig {
   /** Model id passed to the SDK, e.g. "claude-sonnet-4-6". */
   model: string;
-  /** Env the SDK subprocess needs: ANTHROPIC_API_KEY (+ ANTHROPIC_BASE_URL for Eliza). */
+  /** Env the SDK subprocess needs: ANTHROPIC_API_KEY (+ optional ANTHROPIC_BASE_URL). */
   env: Record<string, string>;
 }
 
@@ -33,7 +31,7 @@ export function resolveProvider(opts: ResolveOptions = {}): ProviderConfig {
   const model = opts.model ?? process.env.ATELIER_MODEL ?? DEFAULT_MODEL;
 
   const env: Record<string, string> = { ANTHROPIC_API_KEY: apiKey };
-  // Eliza / proxy: reroute sampling without touching the loop.
+  // Optional base URL override: reroute sampling without touching the loop.
   const baseUrl = process.env.ANTHROPIC_BASE_URL;
   if (baseUrl) env.ANTHROPIC_BASE_URL = baseUrl;
 

@@ -1,4 +1,4 @@
-# AGENTS.md
+# CLAUDE.md
 
 Contributor + agent guide for **Atelier** — a Cowork-style desktop AI workspace: a Go host
 service drives a Linux utility VM on Windows HCS, a TypeScript agent loop runs the AI *inside*

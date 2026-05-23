@@ -92,7 +92,7 @@ drive the decisions in the rest of this plan.
 
 | # | Claim | Verdict | Notes / source |
 |---|---|---|---|
-| 1 | **Filesystem shares can be changed while the VM runs** | **VERIFIED (with smoke-test caveat)** | `VZVirtioFileSystemDevice.share` is `get/set` on the *runtime* device (macOS 12+), reachable via `VZVirtualMachine.directorySharingDevices`; `VZMultipleDirectoryShare.directories` is also mutable. Apple does not document *live guest visibility* of a post-`start()` swap in prose, so confirm by smoke test — but the API supports it. **This resolves the plan's biggest open spike** (see [Files Door](#files-door-on-macos)). |
+| 1 | **Filesystem shares can be changed while the VM runs** | **VERIFIED (smoke-tested, S7)** | `VZVirtioFileSystemDevice.share` is `get/set` on the *runtime* device (macOS 12+), reachable via `VZVirtualMachine.directorySharingDevices`; `VZMultipleDirectoryShare.directories` is also mutable. The remaining undocumented bit — *live guest visibility* of a post-`start()` swap — is now confirmed on Apple Silicon by the S7 probe: a share added after `start()` is visible in the guest with **no remount**, even inside an already-mounted point. **This fully resolves the plan's biggest open spike** (see [Files Door](#files-door-on-macos)). |
 | 2 | **Guest mounts a share with `mount -t virtiofs <tag> <target>`** | VERIFIED | `<tag>` = `VZVirtioFileSystemDeviceConfiguration.tag`. A `validateTag(_:)` exists; exact length/charset rules are not published — validate tags before use. |
 | 3 | **Virtualization.framework is callable from Go/Node, not just Swift** | VERIFIED | `com.apple.security.virtualization` must be on whichever Mach-O instantiates `VZVirtualMachine`, run under the hardened runtime. `Code-Hex/vz` drives the whole framework from Go via cgo. No separate daemon is required. `VZVirtualMachine(configuration:queue:)` requires a **serial dispatch queue** — all VM ops must run on that one queue. |
 | 4 | **NAT needs no special networking entitlement; only bridged does** | VERIFIED | `VZNATNetworkDeviceAttachment` explicitly does not require `com.apple.vm.networking`; only `VZBridgedNetworkDeviceAttachment` does. So a NAT early-boot spike is unblocked by entitlements. |
@@ -266,16 +266,35 @@ matching the tag exists (e.g. under `/sys/bus/virtio`), mount virtiofs; otherwis
 back to 9p. (Alternatively, have the broker pass the share type in the `attachWorkspace`
 guestd RPC — cleaner, but a protocol change.)
 
-**Open spike (downgraded):** validation #1 confirms the *API* supports runtime share
-changes; what Apple does not document is whether the **guest sees a share added after
-`start()` without a remount nudge**. Smoke-test this early. If live add fails, the
-fallbacks are, in order of preference:
+**Open spike — RESOLVED (2026-05-23, S7).** The one undocumented behavior — does the
+guest see a share added after `start()` **without a remount nudge** — is now verified
+on Apple Silicon by the S7 probe (`scripts/s7-smoke-darwin.sh` white-box layer +
+`services/internal/vmm/s7_probe_darwin_test.go`). The probe drives the driver's
+host-only `SetShare` directly (no broker round-trip) and inspects the guest over
+`DialGuest`. **Verdict: live add works with no remount.** A share added after `start()`
+via the forked vz runtime `SetShare` is visible in the guest immediately — *including
+inside an already-mounted point*: a mountpoint that listed `a.txt` directly transformed
+**live** (no remount) into `s1/  workspace/` named subdirs the instant a second share was
+attached. Multi-session attach/detach all worked on one live VM: three shares up
+concurrently, detaching the middle one left the others, and dropping back to one share
+flipped the layout back. **None of the fallback ladder is needed — the one-VM /
+many-session model holds.**
 
-- mount the new tag in the guest on demand after the host adds it (most likely the real
-  shape — host adds directory, guest runs `mount -t virtiofs`),
-- a shared host staging directory of per-session symlinks under one fixed share,
-- a controlled VM restart when the live-share set changes,
-- one VM per active session (last resort — drops the one-VM model).
+Two facts the probe pinned down that the implementation must honor:
+
+- **Topology is share-count dependent.** A `VZSingleDirectoryShare` (one entry) exposes
+  the directory **at the mount root**; a `VZMultipleDirectoryShare` (two or more) exposes
+  **one named subdir per tag** under the single device's root (confirmed:
+  `/<base>/s1/b.txt` readable). Because there is exactly one device with one fixed tag
+  (`"workspace"`), the implementation shape is: **mount the single device once at a base
+  and address each session as `<base>/<tag>`.** Per-share-tag mounts (`mount -t virtiofs
+  <session-tag>`) cannot work — which is precisely why the broker's current multi-session
+  path rolls back (the probe's black-box layer reproduces that rollback).
+- **The 1↔2 flip is a footgun.** `buildShare`'s single-vs-multiple branch means a session
+  mounted while it is the *only* share sees files at the root, then those files shift under
+  a `workspace/` subdir the moment a second session attaches (and back on the reverse).
+  S7's implementation should therefore **always use `VZMultipleDirectoryShare`** (even for
+  one entry) so the guest layout is stable across the session count.
 
 The broker's host-side file jail remains mandatory either way. The guest mount is for
 compute convenience; the privileged boundary still mediates `readFile` and `writeFile`.

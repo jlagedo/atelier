@@ -3,7 +3,7 @@
 > **Companion to [`macos-port-plan.md`](./macos-port-plan.md).** That doc decides *what*
 > and *why* (architecture, API validation, framework mapping). This doc is the **execution
 > tracker**: it cuts the port into thin, reviewable, demoable slices and records progress.
-> **Last updated:** 2026-05-23 (S6 landed).
+> **Last updated:** 2026-05-23 (S7 spike resolved — runtime-share behavior verified; impl pending).
 
 ## How to use this doc
 
@@ -33,7 +33,7 @@
 | S4 | dev signing + macOS boot spike (Create/Start/Stop) | M3 | ☑ | — |
 | S5 | guest control plane — `DialGuest` + `exec` | M4 | ☑ | — |
 | S6 | virtio-fs single workspace share | M5 | ☑ | — |
-| S7 | runtime add/remove + multi-session smoke test | M5 | ☐ | |
+| S7 | runtime add/remove + multi-session smoke test | M5 | ◐ spike resolved | |
 | S8 | agent loop end-to-end (NAT crutch allowed) | M6 | ☐ | |
 | S9 | network containment — vsock egress seam, drop NAT | M7 | ☐ | |
 | S10 | packaging, notarization, install docs | M8 | ☐ | |
@@ -291,7 +291,7 @@ S4 NAT crutch for egress until S9 replaces it.
 
 ---
 
-### S7 — runtime add/remove + multi-session smoke test  ☐
+### S7 — runtime add/remove + multi-session smoke test  ◐
 
 - **Goal:** resolve the plan's **single remaining unverified spike** (validation #1): does the
   guest see a share **added after `start()`** without a remount nudge, and does
@@ -313,6 +313,26 @@ S4 NAT crutch for egress until S9 replaces it.
   any) doesn't silently drop the one-VM model without calling it out.
 - **Depends:** S6.
 - **Risk:** Medium–High. The one genuinely unverified Apple behavior in the whole port.
+- **Spike resolved (2026-05-23), implementation pending.** The verification half is done; the
+  shape change is not — so S7 is in progress.
+  - **Test rig landed:** `scripts/s7-smoke-darwin.sh` (builds the bundle if missing, signs the
+    broker/vmctl, then runs two layers) + `services/internal/vmm/s7_probe_darwin_test.go` (gated
+    by `ATELIER_VZ_SMOKE`; the script compiles, codesigns with the virtualization entitlement,
+    and runs it). The probe drives the driver's host-only `SetShare` directly (no broker rollback)
+    and inspects the guest over `DialGuest`. Mountpoints live under `/sessions` (the boot tmpfs) —
+    the read-only root rejects `mkdir` elsewhere.
+  - **Verdict (full reproduction + caveats in `macos-port-plan.md` §Files Door):** a share added
+    after `start()` is visible in the guest with **no remount**, even inside an already-mounted
+    point; multi-session attach/detach works live on one VM. **The one-VM/many-session model holds**
+    — no fallback needed. Two facts to honor: (1) `MultipleDirectoryShare` exposes each tag as a
+    **named subdir** under the single device, so the shape is *mount the one device once at a base,
+    address sessions as `<base>/<tag>`* (per-tag mounts can't work → why the broker multi path rolls
+    back today, reproduced by the black-box layer); (2) the `buildShare` 1↔2 single/multiple flip
+    moves a lone share's files between the root and a `workspace/` subdir — so always use
+    `MultipleDirectoryShare` for a stable layout.
+  - **Remaining (the Exit's "chosen shape is implemented"):** rework the broker `attachWorkspace` +
+    guestd mount so multi-session mounts the single device at a base and addresses `<base>/<tag>`
+    (and pins `MultipleDirectoryShare`), replacing today's per-tag mount that rolls back.
 
 ---
 
