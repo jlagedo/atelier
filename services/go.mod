@@ -3,6 +3,7 @@ module github.com/jlagedo/atelier/services
 go 1.25.0
 
 require (
+	github.com/Code-Hex/vz/v3 v3.7.1
 	github.com/Microsoft/go-winio v0.6.2
 	github.com/containers/gvisor-tap-vsock v0.8.9
 	github.com/inetaf/tcpproxy v0.0.0-20250222171855-c4b9df066048
@@ -13,6 +14,7 @@ require (
 )
 
 require (
+	github.com/Code-Hex/go-infinity-channel v1.0.0 // indirect
 	github.com/apparentlymart/go-cidr v1.1.1 // indirect
 	github.com/google/btree v1.1.2 // indirect
 	github.com/google/gopacket v1.1.19 // indirect

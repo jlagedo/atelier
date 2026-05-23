@@ -200,7 +200,9 @@ mke2fs -q -t ext4 -L atelier-root -d /rootfs -r 1 -N 0 -m 1 /rootfs.ext4 4G'
 cmd_kernel() {
   ensure_tree
   log "extracting + pinning kernel"
-  ./kernel/fetch-kernel.sh "$OUT" "$WORK/rootfs"
+  # Pass DISK so raw (VZ) targets get a decompressed arm64 Image; vhd keeps the
+  # compressed vmlinuz HCS boots directly.
+  ./kernel/fetch-kernel.sh "$OUT" "$WORK/rootfs" "$DISK"
 }
 
 cmd_initrd() {

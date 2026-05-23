@@ -96,6 +96,23 @@ go run ./cmd/host  -addr /tmp/atelier-host.sock &
 go run ./cmd/vmctl -addr /tmp/atelier-host.sock getStatus
 ```
 
+On **macOS (Apple Silicon)** the broker drives Apple's Virtualization.framework via the
+`Code-Hex/vz` cgo binding (`internal/vmm/driver_darwin.go`), so darwin builds need
+`CGO_ENABLED=1` + Xcode Command Line Tools, and the broker must be codesigned with
+`com.apple.security.virtualization` (`services/packaging/darwin/atelier-vm.entitlements`)
+under the hardened runtime — the framework refuses to start otherwise, and cgo invalidates
+the signature on every rebuild. Use the build+sign helper instead of a bare `go build`:
+
+```sh
+./scripts/build-sign-darwin.sh        # protogen -> cgo build host+vmctl -> codesign host
+services/bin/host  -addr /tmp/atelier-host.sock &
+B=image/bundle/darwin-arm64-vz
+services/bin/vmctl -addr /tmp/atelier-host.sock createVM -id vm0 \
+  -kernel $B/vmlinuz -initrd $B/initrd -rootfs $B/rootfs.raw
+services/bin/vmctl -addr /tmp/atelier-host.sock startVM -id vm0   # serial boot log -> broker stderr
+services/bin/vmctl -addr /tmp/atelier-host.sock stopVM  -id vm0
+```
+
 `internal/` packages: `broker` (policy gate + audit + Files/Network doors), `hcs` (our own
 `computecore.dll` bindings + compute-system doc), `vm` (lifecycle + guest/console wiring), `rpc`
 (JSON-RPC codec/transport/notifications), `vsock` (hvsocket dialing), `netjail` (default-deny egress

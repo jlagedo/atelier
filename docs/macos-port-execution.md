@@ -30,7 +30,7 @@
 | S1 | darwin build-tag split + compiling stub | M3 (pre) | ☑ `cc094d6` | — |
 | S2 | arm64 guest bundle (`darwin-arm64-vz`, raw ext4) | M2 | ☑ `2d2db72` | — |
 | S3 | desktop bundle/arch resolution | M2 | ☑ `c0ca554` | — |
-| S4 | dev signing + macOS boot spike (Create/Start/Stop) | M3 | ☐ | |
+| S4 | dev signing + macOS boot spike (Create/Start/Stop) | M3 | ☑ | — |
 | S5 | guest control plane — `DialGuest` + `exec` | M4 | ☐ | |
 | S6 | virtio-fs single workspace share | M5 | ☐ | |
 | S7 | runtime add/remove + multi-session smoke test | M5 | ☐ | |
@@ -132,7 +132,7 @@ S4 NAT crutch for egress until S9 replaces it.
 
 ---
 
-### S4 — dev signing + macOS boot spike (Create/Start/Stop)  ☐
+### S4 — dev signing + macOS boot spike (Create/Start/Stop)  ☑
 
 - **Goal:** boot the arm64 guest under `Virtualization.framework` from `driver_darwin.go`
   (Option A, `Code-Hex/vz`): kernel + initrd + raw rootfs **read-only**, capture serial,
@@ -162,6 +162,30 @@ S4 NAT crutch for egress until S9 replaces it.
   temporary; no HCS concepts leak into the darwin driver.
 - **Depends:** S1, S2.
 - **Risk:** High. First framework integration; signing/threading constraints; cgo build.
+- **Landed:** `driver_darwin.go` implements Create/Start/Stop on `Code-Hex/vz` v3.7.1 —
+  `VZLinuxBootLoader` (cmdline `console=hvc0 root=/dev/vda ro noresume init=/sbin/init`),
+  read-only raw rootfs (validation #6), virtio-socket (for S5) + empty virtio-fs (for S6) +
+  entropy devices, and the **NAT crutch** (validation #4, flagged for S9). Serial console
+  captured to broker logs via `console_darwin.go` (os.Pipe → scanner, the darwin analog of
+  `console_windows.go`). The binding owns the per-VM serial dispatch queue (validation #3),
+  so no hand-rolled queue. Dev signing: `scripts/build-sign-darwin.sh` (protogen → cgo build
+  → ad-hoc `codesign --options runtime` with the pre-existing
+  `services/packaging/darwin/atelier-vm.entitlements`); requires Xcode CLT + `CGO_ENABLED=1`.
+  - **Build-pipeline fix (S2 gap):** Ubuntu's arm64 `/boot/vmlinuz` is a **gzip** Image,
+    which `VZLinuxBootLoader` refuses (Code=1, no serial). The arch was correct; only the
+    packaging was. Fixed at the source — `image/kernel/fetch-kernel.sh` now gunzips the
+    kernel to a decompressed arm64 `Image` for `DISK=raw` (VZ) targets while leaving the
+    Windows compressed `vmlinuz` untouched (same `vmlinuz` filename, so S3's resolver is
+    unchanged). Chosen over a runtime decompress in the driver: the darwin bundle is
+    separate (no Windows risk), it happens once at build time, and the driver stays the
+    clean platform seam.
+  - **Verified:** boot reaches `/sbin/init` — serial shows `EXT4-fs (vda) … ro` and
+    `atelier guest init: kernel 6.8.0-117-generic`; `stopVM` returns cleanly (`err=null`),
+    `vmCount` → 0; create/start/stop is idempotent on a reused id. `go test/vet`, `gofmt`,
+    and `GOOS=windows go build ./...` all green (vz excluded from non-darwin builds).
+  - **S5 boundary surfaced:** `guestd` then fails `open /dev/vsock` and the guest panics —
+    the guest loads the Hyper-V `hv_sock` transport (`image/guest/init.sh`), not VZ's
+    virtio-vsock. That is exactly S5's "guest control plane" work, out of S4 scope.
 
 ---
 
