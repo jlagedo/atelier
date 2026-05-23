@@ -27,8 +27,8 @@
 | ID | Slice | Plan ref | Status | PR |
 |---|---|---|---|---|
 | S0 | Driver seam (Driver/Manager, build tags) | M0 | ☑ `03a78ae` | — |
-| S1 | darwin build-tag split + compiling stub | M3 (pre) | ☑ | _pending commit_ |
-| S2 | arm64 guest bundle (`darwin-arm64-vz`, raw ext4) | M2 | ☐ | |
+| S1 | darwin build-tag split + compiling stub | M3 (pre) | ☑ `cc094d6` | — |
+| S2 | arm64 guest bundle (`darwin-arm64-vz`, raw ext4) | M2 | ☑ | _pending commit_ |
 | S3 | desktop bundle/arch resolution | M2 | ☐ | |
 | S4 | dev signing + macOS boot spike (Create/Start/Stop) | M3 | ☐ | |
 | S5 | guest control plane — `DialGuest` + `exec` | M4 | ☐ | |
@@ -78,7 +78,7 @@ S4 NAT crutch for egress until S9 replaces it.
 
 ---
 
-### S2 — arm64 guest bundle (`darwin-arm64-vz`)  ☐
+### S2 — arm64 guest bundle (`darwin-arm64-vz`)  ☑
 
 - **Goal:** `image/build.sh` emits a bootable **arm64** bundle with **raw ext4** rootfs —
   the hard prerequisite for any VZ boot (validation #7: x86_64 will not boot on Apple Silicon).

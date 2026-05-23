@@ -74,7 +74,7 @@ Conventions:
 - Tailwind v4: no `postcss.config`/`tailwind.config`; wired via `@tailwindcss/vite` +
   `@import "tailwindcss"` / `@plugin` in `src/renderer/index.css`.
 - WORK mode drives the real broker; chat mode is still mock (`renderer/lib/mock-data.ts`).
-- Env knobs: `ATELIER_BUNDLE_DIR` (default `image\bundle`), `ATELIER_IDLE_MS` (hibernate-after-idle,
+- Env knobs: `ATELIER_BUNDLE_DIR` (per-target bundle dir, e.g. `image\bundle\windows-amd64-hyperv`; platform-aware default resolver lands in S3), `ATELIER_IDLE_MS` (hibernate-after-idle,
   default 10 min), `ATELIER_MAX_ACTIVE` (live loops before LRU hibernate, default 3),
   `ATELIER_BOOT_TIMEOUT_MS` (default 120 000). The model call needs `ANTHROPIC_API_KEY` in the
   environment that launches the app.
@@ -159,14 +159,18 @@ goes to `image/bundle/` (gitignored). The matched kernel + `/lib/modules` + boot
 from one Ubuntu 22.04 Docker build (so the §7 coupling holds by construction); the same build
 cross-compiles `guestd` and bakes the in-guest agent (`stage_context` assembles a small Docker
 context from `packages/{agent,provider,protocol}` source and runs `npm install` inside the
-linux/amd64 build). Big artifacts (multi-GB VHDs) are **not** committed — produced here and stored
-externally, not in git/LFS.
+target-arch build — `--platform linux/amd64` or `linux/arm64`). Big artifacts (multi-GB VHDs) are
+**not** committed — produced here and stored externally, not in git/LFS.
+
+A build `TARGET` (default `windows-amd64-hyperv`) selects guest arch + Docker platform + GOARCH +
+disk format + per-target output dir; output goes to `bundle/<target>/`.
 
 ```sh
 cd image
-./build.sh check        # tool readiness (docker, mke2fs, qemu-img)
-./build.sh rootfs       # docker export -> ext4 (mke2fs -d, no root) -> VHD
-./build.sh all          # kernel + rootfs + initrd + bundle -> bundle/{vmlinuz,initrd,rootfs.vhd}
+./build.sh check        # tool readiness + resolved target profile (docker, mke2fs, qemu-img)
+./build.sh rootfs       # docker export -> ext4 (mke2fs -d, no root) -> VHD/raw
+make all                # Windows: kernel+rootfs+initrd+bundle -> bundle/windows-amd64-hyperv/{vmlinuz,initrd,rootfs.vhd}
+make darwin             # macOS arm64 (raw ext4)              -> bundle/darwin-arm64-vz/{vmlinuz,initrd,rootfs.raw}
 ```
 
 ## Versions

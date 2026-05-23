@@ -16,10 +16,21 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 UBUNTU_VERSION="22.04"
-ARCH="x86_64"
-OUT="bundle"
-WORK=".work"
-ROOTFS_TAG="atelier-rootfs:${UBUNTU_VERSION}"
+
+# A build TARGET selects everything platform-specific in one place: the guest ARCH, the
+# Docker build platform, the Go cross-compile GOARCH, the disk format, and the per-target
+# output dir. Default is the Windows/Hyper-V bundle so existing invocations are unchanged.
+# --platform pins the rootfs arch to the TARGET (not the Docker host), so the apt kernel +
+# baked node_modules can never drift from the GOARCH-built guestd/gvforwarder.
+TARGET="${TARGET:-windows-amd64-hyperv}"
+case "$TARGET" in
+  windows-amd64-hyperv) ARCH="x86_64";  DOCKER_PLATFORM="linux/amd64"; GOARCH="amd64"; DISK="vhd" ;;
+  darwin-arm64-vz)      ARCH="aarch64"; DOCKER_PLATFORM="linux/arm64"; GOARCH="arm64"; DISK="raw" ;;
+  *) echo "image: unknown TARGET '$TARGET' (want: windows-amd64-hyperv | darwin-arm64-vz)" >&2; exit 2 ;;
+esac
+OUT="bundle/$TARGET"
+WORK=".work/$TARGET"      # per-target: never mix arch trees/tars/binaries across targets
+ROOTFS_TAG="atelier-rootfs:${UBUNTU_VERSION}-${ARCH}"
 
 log() { printf '\033[1;34m[image]\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31m[image] error:\033[0m %s\n' "$*" >&2; exit 1; }
@@ -52,13 +63,14 @@ stage_context() {
 }
 
 cmd_check() {
+  log "target:  $TARGET (arch=$ARCH platform=$DOCKER_PLATFORM goarch=$GOARCH disk=$DISK out=$OUT)"
   log "tool readiness:"
   for t in docker go qemu-img sha256sum; do
     if have "$t"; then printf '  ok    %s\n' "$t"; else printf '  MISSING %s\n' "$t"; fi
   done
   log "all stages need docker + go; the ext4 is populated inside a Linux 'imager'"
-  log "container (mke2fs runs there, not on the host) so file perms survive; qemu-img"
-  log "converts the resulting blob to VHD/VHDX."
+  log "container (mke2fs runs there, not on the host) so file perms survive. qemu-img"
+  log "is needed only for the VHD disk format (windows-* targets), not raw (darwin-* / VZ)."
 }
 
 # ensure_tree builds the rootfs container and exports its filesystem into
@@ -74,8 +86,8 @@ ensure_tree() {
   log "staging build context (Dockerfile + packages/{agent,provider,protocol})"
   stage_context
 
-  log "building rootfs container image ($ROOTFS_TAG)"
-  docker build -t "$ROOTFS_TAG" "$WORK/ctx"
+  log "building rootfs container image ($ROOTFS_TAG, $DOCKER_PLATFORM)"
+  docker build --platform "$DOCKER_PLATFORM" -t "$ROOTFS_TAG" "$WORK/ctx"
 
   log "exporting container filesystem (tar preserves perms; the ext4 is built from it in Linux)"
   cid="$(docker create "$ROOTFS_TAG")"
@@ -94,24 +106,34 @@ ensure_tree() {
   # (cmd_rootfs), not into the host tree (which is only used for /boot extraction).
   have go || die "go not found (needed to cross-compile the guest daemon, services/cmd/guestd)"
   mkdir -p "$WORK/bin"
-  log "building guest daemon (guestd, linux/amd64 static)"
+  log "building guest daemon (guestd, linux/$GOARCH static)"
   local gout; gout="$(pwd)/$WORK/bin/guestd"
-  ( cd ../services && env GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o "$gout" ./cmd/guestd )
+  ( cd ../services && env GOOS=linux GOARCH="$GOARCH" CGO_ENABLED=0 go build -trimpath -o "$gout" ./cmd/guestd )
 
   # Guest network forwarder (gvforwarder, design.md §8 Hop 3 channel 2 — S4.1):
   # gvisor-tap-vsock's cmd/vm at the exact version services/go.mod pins (go install
   # pkg@version resolves against the library's own module, independent of our go.mod).
   # guestd supervises it at boot, now with -preexisting since networking is static (S4.1).
-  local gvbin gvver
+  local gvbin gvver gvpath gvsrc
   gvver="$(cd ../services && go list -m -f '{{.Version}}' github.com/containers/gvisor-tap-vsock)"
-  log "building guest network forwarder (gvforwarder ${gvver}, linux/amd64 static)"
+  log "building guest network forwarder (gvforwarder ${gvver}, linux/$GOARCH static)"
   gvbin="$(pwd)/$WORK/bin"
-  ( env GOBIN="$gvbin" GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
+  # `go install pkg@version` resolves against the library's own module (independent of our
+  # go.mod/go.sum), but it REFUSES a set GOBIN when cross-compiling — and building linux on a
+  # macOS/Windows host IS cross (host GOOS != linux). So install into a build-local GOPATH
+  # (cross binaries land in bin/<goos>_<goarch>/, native in bin/) while reusing the shared
+  # module cache, then move the located binary out. (The Windows bundle builds in WSL2, a
+  # linux host, where this was non-cross — which is why a set GOBIN worked there.)
+  gvpath="$(pwd)/$WORK/gopath"
+  ( env -u GOBIN GOPATH="$gvpath" GOMODCACHE="$(go env GOMODCACHE)" \
+        GOOS=linux GOARCH="$GOARCH" CGO_ENABLED=0 \
       go install -trimpath "github.com/containers/gvisor-tap-vsock/cmd/vm@${gvver}" )
-  mv -f "$gvbin/vm" "$gvbin/gvforwarder"
+  gvsrc="$(find "$gvpath/bin" -name vm -type f 2>/dev/null | head -n1)"
+  [ -n "$gvsrc" ] || die "gvforwarder: built 'vm' binary not found under $gvpath/bin"
+  mv -f "$gvsrc" "$gvbin/gvforwarder"
 
   log "building imager image (e2fsprogs) for in-Linux ext4 population"
-  docker build -t atelier-imager imager
+  docker build --platform "$DOCKER_PLATFORM" -t atelier-imager imager
 
   TREE_READY=1
 }
@@ -161,7 +183,12 @@ mke2fs -q -t ext4 -L atelier-root -d /rootfs -r 1 -N 0 -m 1 /rootfs.ext4 4G'
   docker cp "$icid:/rootfs.ext4" "$WORK/rootfs.ext4"
   docker rm -f "$icid" >/dev/null 2>&1 || true
 
-  if have qemu-img; then
+  if [ "$DISK" = raw ]; then
+    # VZDiskImageStorageDeviceAttachment takes the raw ext4 as-is (validation #6) — the
+    # mke2fs blob IS a raw disk image, so there's nothing to convert.
+    log "emitting raw ext4 disk for $TARGET (VZ attaches it as-is; no qemu-img needed)"
+    cp "$WORK/rootfs.ext4" "$OUT/rootfs.raw"
+  elif have qemu-img; then
     log "converting ext4 -> VHD (hcsshim PreferredRootFSType=vhd, design.md §7)"
     qemu-img convert -f raw -O vpc "$WORK/rootfs.ext4" "$OUT/rootfs.vhd"
   else
@@ -193,7 +220,7 @@ cmd_bundle() {
   mkdir -p "$OUT"
   log "assembling bundle in $OUT/ (pin kernel+initrd+rootfs with sha256 .origin markers)"
   written=0
-  for f in vmlinuz initrd rootfs.vhd rootfs.ext4; do
+  for f in vmlinuz initrd rootfs.vhd rootfs.raw rootfs.ext4; do
     if [ -f "$OUT/$f" ]; then
       sha256sum "$OUT/$f" | awk '{print $1}' > "$OUT/$f.origin"
       printf '  pinned %s -> %s.origin\n' "$f" "$f"
@@ -204,8 +231,10 @@ cmd_bundle() {
   k="$(kver)"
   cat > "$OUT/manifest.txt" <<EOF
 atelier vm bundle
+target: ${TARGET}
 ubuntu: ${UBUNTU_VERSION}
 arch:   ${ARCH}
+disk:   ${DISK}
 kernel: ${k:-unknown}
 built:  $(date -u +%Y-%m-%dT%H:%M:%SZ)
 EOF
@@ -215,7 +244,9 @@ EOF
 # $WORK/rootfs (ensure_tree is memoized for the invocation).
 cmd_all() { cmd_rootfs; cmd_kernel; cmd_initrd; cmd_bundle; }
 
-cmd_clean() { rm -rf "$WORK" "$OUT"/rootfs.* "$OUT"/vmlinuz* "$OUT"/initrd* "$OUT"/manifest.txt; log "cleaned"; }
+# OUT/WORK are per-target (bundle/$TARGET, .work/$TARGET), so removing them wholesale never
+# touches bundle/README.md or the other target's output.
+cmd_clean() { rm -rf "$WORK" "$OUT"; log "cleaned $TARGET"; }
 
 case "${1:-}" in
   check)  cmd_check ;;

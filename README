@@ -59,7 +59,8 @@ Electron app drives it all. Work follows the milestone ladder in
 
 # 1b. Build the VM image bundle in WSL — cross-compiles guestd + bakes the in-guest agent
 #     into the rootfs (needs the protocol bindings from 1a).
-(cd image && ./build.sh check && ./build.sh all)  # -> image/bundle/{vmlinuz,initrd,rootfs.vhd}
+(cd image && ./build.sh check && ./build.sh all)  # Windows bundle -> image/bundle/windows-amd64-hyperv/{vmlinuz,initrd,rootfs.vhd}
+# macOS (Apple Silicon): make -C image darwin     # arm64 bundle  -> image/bundle/darwin-arm64-vz/{vmlinuz,initrd,rootfs.raw}
 
 # 1c. Install desktop deps (agent deps are baked into the rootfs by build.sh).
 npm --prefix apps/desktop install
@@ -84,7 +85,7 @@ the in-guest agent loop. Type a task in the composer; assistant text plus tool-c
 policy-decision cards stream in, and deliverables land in your folder. Idle sessions hibernate and
 resume on selection.
 
-Desktop env knobs: `ATELIER_BUNDLE_DIR` (default `image\bundle`), `ATELIER_IDLE_MS` (hibernate after
+Desktop env knobs: `ATELIER_BUNDLE_DIR` (point at a per-target bundle dir, e.g. `image\bundle\windows-amd64-hyperv`; the platform-aware default resolver lands in S3), `ATELIER_IDLE_MS` (hibernate after
 idle, default 10 min), `ATELIER_MAX_ACTIVE` (live loops before LRU hibernate, default 3),
 `ATELIER_BOOT_TIMEOUT_MS` (boot wait, default 120 000).
 
@@ -94,7 +95,7 @@ Once the broker is up, the built `services\bin\vmctl` (add `services\bin` to `PA
 path) exercises the whole substrate from a shell:
 
 ```sh
-vmctl createVM -id vm0 -kernel image/bundle/vmlinuz -initrd image/bundle/initrd -rootfs image/bundle/rootfs.vhd
+vmctl createVM -id vm0 -kernel image/bundle/windows-amd64-hyperv/vmlinuz -initrd image/bundle/windows-amd64-hyperv/initrd -rootfs image/bundle/windows-amd64-hyperv/rootfs.vhd
 vmctl startVM  -id vm0
 vmctl exec     -id vm0 -- python3 --version                  # run in the guest, stream output back
 vmctl attachWorkspace -id vm0 -path C:\work\folder           # share a host folder at /workspace
