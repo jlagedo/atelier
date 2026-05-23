@@ -5,101 +5,105 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
-  Atelier — "Enterprise peace", deep-blue dark.
-  Dark is the hero theme; light is the secondary. Emerald is --primary,
-  deliberately vivid against the navy. shadcn's --accent stays the subtle hover surface.
+  Atelier — "Warm workshop", espresso-ink dark + brass.
+  The brand is a craftsman's studio, so the palette is warm end to end: there are
+  no flat greys — every surface, border and muted text carries a trace of warm
+  chroma (hue ~64–84), the way premium tools tint their neutrals. Brass amber is
+  --primary: a confident accent (studio lamplight, brass tools) rather than a
+  whisper. Dark is the hero theme — warm near-black espresso; light is the
+  secondary — cream paper. shadcn's --accent stays the subtle hover surface.
 */
 
 :root {
-  --radius: 0.5rem;
+  --radius: 0.625rem;
 
-  /* Light (secondary) */
-  --background: oklch(0.985 0.003 250);
-  --foreground: oklch(0.22 0.03 264);
+  /* Light (secondary) — warm cream paper + bronze */
+  --background: oklch(0.985 0.007 84);
+  --foreground: oklch(0.26 0.02 58);
 
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.22 0.03 264);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.22 0.03 264);
+  --card: oklch(0.998 0.004 84);
+  --card-foreground: oklch(0.26 0.02 58);
+  --popover: oklch(0.998 0.004 84);
+  --popover-foreground: oklch(0.26 0.02 58);
 
-  --primary: oklch(0.58 0.17 145);
-  --primary-foreground: oklch(0.99 0.005 250);
+  --primary: oklch(0.58 0.115 66);
+  --primary-foreground: oklch(0.99 0.006 84);
 
-  --secondary: oklch(0.96 0.006 250);
-  --secondary-foreground: oklch(0.26 0.03 264);
+  --secondary: oklch(0.955 0.01 82);
+  --secondary-foreground: oklch(0.32 0.02 60);
 
-  --muted: oklch(0.96 0.006 250);
-  --muted-foreground: oklch(0.5 0.02 262);
+  --muted: oklch(0.955 0.01 82);
+  --muted-foreground: oklch(0.52 0.018 62);
 
-  --accent: oklch(0.95 0.008 250);
-  --accent-foreground: oklch(0.26 0.03 264);
+  --accent: oklch(0.945 0.014 80);
+  --accent-foreground: oklch(0.32 0.02 60);
 
-  --destructive: oklch(0.58 0.22 27);
-  --destructive-foreground: oklch(0.99 0.005 250);
+  --destructive: oklch(0.55 0.19 30);
+  --destructive-foreground: oklch(0.99 0.006 84);
 
-  --border: oklch(0.9 0.008 255);
-  --input: oklch(0.9 0.008 255);
-  --ring: oklch(0.58 0.17 145);
+  --border: oklch(0.905 0.01 78);
+  --input: oklch(0.905 0.01 78);
+  --ring: oklch(0.58 0.115 66);
 
-  --chart-1: oklch(0.58 0.17 145);
-  --chart-2: oklch(0.6 0.1 200);
-  --chart-3: oklch(0.58 0.12 265);
-  --chart-4: oklch(0.6 0.18 27);
-  --chart-5: oklch(0.66 0.15 165);
+  --chart-1: oklch(0.58 0.115 66);
+  --chart-2: oklch(0.6 0.14 40);
+  --chart-3: oklch(0.62 0.08 130);
+  --chart-4: oklch(0.58 0.18 30);
+  --chart-5: oklch(0.7 0.12 85);
 
-  --sidebar: oklch(0.97 0.005 250);
-  --sidebar-foreground: oklch(0.26 0.03 264);
-  --sidebar-primary: oklch(0.58 0.17 145);
-  --sidebar-primary-foreground: oklch(0.99 0.005 250);
-  --sidebar-accent: oklch(0.94 0.008 250);
-  --sidebar-accent-foreground: oklch(0.26 0.03 264);
-  --sidebar-border: oklch(0.9 0.008 255);
-  --sidebar-ring: oklch(0.58 0.17 145);
+  --sidebar: oklch(0.972 0.009 84);
+  --sidebar-foreground: oklch(0.32 0.02 60);
+  --sidebar-primary: oklch(0.58 0.115 66);
+  --sidebar-primary-foreground: oklch(0.99 0.006 84);
+  --sidebar-accent: oklch(0.945 0.012 82);
+  --sidebar-accent-foreground: oklch(0.32 0.02 60);
+  --sidebar-border: oklch(0.905 0.01 78);
+  --sidebar-ring: oklch(0.58 0.115 66);
 }
 
 .dark {
-  /* Dark (hero) — deep midnight navy + emerald */
-  --background: oklch(0.16 0.03 265);
-  --foreground: oklch(0.94 0.012 258);
+  /* Dark (hero) — warm espresso-ink + brass */
+  --background: oklch(0.175 0.012 66);
+  --foreground: oklch(0.925 0.014 84);
 
-  --card: oklch(0.21 0.032 263);
-  --card-foreground: oklch(0.94 0.012 258);
-  --popover: oklch(0.21 0.032 263);
-  --popover-foreground: oklch(0.94 0.012 258);
+  --card: oklch(0.222 0.014 64);
+  --card-foreground: oklch(0.925 0.014 84);
+  --popover: oklch(0.2 0.013 64);
+  --popover-foreground: oklch(0.925 0.014 84);
 
-  --primary: oklch(0.78 0.18 145);
-  --primary-foreground: oklch(0.18 0.03 265);
+  --primary: oklch(0.785 0.13 77);
+  --primary-foreground: oklch(0.22 0.03 70);
 
-  --secondary: oklch(0.26 0.035 263);
-  --secondary-foreground: oklch(0.94 0.012 258);
+  --secondary: oklch(0.262 0.014 64);
+  --secondary-foreground: oklch(0.925 0.014 84);
 
-  --muted: oklch(0.24 0.034 263);
-  --muted-foreground: oklch(0.66 0.035 262);
+  --muted: oklch(0.25 0.012 64);
+  --muted-foreground: oklch(0.705 0.02 80);
 
-  --accent: oklch(0.28 0.038 263);
-  --accent-foreground: oklch(0.94 0.012 258);
+  --accent: oklch(0.285 0.016 66);
+  --accent-foreground: oklch(0.94 0.014 84);
 
-  --destructive: oklch(0.62 0.21 25);
-  --destructive-foreground: oklch(0.96 0.01 258);
+  --destructive: oklch(0.62 0.17 30);
+  --destructive-foreground: oklch(0.96 0.014 84);
 
-  --border: oklch(0.3 0.04 264);
-  --input: oklch(0.33 0.04 264);
-  --ring: oklch(0.78 0.18 145);
+  --border: oklch(0.3 0.013 66);
+  --input: oklch(0.33 0.014 66);
+  --ring: oklch(0.785 0.13 77);
 
-  --chart-1: oklch(0.78 0.18 145);
-  --chart-2: oklch(0.7 0.1 200);
-  --chart-3: oklch(0.7 0.12 265);
-  --chart-4: oklch(0.65 0.18 25);
-  --chart-5: oklch(0.72 0.15 165);
+  --chart-1: oklch(0.785 0.13 77);
+  --chart-2: oklch(0.66 0.13 45);
+  --chart-3: oklch(0.72 0.07 130);
+  --chart-4: oklch(0.64 0.16 30);
+  --chart-5: oklch(0.84 0.11 88);
 
-  --sidebar: oklch(0.14 0.028 266);
-  --sidebar-foreground: oklch(0.9 0.012 258);
-  --sidebar-primary: oklch(0.78 0.18 145);
-  --sidebar-primary-foreground: oklch(0.16 0.03 265);
-  --sidebar-accent: oklch(0.22 0.035 263);
-  --sidebar-accent-foreground: oklch(0.94 0.012 258);
-  --sidebar-border: oklch(0.26 0.038 264);
-  --sidebar-ring: oklch(0.78 0.18 145);
+  --sidebar: oklch(0.155 0.011 64);
+  --sidebar-foreground: oklch(0.9 0.013 84);
+  --sidebar-primary: oklch(0.785 0.13 77);
+  --sidebar-primary-foreground: oklch(0.22 0.03 70);
+  --sidebar-accent: oklch(0.232 0.014 64);
+  --sidebar-accent-foreground: oklch(0.93 0.014 84);
+  --sidebar-border: oklch(0.262 0.013 66);
+  --sidebar-ring: oklch(0.785 0.13 77);
 }
 
 @theme inline {
@@ -138,6 +142,7 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
 
+  --font-display: "Fraunces", "IBM Plex Serif", ui-serif, Georgia, serif;
   --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
   --font-serif: "IBM Plex Serif", ui-serif, Georgia, serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", monospace;
@@ -146,6 +151,36 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+
+  /* Atmosphere — shadows leaning warm (brass-tinted), the way a lamplit room
+     casts colour into its shadows. Generates shadow-lamp / shadow-brass. */
+  --shadow-lamp: 0 1px 2px -1px oklch(0.12 0.02 60 / 0.5), 0 12px 32px -12px oklch(0.12 0.02 60 / 0.55);
+  --shadow-brass: 0 0 0 1px oklch(0.785 0.13 77 / 0.18), 0 6px 22px -8px oklch(0.785 0.13 77 / 0.4);
+}
+
+/*
+  Layout scale — semantic spacing/size tokens. One source of truth for the
+  shell's rhythm so dimensions aren't scattered as magic numbers across
+  components. Any --spacing-* key generates the full set of utilities
+  (h-, w-, p-, m-, gap-, size-, space-y-, …); --container-* generates max-w-.
+  Plain @theme (not inline) so the values are real custom properties — needed
+  by the derived --spacing-msg-indent calc below.
+*/
+@theme {
+  /* structural dimensions */
+  --spacing-header: 4rem; /* chat + panel header height (was h-16)   */
+  --spacing-panel: 20rem; /* workspace panel width    (was w-80)     */
+  --container-reading: 48rem; /* chat reading measure (was max-w-3xl) */
+
+  /* vertical & horizontal rhythm */
+  --spacing-gutter: 2rem; /* reading column side padding (was px-8)  */
+  --spacing-stack: 2rem; /* between chat turns          (was space-y-8) */
+  --spacing-section: 1.5rem; /* between panel sections   (was space-y-6) */
+
+  /* message layout — indent is derived so avatar + gap can never drift apart */
+  --spacing-avatar: 1.75rem; /* assistant avatar (was size-7)   */
+  --spacing-msg-gap: 1rem; /* avatar↔text gap     (was gap-4)   */
+  --spacing-msg-indent: calc(var(--spacing-avatar) + var(--spacing-msg-gap)); /* was ml-11 */
 }
 
 @layer base {
@@ -154,5 +189,60 @@
   }
   body {
     @apply bg-background text-foreground font-sans antialiased;
+  }
+
+  /* Fraunces reads best a touch tighter and with its "soft" optical voice when
+     used large. Scoped to the display utility so body text is untouched. */
+  .font-display {
+    font-optical-sizing: auto;
+    letter-spacing: -0.015em;
+  }
+
+  /* Warm, slim scrollbars (Electron is Chromium, so -webkit- applies). */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 9999px;
+    border: 3px solid transparent;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--muted-foreground);
+    background-clip: padding-box;
+  }
+
+  /* Tactile grain — the studio's "paper". A fixed, click-through speckle laid
+     over everything: film grain on the dark canvas, paper grain on the cream. */
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    pointer-events: none;
+    opacity: 0.04;
+    mix-blend-mode: multiply;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  .dark body::after {
+    opacity: 0.05;
+    mix-blend-mode: overlay;
+  }
+}
+
+@layer utilities {
+  /* Lamplit gradient-mesh — brass overhead, a clay glow to the side, a cool
+     sage counterpoint low-left. Translucent, so it works over either canvas.
+     Used behind the empty-state hero. */
+  .hero-lamp {
+    background:
+      radial-gradient(56% 44% at 50% 6%, oklch(0.785 0.13 77 / 0.13), transparent 72%),
+      radial-gradient(42% 38% at 84% 26%, oklch(0.66 0.13 45 / 0.08), transparent 72%),
+      radial-gradient(48% 42% at 12% 88%, oklch(0.72 0.07 130 / 0.05), transparent 74%);
   }
 }

@@ -29,13 +29,19 @@ function StatusDot({ status }: { status: ToolCall["status"] }) {
 export function ToolCallCard({ tool }: { tool: ToolCall }) {
   const [open, setOpen] = useState(true);
   const ToolIcon = toolIcon(tool.label);
+  const running = tool.status === "running";
 
   return (
-    <div className="border-border bg-card/60 ml-10 overflow-hidden rounded-lg border">
+    <div
+      className={cn(
+        "ml-msg-indent overflow-hidden rounded-xl border transition-colors",
+        running ? "border-primary/35 bg-primary/[0.045]" : "border-border bg-card/50",
+      )}
+    >
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="hover:bg-accent/40 flex w-full items-center gap-2 px-3 py-2 text-left transition-colors"
+        className="hover:bg-accent/40 flex w-full items-center gap-2 px-3.5 py-2.5 text-left transition-colors"
       >
         <CaretRight
           weight="bold"

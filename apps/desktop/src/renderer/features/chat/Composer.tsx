@@ -33,8 +33,8 @@ export function Composer({
     : "Mock interface — no agent connected. Chat sessions do not map a work folder.";
 
   return (
-    <div className="border-border bg-background border-t px-4 py-3">
-      <div className="border-input bg-card focus-within:border-ring/60 focus-within:ring-ring/20 mx-auto flex max-w-3xl items-end gap-2 rounded-2xl border px-3 py-2 transition-[border-color,box-shadow] focus-within:ring-[3px]">
+    <div className="border-border bg-background border-t px-6 py-5">
+      <div className="border-input bg-card focus-within:border-ring/60 focus-within:ring-ring/20 mx-auto flex max-w-reading items-end gap-2 rounded-2xl border px-4 py-2.5 transition-[border-color,box-shadow] focus-within:ring-[3px]">
         <Button
           type="button"
           variant="ghost"
@@ -61,7 +61,7 @@ export function Composer({
         <Button
           type="button"
           size="icon"
-          className="size-8 shrink-0 rounded-xl"
+          className="enabled:shadow-brass size-8 shrink-0 rounded-xl transition-all enabled:hover:brightness-105"
           aria-label="Send message"
           disabled={value.trim().length === 0 || disabled}
           onClick={submit}
@@ -69,7 +69,7 @@ export function Composer({
           <PaperPlaneRight weight="fill" />
         </Button>
       </div>
-      <p className="text-muted-foreground/70 mt-2 text-center text-[11px]">{hint ?? defaultHint}</p>
+      <p className="text-muted-foreground/70 mt-3 text-center text-[11px]">{hint ?? defaultHint}</p>
     </div>
   );
 }

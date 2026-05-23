@@ -37,17 +37,17 @@ export function ChatView({
         </div>
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-3xl space-y-6 px-4 py-8">
-            {session.items.map((item) => {
-              switch (item.kind) {
-                case "message":
-                  return <MessageBubble key={item.id} role={item.role} content={item.content} />;
-                case "tool":
-                  return <ToolCallCard key={item.id} tool={item.tool} />;
-                case "policy":
-                  return <PolicyDecisionCard key={item.id} policy={item.policy} />;
-              }
-            })}
+          <div className="mx-auto max-w-reading space-y-stack px-gutter py-12">
+            {session.items.map((item) => (
+              <div
+                key={item.id}
+                className="animate-in fade-in slide-in-from-bottom-2 fill-mode-backwards duration-500"
+              >
+                {item.kind === "message" && <MessageBubble role={item.role} content={item.content} />}
+                {item.kind === "tool" && <ToolCallCard tool={item.tool} />}
+                {item.kind === "policy" && <PolicyDecisionCard policy={item.policy} />}
+              </div>
+            ))}
           </div>
         </div>
       )}

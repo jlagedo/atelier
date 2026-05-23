@@ -9,8 +9,8 @@ export function MessageBubble({ role, content }: { role: Role; content: string }
       <div className="flex justify-end">
         <div
           className={cn(
-            "bg-secondary text-secondary-foreground max-w-[80%] rounded-2xl rounded-br-sm px-4 py-2.5",
-            "ring-border/60 ring-1",
+            "bg-secondary text-secondary-foreground max-w-[80%] rounded-2xl rounded-br-sm px-4 py-3",
+            "ring-border/50 ring-1",
           )}
         >
           <Markdown className="prose-p:my-0">{content}</Markdown>
@@ -20,10 +20,10 @@ export function MessageBubble({ role, content }: { role: Role; content: string }
   }
 
   return (
-    <div className="flex gap-3">
-      <Avatar className="bg-primary/15 ring-primary/25 mt-0.5 size-7 ring-1">
+    <div className="flex gap-msg-gap">
+      <Avatar className="bg-primary/12 ring-primary/25 mt-0.5 size-avatar ring-1">
         <AvatarFallback className="bg-transparent">
-          <span className="text-primary font-serif text-sm font-semibold">A</span>
+          <span className="text-primary font-display text-sm font-semibold">A</span>
         </AvatarFallback>
       </Avatar>
       <div className="min-w-0 flex-1 pt-0.5">
