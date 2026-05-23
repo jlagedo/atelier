@@ -28,8 +28,8 @@ services/bin/*
 .env.*
 !.env.example
 
-# Claude Code (local, per-machine — never commit)
-.claude/settings.local.json
+# Claude Code (local, per-machine — never commit), in any package
+**/.claude/settings.local.json
 
 # OS / editor
 .DS_Store

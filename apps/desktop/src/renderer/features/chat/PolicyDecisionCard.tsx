@@ -10,7 +10,7 @@ export function PolicyDecisionCard({ policy }: { policy: PolicyDecision }) {
 
   if (!denied) {
     return (
-      <div className="text-muted-foreground ml-10 flex items-center gap-1.5 px-1 text-[11px]">
+      <div className="text-muted-foreground ml-msg-indent flex items-center gap-1.5 px-1 text-[11px]">
         <ShieldCheck weight="bold" className="text-primary/70 size-3.5 shrink-0" />
         <span className="font-medium">{policy.action}</span>
         {policy.target && (
@@ -22,7 +22,7 @@ export function PolicyDecisionCard({ policy }: { policy: PolicyDecision }) {
   }
 
   return (
-    <div className="border-destructive/40 bg-destructive/[0.07] ml-10 rounded-lg border">
+    <div className="border-destructive/40 bg-destructive/[0.07] ml-msg-indent rounded-lg border">
       <div className="flex items-start gap-3 px-4 py-3">
         <div className="bg-destructive/15 text-destructive mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md">
           <Warning weight="bold" className="size-4" />

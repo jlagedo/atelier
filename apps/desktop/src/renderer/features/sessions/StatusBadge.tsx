@@ -1,6 +1,8 @@
 import { Circle, CircleNotch, Moon, WarningCircle } from "@phosphor-icons/react";
+import type { VariantProps } from "class-variance-authority";
 
 import { cn } from "@/lib/utils";
+import { badgeVariants } from "@/components/ui/badge";
 import type { SessionStatus } from "@/lib/mock-data";
 
 const labelByStatus: Record<SessionStatus, string> = {
@@ -16,6 +18,21 @@ const labelByStatus: Record<SessionStatus, string> = {
   inactive: "dormant",
 };
 
+type BadgeTone = NonNullable<VariantProps<typeof badgeVariants>["tone"]>;
+
+const toneByStatus: Record<SessionStatus, BadgeTone> = {
+  idle: "plain",
+  running: "accent",
+  waiting: "muted",
+  done: "subtle",
+  error: "destructive",
+  starting: "accent",
+  active: "accent",
+  resuming: "accent",
+  hibernating: "muted",
+  inactive: "plain",
+};
+
 const SPINNING = new Set<SessionStatus>(["running", "starting", "resuming", "hibernating"]);
 
 function iconFor(status: SessionStatus) {
@@ -29,17 +46,7 @@ export function StatusBadge({ status, compact = false }: { status: SessionStatus
   const Icon = iconFor(status);
 
   return (
-    <span
-      className={cn(
-        "inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium",
-        (status === "running" || status === "starting" || status === "resuming" || status === "active") &&
-          "bg-primary/15 text-primary",
-        (status === "waiting" || status === "hibernating") && "bg-muted text-muted-foreground",
-        status === "done" && "bg-sidebar-accent text-muted-foreground",
-        (status === "idle" || status === "inactive") && "bg-transparent text-muted-foreground",
-        status === "error" && "bg-destructive/15 text-destructive",
-      )}
-    >
+    <span className={badgeVariants({ tone: toneByStatus[status] })}>
       <Icon className={cn("size-2.5", SPINNING.has(status) && "animate-spin")} weight="fill" />
       {!compact && labelByStatus[status]}
     </span>

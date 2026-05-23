@@ -1,5 +1,6 @@
 import { Cpu, FolderOpen, ShieldCheck } from "@phosphor-icons/react";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -23,15 +24,13 @@ export function ChatHeader({
     : "Chat session · no work folder";
 
   return (
-    <header className="border-border bg-background/80 flex h-14 shrink-0 items-center gap-2 border-b px-3 backdrop-blur">
+    <header className="border-border bg-background/70 flex h-header shrink-0 items-center gap-2 border-b px-5 backdrop-blur">
       <SidebarTrigger className="text-muted-foreground" />
       <Separator orientation="vertical" className="mr-1 h-5" />
       <div className="flex min-w-0 flex-col">
         <div className="flex min-w-0 items-center gap-2">
           <h1 className="text-foreground truncate text-sm font-medium">{session.title}</h1>
-          <span className="bg-primary/10 text-primary rounded px-1.5 py-0.5 text-[10px] font-medium">
-            {isWork ? "Work" : "Chat"}
-          </span>
+          <Badge tone="accent">{isWork ? "Work" : "Chat"}</Badge>
           {isWork && <StatusBadge status={session.status} />}
         </div>
         <div className="text-muted-foreground flex items-center gap-2 text-[11px]">
