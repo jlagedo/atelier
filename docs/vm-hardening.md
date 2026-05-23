@@ -18,7 +18,7 @@ resource limits, and shared-VM session separation.
 
 | Area | Current state | Code reference |
 |---|---|---|
-| Hypervisor boundary | Dedicated Linux utility VM driven by HCS | `services/internal/hcs`, `services/internal/vm` |
+| Hypervisor boundary | Dedicated Linux utility VM driven by HCS | `services/internal/hcs`, `services/internal/vmm` |
 | Agent identity | Agent launched as uid/gid 1001, not root | `services/cmd/guestd/sandbox_linux.go` |
 | Agent process sandbox | bubblewrap user/pid/ipc/uts/mount namespaces; caps dropped | `services/cmd/guestd/sandbox_linux.go` |
 | Root filesystem | rootfs mounted read-only; writable paths are tmpfs/session shares | `services/internal/hcs/doc.go`, `image/guest/init.sh` |

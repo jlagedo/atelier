@@ -44,7 +44,7 @@ The scaffold went **wide and shallow**: every layer has a seam, almost no depth.
 |---|---|
 | Go RPC (Hop 2) — JSON-RPC 2.0 + Content-Length framing, server/client/codec | **Real**, tests green |
 | Broker / policy gate / audit log | **Real seam**; `getStatus` works, capability methods are gated stubs |
-| `internal/hcs`, `internal/vm`, `internal/netjail`, `cmd/guestd` | **Stubs / empty** |
+| `internal/hcs`, `internal/vmm`, `internal/netjail`, `cmd/guestd` | **Stubs / empty** |
 | Protocol codegen (`protocol.json` → TS + Go) | **Real**, zero-dep, regenerates |
 | Image build | **Partial** — rootfs stage real; **kernel + initrd are TODO** |
 | Desktop shell (hardened renderer, CSP, narrow IPC, one channel) | **Real shell**, no host-client wiring |
@@ -170,12 +170,12 @@ Tiny but blocking. No product code; just make the toolchain usable.
 
 ### S1.2 — M1: Drive HCS yourself (first boot of our rootfs)
 - **Goal:** **our** VM boots **our** rootfs, via **our** code. The central milestone.
-- **Work:** implement `internal/hcs` (replace the stub) + `internal/vm`: author the
+- **Work:** implement `internal/hcs` (replace the stub) + `internal/vmm`: author the
   compute-system **JSON doc** (KernelDirect, ext4 root on VHD, `console=hvc0 …`),
   `HcsCreateComputeSystem` + `Start`. **De-risk:** use a *built-in-driver* kernel
   (LCOW/WSL2) so **no initrd** is needed yet. Wire broker `createVM`/`startVM`/`stopVM`
   to it (replace the gated stubs).
-- **Touches:** `internal/hcs/hcs_windows.go`, `internal/vm/*`, `internal/broker/broker.go`,
+- **Touches:** `internal/hcs/hcs_windows.go`, `internal/vmm/*`, `internal/broker/broker.go`,
   `protocol.json` (CreateVM doc field already present).
 - **Verify:** `vmctl createVM` + `startVM`; serial console (`hvc0`) shows the boot;
   `cat /etc/os-release` = Ubuntu 22.04; `python3 --version` works.
@@ -189,7 +189,7 @@ Tiny but blocking. No product code; just make the toolchain usable.
   `syscall.SyscallN`. **Chose `computecore.dll` over `vmcompute.dll`** because only the former
   exports the async operation surface (`HcsWaitForOperationResult` blocks for completion → no
   callbacks, no polling; vmcompute.dll lacks it — probed on the box). `MakeLCOWDoc` authors the
-  schema-2.1 doc (no gcs/vsockexec tail; `init=/sbin/init`); `internal/vm.Manager` builds the
+  schema-2.1 doc (no gcs/vsockexec tail; `init=/sbin/init`); `internal/vmm.Manager` builds the
   doc, drives the driver, and bridges COM1→named-pipe console; broker `createVM`/`startVM`/`stopVM`
   now real (through the policy gate + audit); `vmctl` gained `-id/-kernel/-rootfs/-mem/-cpu`.
   Booted the **WSL2 built-in-driver kernel** (`6.6.114.1-microsoft-standard-WSL2`, **no initrd**)
@@ -229,7 +229,7 @@ Tiny but blocking. No product code; just make the toolchain usable.
   extract, not download); ext4 bumped 2G→4G for the modules; `manifest.txt` records the kernel
   version; `cmd_all` reordered `rootfs→kernel→initrd→bundle`. `image/initrd/modules.conf` is now
   reference-only (every driver is already in the full initrd). Go side: threaded an optional
-  `initrdPath` through `protocol.json` (regenerated) → broker `CreateVMParams` → `vm.VMConfig` →
+  `initrdPath` through `protocol.json` (regenerated) → broker `CreateVMParams` → `vmm.VMConfig` →
   `hcs.DocConfig.InitrdPath` (the doc field `LinuxKernelDirect.InitRdPath` was already wired in
   S1.2) → `GrantVMAccess` (VM-worker account reads the initrd); `vmctl` gained `-initrd`. Empty
   `initrdPath` preserves the S1.2 no-initrd boot (regression-safe). **Empirical boot
@@ -254,7 +254,7 @@ Tiny but blocking. No product code; just make the toolchain usable.
 - **Work:** implement `cmd/guestd`: AF_VSOCK RPC server reusing `internal/rpc` (JSON-RPC +
   Content-Length); one method `exec` → run a command, emit stdout/stderr as **JSON-RPC
   notifications** (§8 streaming = notifications). `init.sh` execs `guestd` instead of `sh`.
-- **Touches:** `cmd/guestd/main.go`, `internal/vm` (guest transport), `image/guest/init.sh`,
+- **Touches:** `cmd/guestd/main.go`, `internal/vmm` (guest transport), `image/guest/init.sh`,
   rootfs manifest (ship the `guestd` binary).
 - **Verify:** boot logs show `guestd` listening on the vsock port.
 - **Exit:** guest daemon up at boot.
@@ -290,7 +290,7 @@ Tiny but blocking. No product code; just make the toolchain usable.
 - **Work:** host `vm.RPCClient` over **AF_HYPERV** (`Microsoft/go-winio` hvsock); broker
   `exec` method → policy gate → guest `exec`; relay notifications back over Hop 2; add
   `vmctl exec`.
-- **Touches:** `internal/vm` (host hvsock client), `internal/broker` (`exec`), `cmd/vmctl`,
+- **Touches:** `internal/vmm` (host hvsock client), `internal/broker` (`exec`), `cmd/vmctl`,
   `protocol.json` (`exec` method + params).
 - **Verify:** `vmctl exec -- ls -la /` streams the guest's output to the terminal,
   end-to-end across Hop 2 → Hop 3.
@@ -305,7 +305,7 @@ Tiny but blocking. No product code; just make the toolchain usable.
   `"vm0"` but the compute system's **RuntimeId GUID** (confirmed against hcsshim
   `internal/uvm/create.go`, which caches `properties.RuntimeID`). So our `computecore.dll`
   bindings gained **`HcsGetComputeSystemProperties`** (+ a result-doc-returning wait helper) and a
-  new `Driver.RuntimeID`. `internal/vm.Manager.DialGuest` (Windows; stub elsewhere) dials with
+  new `Driver.RuntimeID`. `internal/vmm.Manager.DialGuest` (Windows; stub elsewhere) dials with
   go-winio's root `winio` package — `winio.Dial(ctx, &winio.HvsockAddr{VMID: runtimeID GUID,
   ServiceID: winio.VsockServiceID(5000)})` — caching the GUID on the instance and using a bounded
   `HvsockDialer{Retries,RetryWait}` to absorb the `startVM`→guestd-bind race. The compute-system
@@ -345,7 +345,7 @@ Tiny but blocking. No product code; just make the toolchain usable.
   already mounts 9p — match the tag. Implement broker `readFile`/`writeFile`: canonicalize
   every path against the workspace root, **reject `..` and escaping symlinks**; writes route
   through the policy gate (`ask`) + audit. (Copy Cowork's "broker mediates file I/O" rule.)
-- **Touches:** `internal/hcs`/`internal/vm` (9p share), `internal/broker` (`readFile`/
+- **Touches:** `internal/hcs`/`internal/vmm` (9p share), `internal/broker` (`readFile`/
   `writeFile`, jail), `image/guest/init.sh`, `protocol.json` (params already present).
 - **Verify:** file written on host shows in guest `/workspace` and vice-versa; a path with
   `..` is **denied**; every access lands in the audit log.
@@ -395,7 +395,7 @@ Tiny but blocking. No product code; just make the toolchain usable.
   forced through it. Implement `internal/netjail`. (Later: swap to no-NIC user-mode network
   via `containers/gvisor-tap-vsock` for Cowork-exact isolation — tracked as a follow-up,
   not this slice.)
-- **Touches:** `internal/netjail`, `internal/hcs`/`internal/vm` (NIC/HNS config),
+- **Touches:** `internal/netjail`, `internal/hcs`/`internal/vmm` (NIC/HNS config),
   `internal/broker` (egress policy + audit).
 - **Verify:** from the guest, an allowlisted host succeeds and a non-allowlisted host
   **fails**; `pip install` works only via the proxy; blocks are audited.

@@ -32,7 +32,7 @@ const (
 )
 
 // DocConfig is the small, host-facing knob set we build a compute-system doc
-// from. internal/vm fills it from a VMConfig.
+// from. The Windows vmm driver fills it from a VMConfig.
 type DocConfig struct {
 	// Owner is a free-form tag HCS records against the system (e.g. "atelier").
 	Owner string

@@ -30,7 +30,7 @@ The network-layer (vNIC) isolation is functioning correctly and is the strongest
 Remediation was implemented after this assessment and **verified on a live Hyper-V boot**
 (create → start → in-guest checks → a real end-to-end agent run). Fixes touch the image
 build (`image/build.sh`, `image/imager/`, `image/rootfs/Dockerfile`, `image/guest/init.sh`)
-and the in-guest daemon / launcher (`services/cmd/guestd`, `services/internal/vm`).
+and the in-guest daemon / launcher (`services/cmd/guestd`, `services/internal/vmm`).
 
 ### Status at a glance
 

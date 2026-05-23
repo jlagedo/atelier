@@ -1,6 +1,6 @@
 //go:build windows
 
-package vm
+package vmm
 
 import (
 	"bufio"
@@ -12,9 +12,10 @@ import (
 
 // consolePipeSDDL restricts the serial-console pipe to SYSTEM + Builtin
 // Administrators. The VM worker process (vmwp) for a utility VM connects as
-// SYSTEM; if HCS can't reach the pipe on some configs, widen this in S1.2 boot
-// testing.
+// SYSTEM; if HCS can't reach the pipe on some configs, widen this in boot testing.
 const consolePipeSDDL = "D:P(A;;FA;;;SY)(A;;FA;;;BA)"
+
+type consoleStream interface{ Close() error }
 
 // winConsole is the host end of a VM's COM1 serial console: a named-pipe server
 // HCS connects to. Each connection's bytes are logged line-by-line.

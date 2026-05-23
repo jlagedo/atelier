@@ -14,7 +14,7 @@ import (
 
 	"github.com/jlagedo/atelier/services/internal/netjail"
 	"github.com/jlagedo/atelier/services/internal/rpc"
-	"github.com/jlagedo/atelier/services/internal/vm"
+	"github.com/jlagedo/atelier/services/internal/vmm"
 	"github.com/jlagedo/atelier/services/internal/vsock"
 )
 
@@ -26,7 +26,7 @@ type Broker struct {
 	start time.Time
 	log   *slog.Logger
 	gate  Gate
-	vms   *vm.Manager
+	vms   *vmm.Manager
 
 	// egress is the Network-door policy (design.md §10 — S4.1): a runtime-settable,
 	// default-deny allowlist the guest's user-mode network (gvisor) consults. The
@@ -80,7 +80,7 @@ func New(log *slog.Logger, gate Gate) *Broker {
 		start:   time.Now(),
 		log:     log,
 		gate:    gate,
-		vms:     vm.NewManager(log, egress),
+		vms:     vmm.NewManager(log, egress),
 		egress:  egress,
 		mounts:  make(map[string]mountInfo),
 		opLocks: make(map[string]*sync.Mutex),
@@ -214,7 +214,7 @@ func (b *Broker) createVM(ctx context.Context, params json.RawMessage) (any, err
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "createVM: " + err.Error()}
 	}
-	if err := b.vms.Create(ctx, vm.VMConfig{
+	if err := b.vms.Create(ctx, vmm.VMConfig{
 		ID:         p.ID,
 		KernelPath: p.KernelPath,
 		InitrdPath: p.InitrdPath,

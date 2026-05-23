@@ -48,7 +48,7 @@ Four processes, three hops (plus the guestd↔agent stdio channel).
 │   rpc.Server  →  broker.Register(...)                                          │
 │   authorize(method, door) ── Gate (policy.go) + audit log (audit.go)          │
 │        doors: compute | files | network                                       │
-│   vm.Manager ── HCS via own computecore.dll bindings + go-winio hvsock        │
+│   vmm.Manager ── HCS via own computecore.dll bindings + go-winio hvsock        │
 │   netjail.Allowlist ── default-deny egress policy (live, no reboot)           │
 └───────┬───────────────────────────┬───────────────────────────────┬─────────┘
         │ CONTROL plane             │ FILES door                    │ NETWORK door
@@ -138,6 +138,6 @@ Renderer onEvent(...) renders text/tool_use/turn_done
 - Hop 2 transport: `services/internal/rpc/transport_windows.go` (`DefaultAddress`)
 - Broker + gate: `services/internal/broker/broker.go`, `policy.go`, `audit.go`
 - Method/protocol surface: `services/pkg/protocol/protocol.go`
-- Hop 3 control plane: `services/internal/vm/guest_windows.go` (`DialGuest`),
+- Hop 3 control plane: `services/internal/vmm/driver_windows.go` (`DialGuest`),
   `services/cmd/guestd/main.go`, `services/internal/vsock/vsock.go` (ports)
 - In-guest agent: `packages/agent/src/cli-guest.ts`
