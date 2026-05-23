@@ -32,7 +32,9 @@ require (
 	golang.org/x/tools v0.43.0 // indirect
 )
 
-// S6: local fork adds runtime virtio-fs share mutation (VirtualMachine.DirectorySharingDevices
-// + VirtioFileSystemDevice.SetShare) that upstream v3.7.1 doesn't expose. Patch lives at
-// ~/Developer/vz on branch feat/runtime-directory-share; PR upstream once validated, then drop this.
-replace github.com/Code-Hex/vz/v3 => /Users/jlagedo/Developer/vz
+// S6: forked Code-Hex/vz adds runtime virtio-fs share mutation
+// (VirtualMachine.DirectorySharingDevices + VirtioFileSystemDevice.SetShare) that upstream
+// v3.7.1 doesn't expose. The fork is checked out as the `third_party/vz` git submodule
+// (github.com/jlagedo/vz, branch feat/runtime-directory-share), pinned by commit so the build
+// is reproducible without a machine-local clone. PR upstream once validated, then drop this.
+replace github.com/Code-Hex/vz/v3 => ../third_party/vz
