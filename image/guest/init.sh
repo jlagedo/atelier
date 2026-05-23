@@ -60,6 +60,11 @@ fi
 modprobe hv_sock 2>/dev/null || true
 modprobe vmw_vsock_virtio_transport 2>/dev/null || true
 
+# Files door: load the virtio-fs client so guestd can `mount -t virtiofs <tag> <target>`
+# the host shares (S6, macOS/Virtualization.framework). Tolerant like the vsock loads:
+# it no-ops where virtiofs is built-in or absent (e.g. the Hyper-V bundle, which mounts 9p).
+modprobe virtiofs 2>/dev/null || true
+
 # guestd becomes the long-running PID 1. Fall back to a shell if it isn't shipped
 # (e.g. a bundle built without it) so the VM still boots and stays debuggable.
 if [ -x /usr/sbin/guestd ]; then

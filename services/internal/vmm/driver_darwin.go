@@ -62,6 +62,13 @@ type darwinInstance struct {
 	// socket is the runtime virtio-socket device, cached on Start for S5's
 	// DialGuest (VZVirtioSocketDevice.connect(toPort:)). Nil until started.
 	socket *vz.VirtioSocketDevice
+	// fsdev is the runtime virtio-fs device, cached on Start for S6's AttachWorkspace
+	// (VZVirtioFileSystemDevice.share swap on the live device). Nil until started.
+	fsdev *vz.VirtioFileSystemDevice
+	// shares is the authoritative tag->dir set the host has applied to fsdev. The device
+	// exposes no readable getter, so the driver tracks the set here and rebuilds the whole
+	// share on every attach/detach. Guarded by darwinDriver.mu.
+	shares map[string]*vz.SharedDirectory
 }
 
 // NewDriver returns the macOS Virtualization.framework VMM driver.
@@ -139,9 +146,10 @@ func (d *darwinDriver) Create(_ context.Context, cfg VMConfig) error {
 	}
 	config.SetSocketDevicesVirtualMachineConfiguration([]vz.SocketDeviceConfiguration{sock})
 
-	// Virtio-fs: one device, tagged for the default workspace, with an empty
-	// share for now. S6 mutates its share to mount workspaces; created here so the
-	// device exists at boot.
+	// Virtio-fs: one device, tagged for the default workspace, with an empty share.
+	// S6's AttachWorkspace swaps this device's share at runtime (the forked vz binding
+	// exposes VZVirtioFileSystemDevice.share get/set); it's created here so the device
+	// exists from boot for the guest to mount.
 	fs, err := vz.NewVirtioFileSystemDeviceConfiguration(vsock.WorkspaceShareTag)
 	if err != nil {
 		return fmt.Errorf("vm: filesystem device: %w", err)
@@ -210,11 +218,16 @@ func (d *darwinDriver) Start(ctx context.Context, id string) error {
 	if err := waitForState(ctx, inst.vm, vz.VirtualMachineStateRunning, startTimeout); err != nil {
 		return fmt.Errorf("vm: %q did not reach running: %w", id, err)
 	}
+	// Cache the runtime devices the control plane and files door dial into. They only
+	// exist after the VM reaches running; we configured exactly one of each in Create.
+	d.mu.Lock()
 	if devs := inst.vm.SocketDevices(); len(devs) > 0 {
-		d.mu.Lock()
 		inst.socket = devs[0]
-		d.mu.Unlock()
 	}
+	if devs := inst.vm.DirectorySharingDevices(); len(devs) > 0 {
+		inst.fsdev = devs[0]
+	}
+	d.mu.Unlock()
 	d.log.Info("vm running", "vm", id)
 	return nil
 }
@@ -305,14 +318,111 @@ func (d *darwinDriver) DialGuest(ctx context.Context, id string, port uint32) (n
 	return nil, fmt.Errorf("vm: dial guest %q (vsock %d): %w", id, port, lastErr)
 }
 
-// AttachWorkspace mounts a host folder over virtio-fs. Implemented in S6.
-func (*darwinDriver) AttachWorkspace(context.Context, string, WorkspaceShare) error {
-	return ErrUnsupported
+// AttachWorkspace shares a host folder into the running guest over virtio-fs (S6).
+// VZ has no incremental "add directory" call: the share is swapped wholesale, so the
+// driver keeps the authoritative tag->dir set in inst.shares, folds in the new entry,
+// rebuilds the VZDirectoryShare, and SetShares it on the live device. share.Port is
+// ignored — virtio-fs is tag-addressed, not vsock-port-addressed (that field is the
+// Windows 9p path). The guest mounts the result with `mount -t virtiofs` (guestd).
+func (d *darwinDriver) AttachWorkspace(_ context.Context, id string, share WorkspaceShare) error {
+	if err := validateShareTag(share.Tag); err != nil {
+		return err
+	}
+	inst := d.instance(id)
+	if inst == nil {
+		return fmt.Errorf("vm: %q not found", id)
+	}
+	// NewSharedDirectory os.Stat()s the path; the broker already canonicalized it.
+	sd, err := vz.NewSharedDirectory(share.HostPath, share.ReadOnly)
+	if err != nil {
+		return fmt.Errorf("vm: shared directory %q: %w", share.HostPath, err)
+	}
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if inst.fsdev == nil {
+		return fmt.Errorf("vm: %q has no filesystem device (not started?)", id)
+	}
+	next := cloneShares(inst.shares)
+	next[share.Tag] = sd
+	dshare, err := buildShare(next)
+	if err != nil {
+		return fmt.Errorf("vm: build share: %w", err)
+	}
+	inst.fsdev.SetShare(dshare)
+	inst.shares = next
+	return nil
 }
 
-// DetachWorkspace removes a virtio-fs share. Implemented in S6.
-func (*darwinDriver) DetachWorkspace(context.Context, string, WorkspaceShare) error {
-	return ErrUnsupported
+// DetachWorkspace drops a tag from the live virtio-fs share (S6). Idempotent: removing
+// an absent tag is a no-op. Like AttachWorkspace, it rebuilds and swaps the whole share.
+func (d *darwinDriver) DetachWorkspace(_ context.Context, id string, share WorkspaceShare) error {
+	inst := d.instance(id)
+	if inst == nil {
+		return fmt.Errorf("vm: %q not found", id)
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if inst.fsdev == nil {
+		return fmt.Errorf("vm: %q has no filesystem device (not started?)", id)
+	}
+	if _, ok := inst.shares[share.Tag]; !ok {
+		return nil
+	}
+	next := cloneShares(inst.shares)
+	delete(next, share.Tag)
+	dshare, err := buildShare(next)
+	if err != nil {
+		return fmt.Errorf("vm: build share: %w", err)
+	}
+	inst.fsdev.SetShare(dshare)
+	inst.shares = next
+	return nil
+}
+
+// cloneShares copies the tag->dir set so a failed rebuild never leaves the tracked state
+// half-mutated (SetShare is applied, then the new set is committed).
+func cloneShares(in map[string]*vz.SharedDirectory) map[string]*vz.SharedDirectory {
+	out := make(map[string]*vz.SharedDirectory, len(in)+1)
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+// buildShare maps the tracked set onto a VZDirectoryShare. One entry uses a
+// SingleDirectoryShare so the guest's `mount -t virtiofs <tag> <target>` lands the
+// directory directly at <target> (the S6 single-workspace shape). Zero entries clears the
+// device with an empty MultipleDirectoryShare. Two or more expose each entry as a named
+// subdirectory — the multi-session target semantics are settled in S7.
+func buildShare(shares map[string]*vz.SharedDirectory) (vz.DirectoryShare, error) {
+	if len(shares) == 1 {
+		for _, sd := range shares {
+			return vz.NewSingleDirectoryShare(sd)
+		}
+	}
+	return vz.NewMultipleDirectoryShare(shares)
+}
+
+// validateShareTag bounds the share tag before it reaches the framework / guest mount.
+// Apple's VZVirtioFileSystemDeviceConfiguration rejects tags of 36+ bytes; the same bound
+// is applied here, with a conservative charset that is also a safe virtio-fs directory name.
+func validateShareTag(tag string) error {
+	if tag == "" {
+		return errors.New("vm: empty share tag")
+	}
+	if len(tag) >= 36 {
+		return fmt.Errorf("vm: share tag %q too long (max 35 bytes)", tag)
+	}
+	for i := 0; i < len(tag); i++ {
+		c := tag[i]
+		ok := c == '-' || c == '_' || c == '.' ||
+			(c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+		if !ok {
+			return fmt.Errorf("vm: invalid share tag %q (allowed: A-Z a-z 0-9 . _ -)", tag)
+		}
+	}
+	return nil
 }
 
 // StartEgress re-hosts the gvisor-tap-vsock jail over a VZ vsock listener.

@@ -20,6 +20,10 @@ const GuestRPCPort uint32 = 5000
 // guest, which mounts the share with `trans=fd` over the resulting socket. The
 // value (564, the IANA 9p port) matches hcsshim's LCOW convention; both ends
 // import this so they can never drift.
+//
+// These Plan9 vsock ports (and WorkspaceShare.Port) are Windows/9p-only. On macOS
+// the files door is virtio-fs, which is tag-addressed, not vsock-port-addressed
+// (S6): the darwin driver ignores Port, and guestd mounts `-t virtiofs <tag>`.
 const WorkspacePlan9Port uint32 = 564
 
 // WorkspaceShareTag is the 9p share name: the host doc's Plan9Share AccessName

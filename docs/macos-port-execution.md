@@ -3,7 +3,7 @@
 > **Companion to [`macos-port-plan.md`](./macos-port-plan.md).** That doc decides *what*
 > and *why* (architecture, API validation, framework mapping). This doc is the **execution
 > tracker**: it cuts the port into thin, reviewable, demoable slices and records progress.
-> **Last updated:** 2026-05-23 (S5 landed).
+> **Last updated:** 2026-05-23 (S6 landed).
 
 ## How to use this doc
 
@@ -32,7 +32,7 @@
 | S3 | desktop bundle/arch resolution | M2 | ☑ `c0ca554` | — |
 | S4 | dev signing + macOS boot spike (Create/Start/Stop) | M3 | ☑ | — |
 | S5 | guest control plane — `DialGuest` + `exec` | M4 | ☑ | — |
-| S6 | virtio-fs single workspace share | M5 | ☐ | |
+| S6 | virtio-fs single workspace share | M5 | ☑ | — |
 | S7 | runtime add/remove + multi-session smoke test | M5 | ☐ | |
 | S8 | agent loop end-to-end (NAT crutch allowed) | M6 | ☐ | |
 | S9 | network containment — vsock egress seam, drop NAT | M7 | ☐ | |
@@ -238,7 +238,7 @@ S4 NAT crutch for egress until S9 replaces it.
 
 ---
 
-### S6 — virtio-fs single workspace share  ☐
+### S6 — virtio-fs single workspace share  ☑
 
 - **Goal:** mount **one** host workspace into the running guest via virtio-fs (the files door).
 - **Work:**
@@ -259,6 +259,35 @@ S4 NAT crutch for egress until S9 replaces it.
   host file jail still mediates `readFile`/`writeFile` (guest mount is convenience only).
 - **Depends:** S5.
 - **Risk:** Medium. Guest mount branch + tag rules (charset/length undocumented).
+- **Landed (2026-05-23):** the planned `AttachWorkspace` hit a **binding gap** — Apple's
+  framework exposes runtime virtio-fs share mutation (`VZVirtioFileSystemDevice.share`
+  get/set, macOS 12+, via `VZVirtualMachine.directorySharingDevices`), but `Code-Hex/vz`
+  v3.7.1 (and upstream `main`) only expose the **config-time** `SetDirectoryShare`; the
+  `internal/objc` package is unimportable and `*vz.VirtualMachine` hides its raw pointer, so
+  the runtime accessor can't be added with a local shim.
+  - **Fork** (`github.com/jlagedo/vz`, cloned to `~/Developer/vz`, branch
+    `feat/runtime-directory-share` off `v3.7.1`): added `VirtualMachine.DirectorySharingDevices()`
+    + runtime `VirtioFileSystemDevice.SetShare` (mirrors `SocketDevices`; `setShare` runs on the
+    VM's serial dispatch queue). Wired via `replace github.com/Code-Hex/vz/v3 =>
+    /Users/jlagedo/Developer/vz` in `services/go.mod`. **Upstream PR deferred** until the change
+    is exercised more broadly (the `replace` + fork are the interim).
+  - **Host** (`driver_darwin.go`): caches the runtime `fsdev` on `Start` (next to `socket`),
+    tracks an authoritative `shares map[string]*vz.SharedDirectory` (the device has no readable
+    getter), and on attach/detach rebuilds the whole share and swaps it with `fsdev.SetShare`.
+    `buildShare`: 1 entry → `SingleDirectoryShare` (clean `/workspace`), else
+    `MultipleDirectoryShare`. `share.Port` ignored; `validateShareTag` (non-empty, <36, charset).
+  - **Guest** (`mount_linux.go` + `init.sh`): `mountShare` chooses transport at **runtime** —
+    `mount -t virtiofs <tag>` when `virtiofs` ∈ `/proc/filesystems`, else falls back to the
+    9p-over-vsock path (Hyper-V unaffected). `init.sh` adds a tolerant `modprobe virtiofs`.
+  - **Verified end-to-end** on Apple Silicon: rebuilt the `darwin-arm64-vz` bundle + re-signed
+    broker; `attachWorkspace` mounts the host dir as `workspace on /workspace type virtiofs (rw)`;
+    host contents readable; a **live** host write after mount is visible in the guest; guest write
+    visible on host; `detachWorkspace` unmounts; **re-attach is idempotent**; clean `stopVM`.
+    Serial: `virtiofs virtio3` probe → `guestd listening` → `mounted share … tag=workspace` →
+    `unmounted share`. `GOOS=windows` still builds (replace is darwin-cgo-only).
+  - **Deferred to S7:** the single-vs-multiple-share topology verdict and the "share added after
+    `start()` visible without a remount" smoke test (S6 sidesteps it — the guest mounts *after* the
+    host `SetShare`, so the mount is the nudge).
 
 ---
 
