@@ -28,8 +28,8 @@
 |---|---|---|---|---|
 | S0 | Driver seam (Driver/Manager, build tags) | M0 | ☑ `03a78ae` | — |
 | S1 | darwin build-tag split + compiling stub | M3 (pre) | ☑ `cc094d6` | — |
-| S2 | arm64 guest bundle (`darwin-arm64-vz`, raw ext4) | M2 | ☑ | _pending commit_ |
-| S3 | desktop bundle/arch resolution | M2 | ☑ | _pending commit_ |
+| S2 | arm64 guest bundle (`darwin-arm64-vz`, raw ext4) | M2 | ☑ `2d2db72` | — |
+| S3 | desktop bundle/arch resolution | M2 | ☑ `c0ca554` | — |
 | S4 | dev signing + macOS boot spike (Create/Start/Stop) | M3 | ☐ | |
 | S5 | guest control plane — `DialGuest` + `exec` | M4 | ☐ | |
 | S6 | virtio-fs single workspace share | M5 | ☐ | |
