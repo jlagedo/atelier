@@ -54,9 +54,11 @@ build/<config>/
   desktop/                       # packaged Electron app
 ```
 
-Flags: `--deep` (also wipe `node_modules` + image cache for a true from-zero), `--no-verify`,
-`--skip-image` (host-only, fast), and `--only=host|image|desktop` to build a single phase. Then run
-as below.
+By default this **skips the heavy rootfs/kernel/initrd image** (it changes rarely) and only rebuilds
+the small `guestd` volume next to a reused image — pass `--image` to build the whole bundle. Other
+flags: `--deep` (also wipe `node_modules` + image cache for a true from-zero), `--no-verify`, and
+`--only=host|image|desktop` to build a single phase (`--only=image` always builds the full image).
+Then run as below.
 
 ### Build one phase at a time
 

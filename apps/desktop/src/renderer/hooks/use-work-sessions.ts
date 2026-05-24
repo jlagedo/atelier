@@ -57,8 +57,12 @@ function reduceItems(items: ChatItem[], ev: LoopEvent): ChatItem[] {
         ...items,
         { kind: "policy", id: rid(), policy: { id: rid(), action: ev.action, target: ev.detail, decision: ev.decision, reason: ev.reason } },
       ];
+    case "error":
+      // The loop's failure reason — show it instead of silently flipping to the
+      // error badge with an empty transcript.
+      return [...items, { kind: "message", id: rid(), role: "assistant", content: `⚠️ Agent error: ${ev.message}` }];
     default:
-      return items; // init/context/result/turn_done/error carry no chat item
+      return items; // init/context/result/turn_done carry no chat item
   }
 }
 
@@ -197,7 +201,7 @@ export function useWorkSessions(): WorkSessionsApi {
       update(id, (s) =>
         withStatus({ ...s, items: [...s.items, { kind: "message", id: rid(), role: "user", content: text }] }, "running"),
       );
-      void api.sendMessage(id, text).catch(() => undefined);
+      void api.sendMessage(id, text).catch((err: unknown) => console.error("work.sendMessage failed", err));
     },
     [update],
   );
@@ -207,13 +211,14 @@ export function useWorkSessions(): WorkSessionsApi {
     const api = window.atelier?.work;
     setSessions((prev) => {
       const s = prev.get(id);
-      if (s && s.status === "inactive" && api) void api.resumeSession(id).catch(() => undefined);
+      if (s && s.status === "inactive" && api)
+        void api.resumeSession(id).catch((err: unknown) => console.error("work.resumeSession failed", err));
       return prev;
     });
   }, []);
 
   const close = useCallback((id: string): void => {
-    void window.atelier?.work?.closeSession(id).catch(() => undefined);
+    void window.atelier?.work?.closeSession(id).catch((err: unknown) => console.error("work.closeSession failed", err));
     setSessions((prev) => {
       const next = new Map(prev);
       next.delete(id);

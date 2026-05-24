@@ -60,15 +60,20 @@ Generated/build output is gitignored: `build/` (the orchestrator's staged artifa
 verifies everything from zero and writes **every artifact into one tree**, `build/<config>/`:
 
 ```sh
-npm run build:all                      # debug (default): clean + build all + verify -> build/debug/
+npm run build:all                      # debug (default): host + desktop + guestd volume; full image skipped -> build/debug/
+npm run build:all -- --image           # also build the heavy VM image (rootfs+kernel+initrd) -> build/debug/
 npm run build:all -- --config=release  # stripped Go + self-contained               -> build/release/
 npm run build:all -- --only=host       # one phase: protocol + host/vmctl (codesigned on macOS)
-npm run build:all -- --only=image      # one phase: VM image bundle
+npm run build:all -- --only=image      # one phase: full VM image bundle
 npm run build:all -- --only=desktop    # one phase: packaged desktop app
 npm run build:all -- --deep            # true from-zero: also wipe node_modules + image/.work
 npm run build:all -- --no-verify       # skip tests/typecheck/lint
-npm run build:all -- --skip-image      # fast host-only iteration (skip the Docker image)
 ```
+
+The full rootfs/kernel/initrd image is the heavy, rarely-changing part, so the default run **skips it**
+and only (re)builds the `guestd` volume (~10s) next to a reused image — pass `--image` (or `--only=image`)
+to rebuild the whole bundle. The `guestd` volume is **always** built when the image phase runs; both
+the default and `--image` need Docker.
 
 `build/<config>/` layout: `host(.exe)` + `vmctl(.exe)` (Go broker + dev CLI, broker codesigned on
 macOS), `image/<target>/` (the VM bundle), `desktop/` (packaged Electron app).

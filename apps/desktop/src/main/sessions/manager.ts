@@ -364,7 +364,13 @@ export class SessionManager {
       DISABLE_AUTOUPDATER: "1",
       DISABLE_TELEMETRY: "1",
       DISABLE_ERROR_REPORTING: "1",
-      HOME: "/root",
+      // Non-root agent (CRIT-01): the loop runs as uid 1001 with /opt read-only, so
+      // HOME/TMPDIR/cache must be writable tmpfs paths or the SDK's native `claude`
+      // binary can't launch ("exists but failed to launch"). Mirror vmctl agent's
+      // genv (services/cmd/vmctl/main.go) — /home/atelier + /tmp are tmpfs (init.sh).
+      HOME: "/home/atelier",
+      TMPDIR: "/tmp",
+      XDG_CACHE_HOME: "/home/atelier/.cache",
     };
     for (const k of ["ATELIER_MODEL", "ANTHROPIC_BASE_URL"]) {
       const v = process.env[k];
@@ -382,7 +388,12 @@ export class SessionManager {
   }
 
   private onOutput(s: LiveSession, stream: OutputStream, data: Buffer): void {
-    if (stream === "stderr") return; // guest loop diagnostics; not part of the wire
+    if (stream === "stderr") {
+      // Not part of the JSON wire, but it's where the in-guest loop's crashes and
+      // stack traces surface — log it so a failing turn isn't silent (was: dropped).
+      process.stderr.write(`[guest ${s.appId}] ${data.toString("utf8")}`);
+      return;
+    }
     s.stdoutBuf += data.toString("utf8");
     for (;;) {
       const nl = s.stdoutBuf.indexOf("\n");
@@ -394,6 +405,7 @@ export class SessionManager {
       try {
         ev = JSON.parse(line) as LoopEvent;
       } catch {
+        console.error(`[session ${s.appId}] dropping malformed loop output: ${line}`);
         continue;
       }
       this.handleEvent(s, ev);
@@ -414,6 +426,11 @@ export class SessionManager {
       s.exportWaiter = undefined;
       return;
     }
+    if (ev.type === "error") {
+      // The loop's real failure (model call, TLS, egress) arrives here on stdout,
+      // not stderr — log it so the cause isn't lost (renderer aside) the way it was.
+      console.error(`[session ${s.appId}] loop error: ${ev.message}`);
+    }
     if (RENDERABLE.has(ev.type)) s.transcript.push(ev);
     this.emit.event(s.appId, ev);
     if (ev.type === "turn_done") {
@@ -427,7 +444,9 @@ export class SessionManager {
     if (s.intentionalStop || s.status === "hibernating" || s.status === "inactive") return;
     // Unexpected exit while we believed it active.
     s.status = "error";
-    this.emit.event(s.appId, { type: "error", message: err ? String(err) : `agent loop exited (code ${code ?? "?"})` });
+    const message = err ? String(err) : `agent loop exited (code ${code ?? "?"})`;
+    console.error(`[session ${s.appId}] ${message}`);
+    this.emit.event(s.appId, { type: "error", message });
     this.setStatus(s, "error");
     void this.store.patch(s.appId, { status: "inactive" });
   }

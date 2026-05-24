@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent } from "electron";
 import path from "node:path";
 import { IpcChannel } from "./channels";
 import { HostClient } from "../host-client";
@@ -14,6 +14,20 @@ function broadcast(channel: string, payload: unknown): void {
   for (const w of BrowserWindow.getAllWindows()) {
     if (!w.isDestroyed()) w.webContents.send(channel, payload);
   }
+}
+
+// Like ipcMain.handle, but logs a rejection in main before re-throwing it across the
+// bridge — otherwise a failed WORK action is invisible (the renderer can't see main's
+// stack, and our renderer callers swallow the rejection).
+function handle(channel: string, listener: (e: IpcMainInvokeEvent, ...args: any[]) => unknown): void {
+  ipcMain.handle(channel, async (e, ...args) => {
+    try {
+      return await listener(e, ...args);
+    } catch (err) {
+      console.error(`[ipc ${channel}]`, err);
+      throw err;
+    }
+  });
 }
 
 // Hop 1 (design.md §8): typed ipcMain handlers, the renderer's only path into main.
@@ -39,16 +53,16 @@ export function registerIpcHandlers(): IpcBackend {
   const manager = new SessionManager(host, store, emit, { bundleBaseDir });
   void manager.init();
 
-  ipcMain.handle(IpcChannel.WorkListSessions, () => manager.listSessions());
-  ipcMain.handle(IpcChannel.WorkHostStatus, () => manager.hostStatus());
-  ipcMain.handle(IpcChannel.WorkPickFolder, async () => {
+  handle(IpcChannel.WorkListSessions, () => manager.listSessions());
+  handle(IpcChannel.WorkHostStatus, () => manager.hostStatus());
+  handle(IpcChannel.WorkPickFolder, async () => {
     const r = await dialog.showOpenDialog({ properties: ["openDirectory"] });
     return r.canceled || r.filePaths.length === 0 ? null : r.filePaths[0];
   });
-  ipcMain.handle(IpcChannel.WorkOpenSession, (_e, folder: string) => manager.openSession(folder));
-  ipcMain.handle(IpcChannel.WorkSendMessage, (_e, appId: string, text: string) => manager.sendMessage(appId, text));
-  ipcMain.handle(IpcChannel.WorkResumeSession, (_e, appId: string) => manager.resume(appId));
-  ipcMain.handle(IpcChannel.WorkCloseSession, (_e, appId: string) => manager.closeSession(appId));
+  handle(IpcChannel.WorkOpenSession, (_e, folder: string) => manager.openSession(folder));
+  handle(IpcChannel.WorkSendMessage, (_e, appId: string, text: string) => manager.sendMessage(appId, text));
+  handle(IpcChannel.WorkResumeSession, (_e, appId: string) => manager.resume(appId));
+  handle(IpcChannel.WorkCloseSession, (_e, appId: string) => manager.closeSession(appId));
 
   return { shutdown: () => manager.shutdown() };
 }

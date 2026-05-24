@@ -16,14 +16,14 @@
 // Zero deps.
 //
 // Usage:
-//   node scripts/build-all.mjs                      debug (default): clean(light) + build all + verify
+//   node scripts/build-all.mjs                      debug (default): host + desktop + guestd volume (full VM image skipped)
 //   node scripts/build-all.mjs --config=release     strip Go symbols, self-contained build/release
 //   node scripts/build-all.mjs --only=host          just protogen + host binaries (+codesign on mac)
 //   node scripts/build-all.mjs --only=image         just the VM image bundle
 //   node scripts/build-all.mjs --only=desktop       just the packaged desktop app
 //   node scripts/build-all.mjs --deep               true from-zero: also wipe node_modules + image/.work
 //   node scripts/build-all.mjs --no-verify          build artifacts only
-//   node scripts/build-all.mjs --skip-image         fast host-only iteration (skip the heavy Docker image)
+//   node scripts/build-all.mjs --image              also build the heavy VM image (rootfs+kernel+initrd); off by default
 //
 // All artifacts land in build/<config>/: host(.exe), vmctl(.exe), image/<target>/, desktop/.
 
@@ -41,12 +41,12 @@ const target = isMac ? 'darwin-arm64-vz' : 'windows-amd64-hyperv';
 
 // ----- args ---------------------------------------------------------------------------------------
 
-const flags = { config: 'debug', deep: false, verify: true, skipImage: false, only: null };
+const flags = { config: 'debug', deep: false, verify: true, image: false, only: null };
 const phases = ['host', 'image', 'desktop'];
 for (const a of process.argv.slice(2)) {
   if (a === '--deep') flags.deep = true;
   else if (a === '--no-verify') flags.verify = false;
-  else if (a === '--skip-image') flags.skipImage = true;
+  else if (a === '--image' || a === '--with-image') flags.image = true;
   else if (a === '--release' || a === '--config=release') flags.config = 'release';
   else if (a === '--debug' || a === '--config=debug') flags.config = 'debug';
   else if (a.startsWith('--only=')) {
@@ -59,10 +59,13 @@ for (const a of process.argv.slice(2)) {
   } else die(`unknown flag: ${a} (try --help)`);
 }
 
-// Which phases run this invocation. --only narrows to one; otherwise all three. The image phase is
-// additionally gated by --skip-image.
+// Which phases run this invocation. --only narrows to one; otherwise all three.
 const want = (p) => !flags.only || flags.only === p;
-const buildImage = want('image') && !flags.skipImage;
+// The image phase always (re)builds the cheap guestd volume; the heavy rootfs+kernel+initrd image
+// is opt-in (--image, or implied by --only=image). So a default run produces a fresh guestd next
+// to a reused image, and `--image` / `--only=image` rebuilds the whole bundle.
+const buildFullImage = want('image') && (flags.image || flags.only === 'image');
+const buildGuestd = want('image') && !buildFullImage;
 
 // ----- tiny helpers -------------------------------------------------------------------------------
 
@@ -140,9 +143,11 @@ function preflight() {
   if (!isMac && !isWin) die(`unsupported platform '${process.platform}' (darwin or win32 only)`);
 
   const required = ['node', 'npm', 'go', 'git'];
-  if (buildImage) {
+  if (want('image')) {
+    // Both the full image and the guestd-only default run image/build.sh (bash + Docker; via wsl on
+    // Windows) — guestd's volume is mke2fs'd inside the imager container, so it needs Docker too.
     required.push('docker');
-    required.push(isWin ? 'wsl' : 'bash'); // image build is bash + Docker (via wsl on Windows); no make
+    required.push(isWin ? 'wsl' : 'bash'); // no make
   }
   if (isMac && want('host')) required.push('codesign'); // ad-hoc sign the broker for the VZ entitlement
 
@@ -153,13 +158,14 @@ function preflight() {
   info(`npm     ${tryCapture(isWin ? 'npm.cmd' : 'npm', ['--version'], { shell: isWin }) ?? '?'}`);
   info(`go      ${(tryCapture('go', ['version']) ?? '?').replace(/^go version /, '')}`);
   info(`git     ${(tryCapture('git', ['--version']) ?? '?').replace(/^git version /, '')}`);
-  if (buildImage) {
+  if (want('image')) {
     info(`docker  ${tryCapture('docker', ['--version']) ?? '?'}`);
     if (tryCapture('docker', ['info', '--format', '{{.ServerVersion}}']) === null)
-      die('docker daemon is not reachable (start OrbStack/Docker Desktop, or pass --skip-image)');
+      die('docker daemon is not reachable (start OrbStack/Docker Desktop, or build host/desktop only with --only=)');
   }
+  const imageMode = !want('image') ? 'none' : buildFullImage ? 'full' : 'guestd-only';
   info(`platform ${process.platform} -> config=${flags.config}, target=${target}, ` +
-    `phases=${flags.only ?? 'all'}${flags.deep ? ', deep' : ''}${flags.skipImage ? ', skip-image' : ''}${flags.verify ? '' : ', no-verify'}`);
+    `phases=${flags.only ?? 'all'}, image=${imageMode}${flags.deep ? ', deep' : ''}${flags.verify ? '' : ', no-verify'}`);
 }
 
 function submodule() {
@@ -180,8 +186,8 @@ function clean() {
     rm('services/bin', `${b}.exe`);
   }
 
-  // Only remove the build/<config>/ subtrees the running phases will rebuild — so --only and
-  // --skip-image never destroy a sibling artifact (e.g. the ~4GB image bundle on a host-only run).
+  // Only remove the build/<config>/ subtrees the running phases will rebuild — so --only and the
+  // guestd-only default never destroy a sibling artifact (e.g. the ~4GB image bundle).
   const cleaned = [];
   if (want('host')) {
     rm('build', flags.config, `host${exe}`);
@@ -194,9 +200,14 @@ function clean() {
     rm('build', flags.config, 'desktop');
     cleaned.push('desktop/');
   }
-  if (buildImage) {
+  if (buildFullImage) {
     rm('build', flags.config, 'image', target);
     cleaned.push(`image/${target}/`);
+  } else if (buildGuestd) {
+    // Default path: rebuild only the guestd volume, leaving any prior rootfs/kernel/initrd in place.
+    for (const f of ['guestd.raw', 'guestd.vhd', 'guestd.raw.origin', 'guestd.vhd.origin'])
+      rm('build', flags.config, 'image', target, f);
+    cleaned.push(`image/${target}/guestd.*`);
   }
   info(`removed generated code, services/bin, build/${flags.config}/{${cleaned.join(', ')}}`);
 
@@ -204,9 +215,10 @@ function clean() {
     for (const d of ['', 'apps/desktop', 'packages/agent', 'packages/provider', 'packages/protocol', 'tools/protogen'])
       rm(d, 'node_modules');
     info('removed all node_modules');
-    if (buildImage) {
+    if (buildFullImage) {
       // Wipe Docker scratch (.work/<target>) so the rootfs is fully re-exported (the Docker layer
       // cache still persists). build.sh clean removes $WORK and $OUT (build/<config>/image/<target>).
+      // Guestd-only runs skip this — it would delete the reused rootfs/kernel/initrd.
       imageRun('clean');
       info('wiped image/.work (full rootfs re-export on next build)');
     }
@@ -244,15 +256,19 @@ function hostBuild() {
 }
 
 function imageBuild() {
-  if (flags.skipImage) {
-    section('VM image (skipped)');
-    return;
-  }
-  section('VM image bundle');
   if (isWin)
     warn("Windows image build runs under WSL2 and is not verified from this repo author's macOS machine");
-  imageRun('all'); // -> build/<config>/image/<target>/{vmlinuz,initrd,rootfs.*,*.origin,manifest.txt}
-  info(`image/${target}/ -> build/${flags.config}/image/${target}/`);
+  if (buildFullImage) {
+    section('VM image bundle (full: rootfs+kernel+initrd+guestd)');
+    imageRun('all'); // -> build/<config>/image/<target>/{vmlinuz,initrd,rootfs.*,guestd.*,*.origin,manifest.txt}
+    info(`image/${target}/ -> build/${flags.config}/image/${target}/`);
+  } else {
+    // Default: the heavy image is skipped; only the guestd volume is (re)built — fast (~10s) and the
+    // piece that iterates most. The rootfs/kernel/initrd are reused from a prior --image run.
+    section('VM image: guestd volume only (full image skipped — pass --image to build it)');
+    imageRun('guestd'); // -> build/<config>/image/<target>/guestd.{raw,vhd}
+    info(`image/${target}/guestd.* -> build/${flags.config}/image/${target}/`);
+  }
 }
 
 // Text of the dev launcher staged at build/<config>/run.sh. It points the packaged app at THIS
@@ -318,7 +334,7 @@ function desktop() {
 
   // Stage a self-contained dev launcher next to host/vmctl/desktop/image so the workflow is just
   // `cd build/<config> && ./run.sh`. It self-validates the tree and errors clearly if a phase is
-  // missing (e.g. ran with --skip-image), so it's safe to write whenever the desktop phase runs.
+  // missing (e.g. the default run that skips the full image), so it's safe to write whenever the desktop phase runs.
   if (isMac) {
     const launcher = rel('build', flags.config, 'run.sh');
     fs.mkdirSync(path.dirname(launcher), { recursive: true });
@@ -345,7 +361,7 @@ function verify() {
   run('go', ['-C', 'services', 'build', './...'], { env: { GOOS: 'windows', CGO_ENABLED: '0' } });
   // guestd is cross-compiled into the rootfs by the image build, so the host builds above only
   // exercise its !linux stubs. Compile it for its real linux target too, so a break in
-  // egress/mount/sandbox _linux.go is caught here even when --skip-image is set.
+  // egress/mount/sandbox _linux.go is caught here even when the full image build is skipped.
   const guestArch = isMac ? 'arm64' : 'amd64';
   const probe = rel('build', flags.config, `.guestd-probe-${process.pid}`);
   fs.mkdirSync(path.dirname(probe), { recursive: true });

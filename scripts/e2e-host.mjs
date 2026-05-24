@@ -14,7 +14,7 @@
 //
 // Coverage (a real boot, so VZ + a codesigned broker + the image bundle are required):
 //   getStatus  createVM  startVM  setTime  exec  execInput  attachWorkspace  detachWorkspace
-//   readFile   writeFile setEgressPolicy  stopVM   + the guest agent loop (Topology B)
+//   readFile   writeFile setEgressPolicy  stopVM   + the guest agent loop (Topology B: one-shot + serve)
 // The Files door is host-side and jailed to the legacy /workspace root, while the same folder is
 // exposed to guest exec over the fs share (virtio-fs on VZ, 9p on HCS) — so we prove the
 // host<->guest bridge in both directions. egress is
@@ -485,6 +485,128 @@ async function runBattery(work) {
     const r = vmctl('agent', ['-id', 'vm0', '--', taskText], { timeout: 180000 });
     assert(r.status === 0, `agent exited ${r.status}: ${tail(r.err)}`);
     assert((r.out + r.err).includes(token), `agent output missing token:\n${tail(r.out + r.err)}`);
+  });
+
+  await test('serve-mode agent loop: a persistent turn over execInput (the desktop path)', async () => {
+    assert(process.env.ANTHROPIC_API_KEY, 'ANTHROPIC_API_KEY is not set in this environment');
+    // The test above drives `vmctl agent` (one-shot runOnce). The DESKTOP instead runs a PERSISTENT
+    // loop — `cli-guest --serve`, fed user turns over execInput as NDJSON (the Session Manager). That
+    // path had zero e2e coverage, which is how an env-drift regression shipped: HOME on a non-writable
+    // dir → the SDK's native `claude` binary "exists but failed to launch". Reproduce the desktop path:
+    // attach a session share, launch --serve with the SAME env the manager builds, feed one turn, and
+    // assert the loop streams init → a result carrying the token, then closes cleanly.
+    const tag = 'serve';
+    const gpath = `/sessions/${tag}`;
+    fs.mkdirSync(path.join(work, tag), { recursive: true });
+    vmctl('setEgressPolicy', ['-allow', 'api.anthropic.com']); // serve's only escape (vmctl exec won't set it)
+    vmctl('setTime', ['-id', 'vm0']); // the model's TLS needs a valid guest clock
+    assert(
+      vmctl('attachWorkspace', ['-id', 'vm0', '-path', path.join(work, tag), '-tag', tag, '-target', gpath]).status === 0,
+      'serve share attach failed',
+    );
+
+    const sess = 'e2e-serve';
+    const token = 'ATELIER_SERVE_OK_8842';
+    // KEEP IN SYNC with apps/desktop/src/main/sessions/manager.ts startLoop (itself mirroring vmctl
+    // agent's genv): the writable HOME/TMPDIR/XDG_CACHE_HOME are load-bearing — the non-root agent
+    // (uid 1001, /opt read-only) can't launch the SDK's native binary without them.
+    const env = [
+      '-env', `ANTHROPIC_API_KEY=${process.env.ANTHROPIC_API_KEY}`,
+      '-env', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1',
+      '-env', 'DISABLE_AUTOUPDATER=1',
+      '-env', 'DISABLE_TELEMETRY=1',
+      '-env', 'DISABLE_ERROR_REPORTING=1',
+      '-env', 'HOME=/home/atelier',
+      '-env', 'TMPDIR=/tmp',
+      '-env', 'XDG_CACHE_HOME=/home/atelier/.cache',
+    ];
+    const child = spawn(
+      VMCTL,
+      [
+        'exec', '-addr', ADDR, '-id', 'vm0', '-session', sess, '-cwd', '/opt/atelier/packages/agent', ...env,
+        '--', '/opt/atelier/packages/agent/node_modules/.bin/tsx', 'src/cli-guest.ts', '--serve', '--workspace', gpath,
+      ],
+      { cwd: repoRoot, env: process.env },
+    );
+
+    // Parse the loop's NDJSON stdout exactly as the Session Manager's onOutput does.
+    const events = [];
+    let buf = '';
+    let errOut = '';
+    child.stdout.on('data', (d) => {
+      buf += d.toString('utf8');
+      for (let nl; (nl = buf.indexOf('\n')) >= 0; ) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (line)
+          try {
+            events.push(JSON.parse(line));
+          } catch {
+            /* vmctl/guest noise that isn't a wire event */
+          }
+      }
+    });
+    child.stderr.on('data', (d) => (errOut += d)); // guest loop diagnostics, incl. SDK launch errors
+    let exited = null;
+    child.on('exit', (c) => (exited = c));
+
+    // Resolve when an event matches; reject on an error event, early exit, or timeout — surfacing the
+    // loop's own message (e.g. "native binary ... failed to launch") so a failure is self-explanatory.
+    const waitEvent = (pred, ms, label) =>
+      new Promise((resolve, reject) => {
+        const started = Date.now();
+        const tick = () => {
+          const hit = events.find(pred);
+          if (hit) return resolve(hit);
+          const errEv = events.find((e) => e.type === 'error');
+          if (errEv) return reject(new Error(`loop error before ${label}: ${errEv.message}`));
+          if (exited !== null) return reject(new Error(`loop exited (code ${exited}) before ${label}\n${tail(errOut)}`));
+          if (Date.now() - started > ms) return reject(new Error(`timed out for ${label}; saw [${events.map((e) => e.type).join(', ')}]`));
+          setTimeout(tick, 200);
+        };
+        tick();
+      });
+
+    try {
+      await sleep(1500); // let guestd register the session's stdin channel (mirrors the stdin-feed test)
+      // If the loop crashed on launch (the native-binary regression this guards), report it plainly.
+      const early = events.find((e) => e.type === 'error');
+      assert(!early, `loop errored on launch: ${early && early.message}\n${tail(errOut)}`);
+      assert(exited === null, `loop exited (code ${exited}) before first turn\n${tail(errOut)}`);
+
+      const turn = JSON.stringify({ type: 'user', text: `Respond with exactly this token and nothing else: ${token}` });
+      const fed = vmctl('execInput', ['-id', 'vm0', '-session', sess, '-content', turn + '\n']);
+      assert(fed.status === 0, `execInput failed: ${fed.err}`);
+      await waitEvent((e) => e.type === 'result' || e.type === 'turn_done', 180000, 'turn result');
+
+      assert(events.some((e) => e.type === 'init' && e.sessionId), 'no init event (the resume handle) was emitted');
+      const sawToken = events.some(
+        (e) =>
+          (e.type === 'text' && typeof e.text === 'string' && e.text.includes(token)) ||
+          (e.type === 'result' && typeof e.result === 'string' && e.result.includes(token)),
+      );
+      assert(sawToken, `token missing from loop output; saw [${events.map((e) => e.type).join(', ')}]\n${tail(errOut)}`);
+
+      // Clean shutdown: {"type":"close"} ends the input queue → the loop exits 0 (hibernate's path too).
+      vmctl('execInput', ['-id', 'vm0', '-session', sess, '-content', '{"type":"close"}\n']);
+      const code = await new Promise((resolve) => {
+        const started = Date.now();
+        const poll = () => {
+          if (exited !== null) return resolve(exited);
+          if (Date.now() - started > 15000) {
+            child.kill('SIGKILL');
+            return resolve('timeout');
+          }
+          setTimeout(poll, 200);
+        };
+        poll();
+      });
+      assert(code === 0, `serve loop did not exit cleanly on close (got ${code})`);
+    } finally {
+      if (exited === null) child.kill('SIGKILL');
+      vmctl('detachWorkspace', ['-id', 'vm0', '-tag', tag]);
+    }
+    return 'init → turn → token → clean close';
   });
 
   section('Doors: teardown');
