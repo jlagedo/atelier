@@ -168,6 +168,22 @@ build/debug/vmctl -addr /tmp/atelier-host.sock startVM -id vm0   # serial boot l
 build/debug/vmctl -addr /tmp/atelier-host.sock stopVM  -id vm0
 ```
 
+End-to-end integration battery (mirrors `build:all` — zero-dep Node, `build/<config>/` tree):
+
+```sh
+npm run e2e:host                      # build debug if missing, boot vm0, drive all 11 doors + agent
+npm run e2e:host -- --config=release  # against build/release/
+npm run e2e:host -- --skip-build      # reuse build/<config>/ as-is (fast-fail if incomplete)
+```
+
+`scripts/e2e-host.mjs` spawns the **shipped** broker over a unix socket and exercises every door + the
+in-guest agent loop through `vmctl` — the real Hop-2 wire, which the Go unit tests (fake drivers) and
+`s7-smoke-darwin.sh` (share shape) don't cover. It splits the two share models into their own sections
+(legacy `/workspace` + Files door; concurrent `/sessions/<tag>` — isolation, arbitrary targets,
+sibling-safe detach), plus the egress jail (default-deny blocks, allow reaches the model) and
+host↔guest bridging both ways. A real boot, so VZ + a codesigned broker + the image bundle are
+required; the agent check needs `ANTHROPIC_API_KEY` (it fails the suite if absent).
+
 `internal/` packages: `broker` (policy gate + audit + Files/Network doors), `hcs` (our own
 `computecore.dll` bindings + compute-system doc), `vmm` (lifecycle + guest/console wiring), `rpc`
 (JSON-RPC codec/transport/notifications), `vsock` (hvsocket dialing), `netjail` (default-deny egress
@@ -279,6 +295,9 @@ macOS uses **Docker via OrbStack**; Windows uses **WSL2**.
 - TS: verify with typecheck + lint + vitest + `package`; run the Electron window directly.
 - Go: verify with `go build ./...` + `go test ./...`; cross-compile `GOOS=windows` to catch
   Windows-only paths. macOS builds need CGO + codesign — use `npm run build:all -- --only=host`.
+- End-to-end: `npm run e2e:host` boots a real VM and drives all 11 broker doors + the agent loop
+  through the shipped broker (macOS/VZ; `scripts/e2e-host.mjs`) — the deepest integration check,
+  complementing the Go unit tests (fake drivers) and `s7-smoke-darwin.sh` (share shape).
 - State clearly when something can't be verified (HCS, Windows-only paths, restricted network)
   rather than claiming success.
 
