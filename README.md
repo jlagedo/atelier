@@ -11,7 +11,7 @@
 
 A desktop AI workspace inspired by [Anthropic's Claude Cowork](https://www.anthropic.com/research/claude-cowork), with its own twists: **cross-OS** (Apple Virtualization.framework on macOS, HCS on Windows), a persistent multi-session model (one VM, N concurrent agent loops), and hibernate/resume to bound memory.
 
-A **Go** host service boots a Linux utility VM, a **TypeScript** agent loop runs Claude *inside* that VM, and an **Electron/React** app is the UI. The agent works on local files safely by **containment** — the VM is the cage, not per-click consent.
+A **Go** host service boots a Linux utility VM, a **TypeScript** agent loop runs the agent *inside* that VM, and an **Electron/React** app is the UI. The agent works on local files safely by **containment** — the VM is the cage, not per-click consent.
 
 ## Docs
 
@@ -42,7 +42,7 @@ Linux utility VM — one cage, N sessions: each /sessions/<id> mount + its own a
 | VM image | **Docker** (OrbStack on macOS; WSL2 on Windows), `mke2fs`, `qemu-img` |
 | Host broker + guest daemon | **Go 1.25+** |
 | Desktop app, agent, codegen | **Node ≥ 22.12** |
-| Model calls | **`ANTHROPIC_API_KEY`** in the environment that launches the app |
+| Model calls | **`AI_API_KEY`** in the environment that launches the app |
 
 ### Build everything (one command)
 
@@ -88,14 +88,14 @@ node scripts/build-all.mjs --only=desktop  # packaged desktop app
 ```sh
 # macOS (Apple Silicon) — broker needs no root (codesigned with the VZ entitlement)
 build/debug/host                                                       # broker -> /tmp/atelier-host.sock
-ATELIER_BUNDLE_DIR=build/debug/image/darwin-arm64-vz npm run dev       # desktop (ANTHROPIC_API_KEY set)
+ATELIER_BUNDLE_DIR=build/debug/image/darwin-arm64-vz npm run dev       # desktop (AI_API_KEY set)
 
 # Windows — broker must run elevated
 build\debug\host.exe
 $env:ATELIER_BUNDLE_DIR="build\debug\image\windows-amd64-hyperv"; npm run dev
 ```
 
-In the app: **Work → New work → pick a folder.** The app boots `vm0`, mounts the folder, opens egress to `api.anthropic.com`, and launches the in-guest agent. Tasks stream in; deliverables land in your folder. Idle sessions hibernate and resume on selection.
+In the app: **Work → New work → pick a folder.** The app boots `vm0`, mounts the folder, opens egress to the model API, and launches the in-guest agent. Tasks stream in; deliverables land in your folder. Idle sessions hibernate and resume on selection.
 
 ### Terminal path (no Electron)
 
@@ -104,7 +104,7 @@ B=build/debug/image/darwin-arm64-vz   # the bundle dir (use vmctl from build/deb
 vmctl createVM -id vm0 -kernel $B/vmlinuz -initrd $B/initrd -rootfs $B/rootfs.raw
 vmctl startVM  -id vm0
 vmctl attachWorkspace -id vm0 -path /path/to/folder
-vmctl setEgressPolicy -allow api.anthropic.com
+vmctl setEgressPolicy -allow <model-api-host>
 vmctl agent    -id vm0 -- "read orders.csv, write summary.csv"
 vmctl stopVM   -id vm0
 ```
@@ -121,4 +121,4 @@ npm run e2e:host -- --skip-build       # reuse build/<config>/ as-is
 the in-guest agent loop through `vmctl` — both share models (legacy `/workspace` + Files door and
 concurrent `/sessions/<tag>`), the egress jail, and host↔guest file bridging both ways. It needs the
 same prerequisites as a real run (VZ + codesigned broker + image bundle); the agent check also needs
-`ANTHROPIC_API_KEY` and live egress to `api.anthropic.com`.
+`AI_API_KEY` and live egress to the model API.
