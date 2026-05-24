@@ -5,6 +5,7 @@ import { MakerZIP } from "@electron-forge/maker-zip";
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
+    icon: "assets/icon",
     name: "Atelier",
   },
   // maker-zip is the cross-platform smoke target. The real Windows target is maker-msix

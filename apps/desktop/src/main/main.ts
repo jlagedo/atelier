@@ -5,6 +5,12 @@ import { registerIpcHandlers, type IpcBackend } from "./ipc/handlers";
 
 let backend: IpcBackend | undefined;
 
+function installDevDockIcon(): void {
+  if (process.platform !== "darwin" || app.isPackaged) return;
+
+  app.dock?.setIcon(path.join(app.getAppPath(), "assets", "icon.png"));
+}
+
 function createWindow(): void {
   const win = new BrowserWindow({
     width: 1200,
@@ -28,6 +34,7 @@ function createWindow(): void {
 
 void app.whenReady().then(() => {
   installCsp();
+  installDevDockIcon();
   backend = registerIpcHandlers();
   createWindow();
 
