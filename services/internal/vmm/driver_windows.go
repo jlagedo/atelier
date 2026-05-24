@@ -169,7 +169,11 @@ func (d *windowsDriver) DetachWorkspace(ctx context.Context, id string, share Wo
 }
 
 func (d *windowsDriver) StartEgress(_ context.Context, id string, filter *netjail.Allowlist) (io.Closer, error) {
-	return netjail.Start(d.log.With("vm", id), filter)
+	ln, err := netjail.ListenHyperV()
+	if err != nil {
+		return nil, err
+	}
+	return netjail.Start(d.log.With("vm", id), filter, ln)
 }
 
 func (d *windowsDriver) instance(id string) *windowsInstance {

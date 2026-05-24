@@ -1,8 +1,8 @@
 # CLAUDE.md
 
 Contributor + agent guide for **Atelier** — a Cowork-style desktop AI workspace: a Go host
-service drives a Linux utility VM on Windows HCS, a TypeScript agent loop runs the AI *inside*
-that VM (Topology B), and an Electron/React app is the UI. The point is letting an AI agent work
+service drives a Linux utility VM (VZ on macOS, HCS on Windows), a TypeScript agent loop runs
+the AI *inside* that VM (Topology B), and an Electron/React app is the UI. The point is letting an AI agent work
 on local files safely by **containment** (the VM is the cage), not per-click consent. Full design,
 decisions, and glossary: [`docs/design.md`](docs/design.md); slice-by-slice implementation status:
 [`docs/implementation-status.md`](docs/implementation-status.md); the end-to-end run guide is the root
@@ -59,13 +59,19 @@ The three trees build independently; the only cross-cut is the generated protoco
 both `services` and the agent need. Top-level orchestration:
 
 ```sh
-.\scripts\build-go.ps1                            # regen protocol -> services\bin\{host,vmctl}.exe
-(cd image && ./build.sh check && ./build.sh all)  # WSL — bakes guestd + the in-guest agent into rootfs
+# macOS
+./scripts/build-sign-darwin.sh                    # protogen -> cgo build -> codesign host+vmctl
+(cd image && ./build.sh check && ./build.sh all)  # Docker/OrbStack — bakes guestd + agent into rootfs
 npm --prefix apps/desktop install                 # desktop deps (agent deps are baked into the rootfs)
+
+# Windows
+.\scripts\build-go.ps1                            # regen protocol -> services\bin\{host,vmctl}.exe
+(cd image && ./build.sh check && ./build.sh all)  # WSL2 — bakes guestd + agent into rootfs
+npm --prefix apps/desktop install
 ```
 
-Then run the broker (`services\bin\host`, elevated) and the app (`npm run dev`). See the root
-[`README`](README) for the full Windows run + the `vmctl` terminal path + dev-without-HCS.
+Then run the broker (`services/bin/host`, elevated) and the app (`npm run dev`). See the root
+[`README`](README) for the full run guide + the `vmctl` terminal path + dev-without-VM.
 
 ## Desktop app — `apps/desktop` (TypeScript / Electron)
 
@@ -76,7 +82,7 @@ fonts, oxlint/oxfmt, vitest.
 ```sh
 cd apps/desktop
 npm install
-npm start            # dev; headless box: xvfb-run -a npm start
+npm start            # dev
 npm run typecheck    # tsc --noEmit
 npm run lint         # oxlint
 npm run format       # oxfmt (code only)
@@ -141,7 +147,7 @@ services/bin/vmctl -addr /tmp/atelier-host.sock stopVM  -id vm0
 ```
 
 `internal/` packages: `broker` (policy gate + audit + Files/Network doors), `hcs` (our own
-`computecore.dll` bindings + compute-system doc), `vm` (lifecycle + guest/console wiring), `rpc`
+`computecore.dll` bindings + compute-system doc), `vmm` (lifecycle + guest/console wiring), `rpc`
 (JSON-RPC codec/transport/notifications), `vsock` (hvsocket dialing), `netjail` (default-deny egress
 via gvisor-tap-vsock). The 11 doors live in `pkg/protocol` (generated): `getStatus`, `createVM`,
 `startVM`, `stopVM`, `exec`, `execInput`, `attachWorkspace`, `detachWorkspace`, `readFile`,
@@ -179,8 +185,9 @@ npm run dev          # tsx src/cli.ts        (Topology A)
 npm run start:guest  # tsx src/cli-guest.ts  (Topology B)
 ```
 
-The in-guest agent (with its `node_modules` for linux/amd64) is baked into the rootfs by
-`image/build.sh`, so the desktop app does not install or ship it separately.
+The in-guest agent (with its `node_modules` for the target arch — `linux/amd64` on Windows,
+`linux/arm64` on macOS) is baked into the rootfs by `image/build.sh`, so the desktop app does
+not install or ship it separately.
 
 ## Protocol codegen — `tools/protogen`
 
@@ -239,11 +246,14 @@ logic, code review, and general programming concepts.
 
 ## Environment & verification
 
-The dev environment is **headless Linux**; the desktop's real target is **Windows**, and the real
-VM (boot/exec/files/net) needs **Windows 11 + HCS**. The image build needs **WSL2 + Docker**.
-- TS: verify with typecheck + lint + vitest + `package`; use `xvfb-run` to boot a real window.
-- Go: verify with build + test, plus a `GOOS=windows` cross-compile for the Windows paths.
-- State clearly when something can't be verified here (no display, no HCS, restricted network)
+The dev machine is **macOS (Apple Silicon) or Windows 11**. Each drives its own VM backend:
+VZ on macOS, HCS on Windows. Cross-compiling the other target is possible but can't be
+fully exercised without the matching host. For Linux build steps (VM image, rootfs):
+macOS uses **Docker via OrbStack**; Windows uses **WSL2**.
+- TS: verify with typecheck + lint + vitest + `package`; run the Electron window directly.
+- Go: verify with `go build ./...` + `go test ./...`; cross-compile `GOOS=windows` to catch
+  Windows-only paths. macOS builds need CGO + codesign — use `build-sign-darwin.sh`.
+- State clearly when something can't be verified (HCS, Windows-only paths, restricted network)
   rather than claiming success.
 
 ## Housekeeping

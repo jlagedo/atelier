@@ -161,18 +161,9 @@ func (d *darwinDriver) Create(_ context.Context, cfg VMConfig) error {
 	fs.SetDirectoryShare(emptyShare)
 	config.SetDirectorySharingDevicesVirtualMachineConfiguration([]vz.DirectorySharingDeviceConfiguration{fs})
 
-	// TEMPORARY (validation #4): NAT needs no entitlement and gives the guest real
-	// egress, which is enough to confirm the VM is alive in this boot spike. S9
-	// removes this and routes egress through the gvisor-tap-vsock jail instead.
-	nat, err := vz.NewNATNetworkDeviceAttachment()
-	if err != nil {
-		return fmt.Errorf("vm: nat attachment: %w", err)
-	}
-	netCfg, err := vz.NewVirtioNetworkDeviceConfiguration(nat)
-	if err != nil {
-		return fmt.Errorf("vm: network device: %w", err)
-	}
-	config.SetNetworkDevicesVirtualMachineConfiguration([]*vz.VirtioNetworkDeviceConfiguration{netCfg})
+	// No network device: the guest has no real NIC. All egress flows through the
+	// gvisor-tap-vsock jail re-hosted over the VZ vsock listener (StartEgress), so
+	// containment is the vsock jail alone (S9 dropped the S4 NAT crutch).
 
 	// Serial console captured to broker logs (darwin analog of console_windows.go).
 	console, consoleCfg, err := newDarwinConsole(d.log.With("vm", cfg.ID))
@@ -429,10 +420,27 @@ func validateShareTag(tag string) error {
 	return nil
 }
 
-// StartEgress re-hosts the gvisor-tap-vsock jail over a VZ vsock listener.
-// Implemented in S9 (the NAT attachment above is the interim egress path).
-func (*darwinDriver) StartEgress(context.Context, string, *netjail.Allowlist) (io.Closer, error) {
-	return nil, ErrUnsupported
+// StartEgress re-hosts the gvisor-tap-vsock jail over a VZ vsock listener. The
+// guest has no real NIC (S9 dropped the NAT crutch); its gvforwarder dials the
+// host on vsock.EgressLinkPort, which we accept via the cached socket device (the
+// inbound counterpart to DialGuest's Connect) and hand to the shared jail. The
+// returned *netjail.Network is the io.Closer the Manager closes on Stop.
+func (d *darwinDriver) StartEgress(_ context.Context, id string, filter *netjail.Allowlist) (io.Closer, error) {
+	inst := d.instance(id)
+	if inst == nil {
+		return nil, fmt.Errorf("vm: %q not found", id)
+	}
+	d.mu.Lock()
+	sock := inst.socket
+	d.mu.Unlock()
+	if sock == nil {
+		return nil, fmt.Errorf("vm: %q has no socket device (not started?)", id)
+	}
+	ln, err := sock.Listen(vsock.EgressLinkPort)
+	if err != nil {
+		return nil, fmt.Errorf("vm: egress listen: %w", err)
+	}
+	return netjail.Start(d.log.With("vm", id), filter, ln)
 }
 
 func (d *darwinDriver) instance(id string) *darwinInstance {

@@ -310,6 +310,18 @@ compute convenience; the privileged boundary still mediates `readFile` and `writ
 
 ## Network Door on macOS
 
+> **RESOLVED (2026-05-23, S9 — verified on Apple Silicon).** Implemented exactly as the
+> three steps below, with one simplification: the `Code-Hex/vz` fork's `VirtioSocketDevice.Listen(port)`
+> returns a `*VirtioSocketListener` that **already implements `net.Listener`**, so no
+> `VZVirtioSocketConnection`→`net.Conn` adapter was needed — `StartEgress` is
+> `inst.socket.Listen(1024)` handed straight to `netjail.Start`. `netjail.Start` now takes the
+> listener (`Start(log, filter, ln)`); Windows feeds it via a new `netjail.ListenHyperV()`. The
+> guest was unchanged (step 3 confirmed). The **NAT crutch is removed** — the guest has no real
+> NIC (`ip link` shows only `lo` + `tap0`). End-to-end: `allow=example.com` → `curl example.com`
+> HTTP 200 through the jail; google → NXDOMAIN. One fork robustness fix: `VirtioSocketListener.Close()`
+> now unblocks `Accept()` (`net.ErrClosed`) so the `http.Serve` goroutine doesn't leak on VM stop.
+> See `docs/macos-port-execution.md` §S9 for the full reproduction.
+
 **Key realization from the current code:** Atelier already implements the "host is the
 whole network" jail that Cowork ships, and it's *not* NIC-based. In
 `internal/netjail/network.go`, the guest has **no real NIC** — its `gvforwarder`

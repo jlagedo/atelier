@@ -63,11 +63,12 @@ const (
 	dnsPort       = 53
 )
 
-// Start brings up the host user-mode network and its AF_HYPERV listener on
-// vsock.EgressLinkPort, ready for the guest's gvforwarder to dial. filter is the
-// egress allowlist the DNS resolver and TCP forwarder consult (default-deny);
-// nil means deny everything.
-func Start(log *slog.Logger, filter *Allowlist) (*Network, error) {
+// Start brings up the host user-mode network over ln (the per-platform egress
+// listener on vsock.EgressLinkPort: AF_HYPERV on Windows via ListenHyperV, a VZ
+// virtio-socket listener on macOS), ready for the guest's gvforwarder to dial.
+// filter is the egress allowlist the DNS resolver and TCP forwarder consult
+// (default-deny); nil means deny everything. Start owns ln and closes it on Close.
+func Start(log *slog.Logger, filter *Allowlist, ln net.Listener) (*Network, error) {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -110,11 +111,6 @@ func Start(log *slog.Logger, filter *Allowlist) (*Network, error) {
 	}
 	if err := startDHCP(s, ipPool); err != nil {
 		return nil, err
-	}
-
-	ln, err := transport.Listen(egressListenURL())
-	if err != nil {
-		return nil, fmt.Errorf("netjail: listen: %w", err)
 	}
 
 	// The guest POSTs /connect; we hijack the conn and pump ethernet frames.
@@ -285,6 +281,13 @@ func (p *pinResolver) LookupSRV(context.Context, string, string, string) (string
 	return "", nil, errBlocked
 }
 func (p *pinResolver) LookupTXT(context.Context, string) ([]string, error) { return nil, errBlocked }
+
+// ListenHyperV opens the AF_HYPERV egress listener (gvisor-tap-vsock's Windows
+// transport) on vsock.EgressLinkPort. The darwin driver supplies a VZ vsock
+// listener instead; both feed Start.
+func ListenHyperV() (net.Listener, error) {
+	return transport.Listen(egressListenURL())
+}
 
 // egressListenURL is the AF_HYPERV listen URL for gvisor-tap-vsock's Windows
 // transport: the "vsock" scheme with the service GUID derived from the link port

@@ -3,9 +3,9 @@
 > **Companion to [`macos-port-plan.md`](./macos-port-plan.md).** That doc decides *what*
 > and *why* (architecture, API validation, framework mapping). This doc is the **execution
 > tracker**: it cuts the port into thin, reviewable, demoable slices and records progress.
-> **Last updated:** 2026-05-23 (S7 base/<tag> rework landed + verified on Apple Silicon;
-> S8 mount + in-guest loop wiring done — the agent turn is blocked only on egress, which
-> the NAT crutch never actually carried, so it moves to S9).
+> **Last updated:** 2026-05-23 (S9 network containment landed + verified on Apple Silicon:
+> egress re-hosted over a VZ vsock listener, NAT crutch dropped, guest has no real NIC;
+> allow/deny jail confirmed end-to-end. S8's egress-gated agent turn is unblocked).
 
 ## How to use this doc
 
@@ -36,8 +36,8 @@
 | S5 | guest control plane — `DialGuest` + `exec` | M4 | ☑ | — |
 | S6 | virtio-fs single workspace share | M5 | ☑ | — |
 | S7 | runtime add/remove + multi-session smoke test | M5 | ☑ base/<tag> rework | |
-| S8 | agent loop end-to-end (NAT crutch allowed) | M6 | ◐ mount+loop done; egress→S9 | |
-| S9 | network containment — vsock egress seam, drop NAT | M7 | ☐ (blocks S8's turn) | |
+| S8 | agent loop end-to-end | M6 | ◐ egress unblocked by S9; full turn re-run pending | |
+| S9 | network containment — vsock egress seam, drop NAT | M7 | ☑ verified on Apple Silicon | |
 | S10 | packaging, notarization, install docs | M8 | ☐ | |
 
 ### Dependency order
@@ -385,10 +385,16 @@ S4 NAT crutch for egress until S9 replaces it.
     with **zero guest changes**, and it is the real containment (not the throwaway NAT crutch).
     The remaining S8 exit ("one streamed turn with a file write landing on the host") is gated on
     S9 and re-runs there.
+  - **Update (2026-05-23, post-S9):** egress is now proven end-to-end — with policy
+    `allow=example.com`, `curl https://example.com` from inside the guest returns HTTP 200 through
+    the jail (audit `egress connect allowed`), so the model HTTP call that previously hit
+    `ConnectionRefused` will now succeed. The only S8 item left is re-running the **full desktop
+    agent turn** (boot → mount → one streamed turn → file write landing on host) with an allowlist
+    that includes the model endpoint; that re-run is still pending.
 
 ---
 
-### S9 — network containment — vsock egress seam, drop NAT  ☐
+### S9 — network containment — vsock egress seam, drop NAT  ☑
 
 - **Goal:** replace the NAT crutch with the existing gvisor-tap-vsock jail re-hosted over a
   VZ vsock listener — the network door, reusing all jail logic.
@@ -420,6 +426,37 @@ S4 NAT crutch for egress until S9 replaces it.
   guest is already fully wired for this path (static `tap0`/route/DNS, `gvforwarder` →
   `vsock://2:1024`), so S9 is **host-only** (the `netjail.Start` listener seam + the darwin VZ
   vsock listener; then drop the `Create()` NAT attachment). No guest changes expected.
+- **Landed (2026-05-23, verified on Apple Silicon) — host-only, no guest changes.** The plan's
+  fork-feature concern dissolved: the `jlagedo/vz` fork **already** exposed the inbound listener
+  (`VirtioSocketDevice.Listen(port) → *VirtioSocketListener`, already a `net.Listener`), the
+  counterpart to S5's `Connect`. So the seam was the only real work.
+  - **Transport-agnostic jail** (`netjail/network.go`): `Start` now takes a caller-supplied
+    `net.Listener` (`Start(log, filter, ln)`); the internal `transport.Listen` moved to a new
+    exported `ListenHyperV()` helper (keeps gvisor-tap-vsock's `transport` out of package `vmm`).
+    Everything downstream (`http.Serve`, `/connect` hijack + switch pump, `newStack`,
+    `jailedTCPForwarder`, DNS/DHCP, `Network.Close`) is unchanged — it was already
+    `net.Listener`-shaped.
+  - **Windows** (`driver_windows.go`): `StartEgress` now creates the hvsock listener via
+    `netjail.ListenHyperV()` and passes it to `Start` — same GUID/port/jail as before
+    (`GOOS=windows` cross-compile green; no behavior change).
+  - **Darwin** (`driver_darwin.go`): `StartEgress` is `inst.socket.Listen(vsock.EgressLinkPort)`
+    → `netjail.Start` (one socket device serves both `Connect` out to guest:5000 and `Listen` in
+    on host:1024). The **NAT block was deleted** from `Create` — no network device at all, so the
+    guest has no real NIC. The Driver interface, Manager lifecycle, and `manager_test.go` were
+    untouched.
+  - **Fork robustness fix** (`jlagedo/vz` socket.go): the listener's `Accept()` blocked on a
+    channel that `Close()` didn't wake (would leak the `http.Serve` goroutine, ~1/VM-stop). Added a
+    `done` channel so `Close()` unblocks `Accept()` with `net.ErrClosed` — standard `net.Listener`
+    semantics, race-free (`done` is closed, `acceptch` never is, so the connection handler's send
+    can't panic). Consistent with the S6 fork precedent; upstream PR deferred.
+  - **Verified end-to-end** (`scripts/build-sign-darwin.sh`, then broker + `vmctl`): serial shows
+    `egress network up … vsockPort 1024` and `gvforwarder` dialing `vsock://2:1024/connect` **once**
+    (no S5/S8 restart-loop, no `ConnectionRefused`). `ip -o link` in the guest shows **only `lo` +
+    `tap0`** — `enp0s1` is gone. With policy `allow=example.com`: `curl https://example.com` → HTTP
+    200 (audit `egress connect allowed ip:… port:443`); `curl https://www.google.com` and
+    `gethostbyname` → NXDOMAIN/`gaierror` (audit `egress resolve denied host:www.google.com`).
+    `stopVM` clean (`err=null`, `vmCount → 0`), broker healthy after. `go build/vet/test` +
+    `GOOS=windows go build` all green.
 
 ---
 

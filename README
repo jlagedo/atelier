@@ -1,144 +1,83 @@
 # Atelier
 
-A Cowork-style **desktop AI workspace**: a **Go** host service drives a Linux utility VM on
-Windows HCS, a **TypeScript** agent loop runs the AI *inside* that VM, and an **Electron/React**
-app is the UI. The whole point is letting an AI agent work on **local files** safely — by
-containment (the VM is the cage), not per-click consent.
+A desktop AI workspace inspired by [Anthropic's Claude Cowork](https://www.anthropic.com/research/claude-cowork), with its own twists: **macOS-first** (Apple Virtualization.framework), a persistent multi-session model (one VM, N concurrent agent loops), and hibernate/resume to bound memory.
 
-> Full design, decisions, and a glossary live in **[`docs/design.md`](docs/design.md)**; the
-> slice-by-slice implementation history and current milestone status live in
-> **[`docs/implementation-status.md`](docs/implementation-status.md)**.
-> Per-directory build/run/test detail and conventions live in **[`AGENTS.md`](AGENTS.md)**.
+A **Go** host service boots a Linux utility VM, a **TypeScript** agent loop runs Claude *inside* that VM, and an **Electron/React** app is the UI. The agent works on local files safely by **containment** — the VM is the cage, not per-click consent.
 
-## Status
+## Docs
 
-The whole stack is wired end-to-end: our own Go bindings to Windows HCS boot our own Linux VM, the
-host drives the guest over hvsocket, the agent loop runs **inside** the VM (Topology B), and the
-Electron app drives it all. Work follows the milestone ladder in
-[`docs/implementation-status.md`](docs/implementation-status.md).
+- [`docs/design.md`](docs/design.md) — full design, decisions, glossary
+- [`docs/implementation-status.md`](docs/implementation-status.md) — milestone ladder + current status
+- [`CLAUDE.md`](CLAUDE.md) — build/run/test commands, conventions, repo layout
 
-- **Host service** (`services`) — a Go broker speaking JSON-RPC 2.0 (Content-Length framed) over a
-  named pipe (Windows) / unix socket (dev). Every capability passes a policy gate + audit log.
-  - **Boot** — our `computecore.dll` bindings author the compute-system doc and start the VM on a
-    self-built, version-matched **kernel + initrd + Ubuntu 22.04 rootfs** bundle.
-  - **Compute door** — `exec` runs a command in the guest over hvsocket and streams stdout/stderr
-    back live; `execInput` pushes stdin into a long-lived guest process (the persistent agent loop).
-  - **Files door** — host folders mount over **9p** on a *running* VM (no reboot). A legacy single
-    `/workspace`, plus **concurrent per-session shares** at `/sessions/<id>` (one VM, many folders);
-    `readFile`/`writeFile` are broker-mediated and jailed (reject `..` and escaping symlinks).
-  - **Network door** — a no-NIC user-mode network (gvisor-tap-vsock) with a default-deny egress
-    allowlist + pinning DNS resolver; `setEgressPolicy` swaps the allowlist at runtime. Verified
-    live through `vmctl`; the remaining live gate is the desktop UI E2E run.
-- **Agent loop** (`packages/agent`) — the Claude Agent SDK loop, running **in the guest**
-  (`cli-guest.ts`): one-shot (`vmctl agent`) or a persistent multi-turn `--serve` loop driven over
-  stdin/stdout NDJSON. The policy gate (`canUseTool`) audits every tool call; tools act on the guest
-  filesystem and only the model call leaves the cage via the egress allowlist.
-- **Desktop shell** (`apps/desktop`) — a hardened Electron + React 19 + Tailwind v4 app. **WORK
-  mode now drives the real in-guest agent over the broker**: one shared VM hosting **concurrent
-  persistent per-session loops**, each with its own folder mount and conversation, with
-  **hibernate/resume** to bound guest memory. Chat mode stays mock. The remaining gate is a live
-  end-to-end UI run (S6.1); a no-UAC service + MSIX packaging follow (S6.2).
-
-## Build & run the whole stack
-
-### Prerequisites
-
-| For | Need |
-|---|---|
-| Real VM (boot / exec / files / net) | **Windows 11 + HCS** — Hyper-V Administrators membership *or* run the broker elevated |
-| Image-bundle build | **WSL2 + Docker** (plus `mke2fs`, `qemu-img`) — `image/build.sh` is bash |
-| Host broker + guest daemon | **Go 1.25+** (toolchain pinned in `services/go.mod`) |
-| Desktop app, agent, codegen | **Node ≥ 22.12** |
-| The model call | **`ANTHROPIC_API_KEY`** in the environment that launches the desktop app (or `vmctl agent`) |
-
-### 1. Build
-
-```sh
-# 1a. Build the Go host broker + dev CLI (also regenerates the TS + Go protocol bindings).
-.\scripts\build-go.ps1                            # -> services\bin\{host,vmctl}.exe
-
-# 1b. Build the VM image bundle in WSL — cross-compiles guestd + bakes the in-guest agent
-#     into the rootfs (needs the protocol bindings from 1a).
-(cd image && ./build.sh check && ./build.sh all)  # Windows bundle -> image/bundle/windows-amd64-hyperv/{vmlinuz,initrd,rootfs.vhd}
-# macOS (Apple Silicon): make -C image darwin     # arm64 bundle  -> image/bundle/darwin-arm64-vz/{vmlinuz,initrd,rootfs.raw}
-
-# 1c. Install desktop deps (agent deps are baked into the rootfs by build.sh).
-npm --prefix apps/desktop install
-```
-
-Verify everything compiles/tests with `go build ./... && go test ./...` (in `services`) and
-`npm --prefix apps/desktop run typecheck && npm --prefix apps/desktop test` — see [`AGENTS.md`](AGENTS.md).
-
-### 2. Run the full stack (Windows)
-
-```sh
-# 2a. Start the host broker — elevated; listens on \\.\pipe\atelier-host.
-services\bin\host                      # or, without a build step: go run ./cmd/host
-
-# 2b. Launch the desktop app in a separate shell that inherits ANTHROPIC_API_KEY.
-npm --prefix apps/desktop start        # or, from the repo root: npm run dev
-```
-
-In the app: **Work → New work → pick a folder.** The app ensures `vm0` (`createVM` from the bundle +
-`startVM`), mounts the folder at `/sessions/<id>`, opens egress to `api.anthropic.com`, and launches
-the in-guest agent loop. Type a task in the composer; assistant text plus tool-call and
-policy-decision cards stream in, and deliverables land in your folder. Idle sessions hibernate and
-resume on selection.
-
-Desktop env knobs: `ATELIER_BUNDLE_DIR` (point at a per-target bundle dir, e.g. `image\bundle\windows-amd64-hyperv`; the platform-aware default resolver lands in S3), `ATELIER_IDLE_MS` (hibernate after
-idle, default 10 min), `ATELIER_MAX_ACTIVE` (live loops before LRU hibernate, default 3),
-`ATELIER_BOOT_TIMEOUT_MS` (boot wait, default 120 000).
-
-### 3. Or drive it from a terminal — `vmctl` (no Electron)
-
-Once the broker is up, the built `services\bin\vmctl` (add `services\bin` to `PATH`, or use the full
-path) exercises the whole substrate from a shell:
-
-```sh
-vmctl createVM -id vm0 -kernel image/bundle/windows-amd64-hyperv/vmlinuz -initrd image/bundle/windows-amd64-hyperv/initrd -rootfs image/bundle/windows-amd64-hyperv/rootfs.vhd
-vmctl startVM  -id vm0
-vmctl exec     -id vm0 -- python3 --version                  # run in the guest, stream output back
-vmctl attachWorkspace -id vm0 -path C:\work\folder           # share a host folder at /workspace
-vmctl setEgressPolicy -allow api.anthropic.com
-vmctl agent    -id vm0 -- "read orders.csv, write summary.csv"   # run the in-guest agent loop
-vmctl stopVM   -id vm0
-```
-
-### Dev without HCS (protocol-level, unix socket)
-
-The broker and `vmctl` also run on Linux over a unix socket — no VM — to exercise the Hop-2 protocol:
-
-```sh
-cd services
-go run ./cmd/host  -addr /tmp/atelier-host.sock &
-go run ./cmd/vmctl -addr /tmp/atelier-host.sock getStatus
-```
-
-Per-package dev/test/lint commands and conventions are in **[`AGENTS.md`](AGENTS.md)**.
-
-## Layout
-
-| Dir | What |
-|---|---|
-| `apps/desktop` | Electron/React desktop UI (chat-forward shell; WORK mode wired to the broker) |
-| `services` | Go module — privileged host broker, in-VM daemon (`guestd`), dev CLI (`vmctl`) |
-| `packages` | Shared TS libs — agent loop, protocol, provider seam |
-| `image` | VM image build pipeline — kernel + initrd + rootfs bundle |
-| `tools/protogen` | Protocol codegen — schema → TS + Go |
-| `docs` | Design, runtime architecture, implementation, and security docs |
-
-## Architecture at a glance
+## Architecture
 
 ```
 Renderer (React, sandboxed)
-   │  Hop 1: Electron IPC
-Main process (Node) ── conductor + Session Manager (per-session lifecycle, hibernate/resume)
-   │  Hop 2: named pipe / unix socket — JSON-RPC 2.0 (Content-Length)
-Go host service ── broker (policy + audit) + HCS driver  ·  privileged
-   │  Hop 3: hvsocket — control / exec / files / net planes
-Linux utility VM ── one cage, N sessions: each /sessions/<id> mount + its own agent loop (Claude Agent SDK)
-   ·  tools act on the guest fs; only the model call exits, via the egress allowlist
+   │  Electron IPC
+Main process (Node) — Session Manager (per-session lifecycle, hibernate/resume)
+   │  Named pipe / unix socket — JSON-RPC 2.0
+Go host service — broker (policy + audit) + VZ driver (macOS) / HCS driver (Windows)
+   │  hvsocket — control / exec / files / net
+Linux utility VM — one cage, N sessions: each /sessions/<id> mount + its own agent loop
+   ·  tools act on the guest fs; only the model call exits via the egress allowlist
 ```
 
-> Versions: this scaffold uses latest-stable libraries, which diverges from the design doc's
-> Cowork version pins (§11). See `AGENTS.md`.
+## Build
+
+### Prerequisites
+
+| What | Need |
+|---|---|
+| Real VM | **macOS (Apple Silicon) + VZ** — broker must be codesigned; or **Windows 11 + HCS** (Hyper-V Administrators or elevated) |
+| VM image | **Docker** (OrbStack on macOS; WSL2 on Windows), `mke2fs`, `qemu-img` |
+| Host broker + guest daemon | **Go 1.25+** |
+| Desktop app, agent, codegen | **Node ≥ 22.12** |
+| Model calls | **`ANTHROPIC_API_KEY`** in the environment that launches the app |
+
+### macOS (Apple Silicon)
+
+```sh
+# 1. Build host broker + dev CLI (regenerates protocol bindings, codesigns)
+./scripts/build-sign-darwin.sh          # -> services/bin/{host,vmctl}
+
+# 2. Build the VM image bundle
+make -C image darwin                    # -> image/bundle/darwin-arm64-vz/{vmlinuz,initrd,rootfs.raw}
+
+# 3. Install desktop deps
+npm --prefix apps/desktop install
+
+# 4. Run — in two shells
+services/bin/host                       # privileged broker, listens on /tmp/atelier-host.sock
+npm --prefix apps/desktop start         # desktop app (ANTHROPIC_API_KEY must be set)
+```
+
+### Windows
+
+```sh
+# 1. Build host broker + dev CLI
+.\scripts\build-go.ps1                  # -> services\bin\{host,vmctl}.exe
+
+# 2. Build the VM image bundle (in WSL)
+cd image && ./build.sh check && ./build.sh all   # -> image/bundle/windows-amd64-hyperv/...
+
+# 3. Install desktop deps
+npm --prefix apps/desktop install
+
+# 4. Run — elevated, in two shells
+services\bin\host
+npm --prefix apps/desktop start
+```
+
+In the app: **Work → New work → pick a folder.** The app boots `vm0`, mounts the folder, opens egress to `api.anthropic.com`, and launches the in-guest agent. Tasks stream in; deliverables land in your folder. Idle sessions hibernate and resume on selection.
+
+### Terminal path (no Electron)
+
+```sh
+vmctl createVM -id vm0 -kernel $B/vmlinuz -initrd $B/initrd -rootfs $B/rootfs.raw
+vmctl startVM  -id vm0
+vmctl attachWorkspace -id vm0 -path /path/to/folder
+vmctl setEgressPolicy -allow api.anthropic.com
+vmctl agent    -id vm0 -- "read orders.csv, write summary.csv"
+vmctl stopVM   -id vm0
+```
