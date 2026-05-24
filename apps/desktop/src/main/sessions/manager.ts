@@ -104,7 +104,12 @@ export class SessionManager {
     });
     this.rootfsName = rootfsFileName(platform);
     this.guestdImageName = guestdImageFileName(platform);
-    this.egressAllow = opts.egressAllow ?? ["api.anthropic.com"];
+    this.egressAllow = opts.egressAllow ?? [
+      "api.anthropic.com",
+      "pypi.org",
+      "files.pythonhosted.org",
+      "registry.npmjs.org",
+    ];
     this.bootTimeoutMs = opts.bootTimeoutMs ?? (Number(process.env.ATELIER_BOOT_TIMEOUT_MS) || 120_000);
     this.idleMs = opts.idleMs ?? (Number(process.env.ATELIER_IDLE_MS) || 10 * 60_000);
     this.maxActive = opts.maxActive ?? (Number(process.env.ATELIER_MAX_ACTIVE) || 3);
@@ -253,6 +258,38 @@ export class SessionManager {
       // Export timed out — keep the last-known transcript + sdkSessionId.
     }
     await this.endRun(s);
+    await this.safeDetach(s);
+    s.watcher?.dispose();
+    s.watcher = undefined;
+    await this.store.save({
+      appId,
+      folder: s.folder,
+      title: s.title,
+      sdkSessionId: s.sdkSessionId,
+      transcript: s.transcript,
+      status: "inactive",
+      updatedAt: Date.now(),
+    });
+    s.status = "inactive";
+    this.setStatus(s, "inactive");
+  }
+
+  /**
+   * Force-stop a live session's loop *now* and leave it dormant (resumable from the
+   * last-known transcript). Unlike the idle/LRU `hibernate`, this skips the graceful
+   * context export — a user-initiated kill must be immediate, since the loop may be
+   * the very thing that's stuck.
+   */
+  async stopSession(appId: string): Promise<void> {
+    const s = this.live.get(appId);
+    if (!s || s.status === "inactive" || s.status === "hibernating") return;
+    this.setStatus(s, "hibernating");
+    s.intentionalStop = true;
+    if (s.idleTimer) {
+      clearTimeout(s.idleTimer);
+      s.idleTimer = undefined;
+    }
+    await this.endRun(s, true);
     await this.safeDetach(s);
     s.watcher?.dispose();
     s.watcher = undefined;
@@ -471,11 +508,12 @@ export class SessionManager {
     });
   }
 
-  private async endRun(s: LiveSession): Promise<void> {
+  private async endRun(s: LiveSession, force = false): Promise<void> {
     const run = s.run;
     if (!run) return;
     // The loop closes its own input after export and exits; wait briefly then force.
-    await Promise.race([run.result.catch(() => undefined), sleep(5000)]);
+    // A forced kill skips the grace window and closes immediately.
+    if (!force) await Promise.race([run.result.catch(() => undefined), sleep(5000)]);
     run.close();
     s.run = undefined;
   }

@@ -85,6 +85,8 @@ export function App() {
           onModeChange={setActiveMode}
           onSelect={onSelect}
           onNewSession={onNewSession}
+          onKill={isWork ? work.kill : undefined}
+          onDelete={isWork ? work.close : undefined}
         />
         <SidebarInset className="min-w-0">
           {activeSession ? (

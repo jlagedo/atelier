@@ -27,6 +27,7 @@ const api = {
     sendMessage: (appId: string, text: string): Promise<void> =>
       ipcRenderer.invoke(IpcChannel.WorkSendMessage, appId, text),
     resumeSession: (appId: string): Promise<void> => ipcRenderer.invoke(IpcChannel.WorkResumeSession, appId),
+    stopSession: (appId: string): Promise<void> => ipcRenderer.invoke(IpcChannel.WorkStopSession, appId),
     closeSession: (appId: string): Promise<void> => ipcRenderer.invoke(IpcChannel.WorkCloseSession, appId),
 
     onStatus: (cb: (p: WorkStatusPush) => void): (() => void) => subscribe(IpcChannel.WorkStatus, cb),

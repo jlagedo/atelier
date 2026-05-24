@@ -23,6 +23,8 @@ export function AppSidebar({
   onModeChange,
   onSelect,
   onNewSession,
+  onKill,
+  onDelete,
 }: {
   activeMode: SessionMode;
   activeId: string;
@@ -30,6 +32,8 @@ export function AppSidebar({
   onModeChange: (mode: SessionMode) => void;
   onSelect: (id: string) => void;
   onNewSession: () => void;
+  onKill?: (id: string) => void;
+  onDelete?: (id: string) => void;
 }) {
   const [version, setVersion] = useState("…");
   const isWork = activeMode === "work";
@@ -80,7 +84,14 @@ export function AppSidebar({
           </SidebarMenu>
         </div>
 
-        <SessionList mode={activeMode} sessions={sessions} activeId={activeId} onSelect={onSelect} />
+        <SessionList
+          mode={activeMode}
+          sessions={sessions}
+          activeId={activeId}
+          onSelect={onSelect}
+          onKill={onKill}
+          onDelete={onDelete}
+        />
       </SidebarContent>
 
       <SidebarFooter>

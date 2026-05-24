@@ -62,6 +62,7 @@ export function registerIpcHandlers(): IpcBackend {
   handle(IpcChannel.WorkOpenSession, (_e, folder: string) => manager.openSession(folder));
   handle(IpcChannel.WorkSendMessage, (_e, appId: string, text: string) => manager.sendMessage(appId, text));
   handle(IpcChannel.WorkResumeSession, (_e, appId: string) => manager.resume(appId));
+  handle(IpcChannel.WorkStopSession, (_e, appId: string) => manager.stopSession(appId));
   handle(IpcChannel.WorkCloseSession, (_e, appId: string) => manager.closeSession(appId));
 
   return { shutdown: () => manager.shutdown() };

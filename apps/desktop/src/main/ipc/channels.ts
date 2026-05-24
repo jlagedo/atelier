@@ -9,6 +9,7 @@ export const IpcChannel = {
   WorkOpenSession: "work:openSession",
   WorkSendMessage: "work:sendMessage",
   WorkResumeSession: "work:resumeSession",
+  WorkStopSession: "work:stopSession",
   WorkCloseSession: "work:closeSession",
 
   // WORK mode — push (main → renderer, webContents.send). Each carries a sessionId.

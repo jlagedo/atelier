@@ -163,7 +163,7 @@ func main() {
 	}
 
 	// agent (S5b.1) runs the agent loop INSIDE the guest (Topology B). We open
-	// egress to the model host (default api.anthropic.com; -allow overrides), then
+	// egress to the model host + pip/npm registries (default; -allow overrides), then
 	// exec the in-guest agent CLI shipped on the guestd volume at /opt/atelier. The loop's
 	// tools are the SDK's built-ins acting on the guest fs; only the model call
 	// leaves the cage. The API key rides in via the exec env (the operator's env);
@@ -180,7 +180,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		allowList := []string{"api.anthropic.com"}
+		allowList := []string{"api.anthropic.com", "pypi.org", "files.pythonhosted.org", "registry.npmjs.org"}
 		if strings.TrimSpace(*allow) != "" {
 			allowList = nil
 			for _, h := range strings.Split(*allow, ",") {

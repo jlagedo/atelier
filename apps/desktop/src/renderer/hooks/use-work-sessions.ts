@@ -109,6 +109,7 @@ export interface WorkSessionsApi {
   newWork: () => Promise<void>;
   send: (text: string) => void;
   select: (id: string) => void;
+  kill: (id: string) => void;
   close: (id: string) => void;
 }
 
@@ -217,6 +218,17 @@ export function useWorkSessions(): WorkSessionsApi {
     });
   }, []);
 
+  const kill = useCallback(
+    (id: string): void => {
+      const api = window.atelier?.work;
+      if (!api) return;
+      // Optimistic: show the sleeping spinner now; main confirms hibernating -> inactive.
+      update(id, (s) => withStatus(s, "hibernating"));
+      void api.stopSession(id).catch((err: unknown) => console.error("work.stopSession failed", err));
+    },
+    [update],
+  );
+
   const close = useCallback((id: string): void => {
     void window.atelier?.work?.closeSession(id).catch((err: unknown) => console.error("work.closeSession failed", err));
     setSessions((prev) => {
@@ -235,6 +247,7 @@ export function useWorkSessions(): WorkSessionsApi {
     newWork,
     send,
     select,
+    kill,
     close,
   };
 }

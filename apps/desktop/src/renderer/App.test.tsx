@@ -19,6 +19,7 @@ describe("App", () => {
         openSession: () => Promise.resolve("s0"),
         sendMessage: () => Promise.resolve(),
         resumeSession: () => Promise.resolve(),
+        stopSession: () => Promise.resolve(),
         closeSession: () => Promise.resolve(),
         onStatus: () => () => {},
         onEvent: () => () => {},
