@@ -1,6 +1,6 @@
 # Atelier
 
-A desktop AI workspace inspired by [Anthropic's Claude Cowork](https://www.anthropic.com/research/claude-cowork), with its own twists: **macOS-first** (Apple Virtualization.framework), a persistent multi-session model (one VM, N concurrent agent loops), and hibernate/resume to bound memory.
+A desktop AI workspace inspired by [Anthropic's Claude Cowork](https://www.anthropic.com/research/claude-cowork), with its own twists: **cross-OS** (Apple Virtualization.framework on macOS, HCS on Windows), a persistent multi-session model (one VM, N concurrent agent loops), and hibernate/resume to bound memory.
 
 A **Go** host service boots a Linux utility VM, a **TypeScript** agent loop runs Claude *inside* that VM, and an **Electron/React** app is the UI. The agent works on local files safely by **containment** — the VM is the cage, not per-click consent.
 
