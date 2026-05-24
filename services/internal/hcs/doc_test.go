@@ -48,6 +48,10 @@ func TestMakeLCOWDocShape(t *testing.T) {
 	if att.Type != "VirtualDisk" || att.Path != `C:\boot\rootfs.vhd` {
 		t.Fatalf("root attachment wrong: %+v", att)
 	}
+	// With no guestd volume configured, there is no second disk.
+	if _, ok := doc.VirtualMachine.Devices.Scsi["0"].Attachments["1"]; ok {
+		t.Fatalf("unexpected lun1 attachment without GuestdImagePath: %+v", doc.VirtualMachine.Devices.Scsi["0"].Attachments)
+	}
 
 	// Defaults applied.
 	if got := doc.VirtualMachine.ComputeTopology.Memory.SizeInMB; got != 2048 {
@@ -70,6 +74,30 @@ func TestMakeLCOWDocShape(t *testing.T) {
 	// The whole point of own-bindings: NO Microsoft GCS in the cmdline.
 	if strings.Contains(kd.KernelCmdLine, "gcs") || strings.Contains(kd.KernelCmdLine, "vsockexec") {
 		t.Fatalf("cmdline must not reference gcs/vsockexec: %q", kd.KernelCmdLine)
+	}
+}
+
+func TestMakeLCOWDocGuestdVolume(t *testing.T) {
+	raw, err := MakeLCOWDoc(DocConfig{
+		KernelFilePath:  "k",
+		RootFSPath:      `C:\boot\rootfs.vhd`,
+		GuestdImagePath: `C:\boot\guestd.vhd`,
+	})
+	if err != nil {
+		t.Fatalf("MakeLCOWDoc: %v", err)
+	}
+	var doc ComputeSystem
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	// guestd volume rides controller0/lun1 (/dev/sdb), always read-only; init.sh
+	// mounts it by LABEL=guestd and execs guestd from it (it's not baked into the rootfs).
+	att := doc.VirtualMachine.Devices.Scsi["0"].Attachments["1"]
+	if att.Type != "VirtualDisk" || att.Path != `C:\boot\guestd.vhd` {
+		t.Fatalf("guestd attachment wrong: %+v", att)
+	}
+	if !att.ReadOnly {
+		t.Fatalf("guestd volume must be read-only, got %+v", att)
 	}
 }
 

@@ -197,8 +197,12 @@ type CreateVMParams struct {
 	KernelPath string `json:"kernelPath"`
 	InitrdPath string `json:"initrdPath"`
 	RootFSPath string `json:"rootfsPath"`
-	MemoryMB   uint64 `json:"memoryMB"`
-	CPUCount   int32  `json:"cpuCount"`
+	// GuestdImagePath is the host path to the guestd volume (its own ro image, attached
+	// as a second disk and mounted by init.sh). guestd is not baked into the rootfs, so
+	// this is its sole delivery path; the desktop/vmctl always set it.
+	GuestdImagePath string `json:"guestdImagePath"`
+	MemoryMB        uint64 `json:"memoryMB"`
+	CPUCount        int32  `json:"cpuCount"`
 }
 
 // VMRef identifies an existing VM.
@@ -215,12 +219,13 @@ func (b *Broker) createVM(ctx context.Context, params json.RawMessage) (any, err
 		return nil, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "createVM: " + err.Error()}
 	}
 	if err := b.vms.Create(ctx, vmm.VMConfig{
-		ID:         p.ID,
-		KernelPath: p.KernelPath,
-		InitrdPath: p.InitrdPath,
-		RootFSPath: p.RootFSPath,
-		MemoryMB:   p.MemoryMB,
-		CPUCount:   p.CPUCount,
+		ID:              p.ID,
+		KernelPath:      p.KernelPath,
+		InitrdPath:      p.InitrdPath,
+		RootFSPath:      p.RootFSPath,
+		GuestdImagePath: p.GuestdImagePath,
+		MemoryMB:        p.MemoryMB,
+		CPUCount:        p.CPUCount,
 	}); err != nil {
 		return nil, err
 	}

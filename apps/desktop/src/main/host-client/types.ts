@@ -18,6 +18,9 @@ export interface CreateVMParams {
   kernelPath: string;
   initrdPath: string;
   rootfsPath: string;
+  // Host path to the guestd volume (its own ro image, attached as a second disk and
+  // mounted by init.sh). guestd is not baked into the rootfs, so this is its sole delivery.
+  guestdImagePath: string;
   memoryMB: number;
   cpuCount: number;
 }

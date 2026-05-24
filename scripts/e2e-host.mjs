@@ -27,6 +27,11 @@
 //   node scripts/e2e-host.mjs --skip-build     reuse build/<config>/ as-is (fail fast if incomplete)
 //   node scripts/e2e-host.mjs --rebuild-image  force a guest-bundle rebuild (after guest changes)
 //
+// All console + build-subprocess output is mirrored (ANSI-stripped) to a timestamped
+// build/<config>/e2e-host-<ts>.log; the broker's own stdout/stderr go to e2e-host-<ts>.broker.log,
+// and the guest's serial console (kernel boot + init) is distilled into e2e-host-<ts>.console.log,
+// all beside each other.
+//
 // The agent door needs ANTHROPIC_API_KEY in this shell's environment and live egress to
 // api.anthropic.com; it fails the suite if the key is absent (per design: the battery covers it).
 
@@ -43,6 +48,7 @@ const isMac = process.platform === 'darwin';
 const exe = isWin ? '.exe' : '';
 const target = isMac ? 'darwin-arm64-vz' : 'windows-amd64-hyperv';
 const rootfsName = isMac ? 'rootfs.raw' : 'rootfs.vhd';
+const guestdName = isMac ? 'guestd.raw' : 'guestd.vhd'; // guestd ships as its own volume (not baked)
 
 // ----- args ---------------------------------------------------------------------------------------
 
@@ -61,10 +67,40 @@ for (const a of process.argv.slice(2)) {
 
 const config = flags.config;
 const ADDR = '/tmp/atelier-e2e-host.sock';
-const BROKER_LOG = '/tmp/atelier-e2e-broker.log';
+// Both logs land in build/<config>/, sharing one filename-safe timestamp so a run's pair is obvious.
+const stamp = new Date().toISOString().replace(/:/g, '-').replace(/\..+$/, ''); // 2026-05-24T15-30-45
+const LOG_FILE = rel('build', config, `e2e-host-${stamp}.log`);
+const BROKER_LOG = rel('build', config, `e2e-host-${stamp}.broker.log`);
+const CONSOLE_LOG = rel('build', config, `e2e-host-${stamp}.console.log`); // distilled guest kernel/console
 const HOST = rel('build', config, `host${exe}`);
 const VMCTL = rel('build', config, `vmctl${exe}`);
 const BUNDLE = rel('build', config, 'image', target);
+
+// ----- tee all stdout/stderr to the timestamped log ----------------------------------------------
+// Everything this script prints (and the build subprocesses' streamed output) is mirrored, with ANSI
+// stripped, to LOG_FILE. fs.writeSync (not a WriteStream) keeps the log intact across the script's
+// many process.exit() paths, which would otherwise drop unflushed buffers.
+fs.mkdirSync(path.dirname(LOG_FILE), { recursive: true });
+const logFd = fs.openSync(LOG_FILE, 'a');
+const stripAnsi = (s) => s.replace(/\x1b\[[0-9;]*m/g, '');
+function teeStream(raw) {
+  return (chunk, enc, cb) => {
+    if (typeof enc === 'function') {
+      cb = enc;
+      enc = undefined;
+    }
+    const s = typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
+    try {
+      fs.writeSync(logFd, stripAnsi(s));
+    } catch {
+      // never let a logging failure break the test run
+    }
+    return raw(chunk, enc, cb);
+  };
+}
+process.stdout.write = teeStream(process.stdout.write.bind(process.stdout));
+process.stderr.write = teeStream(process.stderr.write.bind(process.stderr));
+fs.writeSync(logFd, `# e2e:host — ${new Date().toISOString()} — config=${config}\n`);
 
 // ----- tiny helpers (same palette as build-all.mjs) -----------------------------------------------
 
@@ -88,12 +124,20 @@ function die(msg) {
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// run a build command inheriting stdio; throws on non-zero (build, not test).
+// run a build command, streaming its stdout/stderr through our tee'd streams (so it lands in the log
+// too, unlike inherited stdio); rejects on non-zero (build, not test).
 function run(cmd, args) {
   console.log(`\x1b[90m  $ ${[cmd, ...args].join(' ')}\x1b[0m`);
-  const res = spawnSync(cmd, args, { cwd: repoRoot, stdio: 'inherit', env: process.env });
-  if (res.error) throw new Error(`could not launch ${cmd}: ${res.error.message}`);
-  if (res.status !== 0) throw new Error(`${cmd} exited with ${res.status ?? `signal ${res.signal}`}`);
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, { cwd: repoRoot, stdio: ['inherit', 'pipe', 'pipe'], env: process.env });
+    child.stdout.on('data', (d) => process.stdout.write(d));
+    child.stderr.on('data', (d) => process.stderr.write(d));
+    child.on('error', (e) => reject(new Error(`could not launch ${cmd}: ${e.message}`)));
+    child.on('close', (code, signal) => {
+      if (code === 0) resolve();
+      else reject(new Error(`${cmd} exited with ${code ?? `signal ${signal}`}`));
+    });
+  });
 }
 
 // vmctl drives one door. vmctl wants the subcommand FIRST (a leading "-" makes it fall back to
@@ -151,10 +195,10 @@ async function readHostRetry(p, tries = 6, ms = 200) {
 // ----- build / preflight --------------------------------------------------------------------------
 
 function bundleComplete() {
-  return ['vmlinuz', 'initrd', rootfsName].every((f) => fs.existsSync(path.join(BUNDLE, f)));
+  return ['vmlinuz', 'initrd', rootfsName, guestdName].every((f) => fs.existsSync(path.join(BUNDLE, f)));
 }
 
-function ensureBuild() {
+async function ensureBuild() {
   if (flags.skipBuild) {
     section('Preflight (reusing build, --skip-build)');
     for (const [label, p] of [
@@ -173,11 +217,11 @@ function ensureBuild() {
 
   // build-all --only=host does the cgo build + (on macOS) the codesign VZ requires.
   section(`Build host + vmctl (${config})`);
-  run('node', [rel('scripts', 'build-all.mjs'), `--config=${config}`, '--only=host', '--no-verify']);
+  await run('node', [rel('scripts', 'build-all.mjs'), `--config=${config}`, '--only=host', '--no-verify']);
 
   if (flags.rebuildImage || !bundleComplete()) {
     section(`Build VM image bundle (${target})`);
-    run('node', [rel('scripts', 'build-all.mjs'), `--config=${config}`, '--only=image', '--no-verify']);
+    await run('node', [rel('scripts', 'build-all.mjs'), `--config=${config}`, '--only=image', '--no-verify']);
   } else {
     info(`image bundle present at ${BUNDLE} (pass --rebuild-image to force)`);
   }
@@ -206,6 +250,30 @@ async function waitForBroker() {
 function stopBroker() {
   vmctl('stopVM', ['-id', 'vm0'], { timeout: 30000 });
   if (broker && broker.exitCode === null) broker.kill('SIGTERM');
+}
+
+// The guest's serial console (kernel boot + init) is logged by both drivers as JSON `console` records
+// on the broker's stderr — already in BROKER_LOG, but interleaved with JSON-RPC audit noise. Distil
+// just those lines into a clean, readable kernel-console log beside it. Returns the line count.
+function extractConsole() {
+  let raw;
+  try {
+    raw = fs.readFileSync(BROKER_LOG, 'utf8');
+  } catch {
+    return 0; // broker never wrote a log
+  }
+  const lines = [];
+  for (const ln of raw.split('\n')) {
+    if (!ln.includes('"console"')) continue; // cheap prefilter before JSON.parse
+    try {
+      const rec = JSON.parse(ln);
+      if (rec.msg === 'console' && typeof rec.line === 'string') lines.push(rec.line);
+    } catch {
+      // skip partial / non-JSON lines
+    }
+  }
+  if (lines.length) fs.writeFileSync(CONSOLE_LOG, lines.join('\n') + '\n');
+  return lines.length;
 }
 
 // ----- the battery --------------------------------------------------------------------------------
@@ -237,6 +305,7 @@ async function runBattery(work) {
       '-kernel', path.join(BUNDLE, 'vmlinuz'),
       '-initrd', path.join(BUNDLE, 'initrd'),
       '-rootfs', path.join(BUNDLE, rootfsName),
+      '-guestd', path.join(BUNDLE, guestdName),
     ]);
     assert(r.status === 0, `${r.err}`);
     assert(JSON.parse(vmctl('getStatus').out).vmCount === 1, 'vmCount did not become 1');
@@ -422,7 +491,7 @@ async function main() {
   if (!isMac && !isWin) die(`unsupported platform '${process.platform}' (darwin or win32 only)`);
   if (isWin) warn('Windows path is unverified here; boot/exec go through HCS, not VZ.');
 
-  ensureBuild();
+  await ensureBuild();
 
   const work = fs.mkdtempSync(path.join(os.tmpdir(), 'atelier-e2e-'));
   let cleaned = false;
@@ -430,6 +499,7 @@ async function main() {
     if (cleaned) return;
     cleaned = true;
     stopBroker();
+    extractConsole();
     fs.rmSync(work, { recursive: true, force: true });
     fs.rmSync(ADDR, { force: true });
   };
@@ -452,6 +522,9 @@ async function main() {
   for (const n of pass) console.log(`  \x1b[32m✅ ${n}\x1b[0m`);
   for (const n of fail) console.log(`  \x1b[31m❌ ${n}\x1b[0m`);
   console.log(`\n  ${pass.length} passed, ${fail.length} failed  \x1b[90m(+${elapsed()})\x1b[0m`);
+  console.log(`  \x1b[90mfull log:   ${LOG_FILE}\x1b[0m`);
+  console.log(`  \x1b[90mbroker log: ${BROKER_LOG}\x1b[0m`);
+  if (fs.existsSync(CONSOLE_LOG)) console.log(`  \x1b[90mvm console: ${CONSOLE_LOG}\x1b[0m`);
   if (fail.length) {
     console.log(`\n\x1b[31mRESULT: FAIL\x1b[0m  (broker log: ${BROKER_LOG})`);
     process.exit(1);

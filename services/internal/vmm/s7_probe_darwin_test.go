@@ -51,10 +51,11 @@ func TestS7RuntimeShareProbe(t *testing.T) {
 		t.Fatal("ATELIER_BUNDLE_DIR must point at the darwin-arm64-vz bundle dir")
 	}
 	cfg := vmm.VMConfig{
-		ID:         probeVMID,
-		KernelPath: filepath.Join(bundle, "vmlinuz"),
-		InitrdPath: filepath.Join(bundle, "initrd"),
-		RootFSPath: filepath.Join(bundle, "rootfs.raw"),
+		ID:              probeVMID,
+		KernelPath:      filepath.Join(bundle, "vmlinuz"),
+		InitrdPath:      filepath.Join(bundle, "initrd"),
+		RootFSPath:      filepath.Join(bundle, "rootfs.raw"),
+		GuestdImagePath: filepath.Join(bundle, "guestd.raw"),
 	}
 
 	// Three host dirs, each with a unique sentinel file so we can tell which share

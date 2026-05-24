@@ -7,7 +7,7 @@
 //	vmctl [method] [flags]
 //
 //	vmctl getStatus
-//	vmctl createVM -id vm0 -kernel C:\path\vmlinuz -rootfs E:\path\rootfs.vhd [-initrd C:\path\initrd -mem 2048 -cpu 2]
+//	vmctl createVM -id vm0 -kernel C:\path\vmlinuz -rootfs E:\path\rootfs.vhd [-initrd C:\path\initrd -guestd B\guestd.img -mem 2048 -cpu 2]
 //	vmctl startVM  -id vm0
 //	vmctl stopVM   -id vm0
 //	vmctl exec     -id vm0 [-cwd /tmp] [-env K=V ...] [-session s1] -- ls -la /
@@ -95,6 +95,7 @@ func main() {
 	kernel := fs.String("kernel", "", "host path to a direct-boot kernel")
 	initrd := fs.String("initrd", "", "host path to the boot initrd (optional)")
 	rootfs := fs.String("rootfs", "", "host path to the rootfs VHD")
+	guestd := fs.String("guestd", "", "host path to the guestd volume image (darwin/VZ; attached ro as a second disk)")
 	mem := fs.Uint64("mem", 0, "memory in MB (0 = broker default)")
 	cpu := fs.Int("cpu", 0, "processor count (0 = broker default)")
 	cwd := fs.String("cwd", "", "working directory in the guest (exec)")
@@ -272,12 +273,13 @@ func main() {
 	switch method {
 	case "createVM":
 		params = map[string]any{
-			"id":         *id,
-			"kernelPath": *kernel,
-			"initrdPath": *initrd,
-			"rootfsPath": *rootfs,
-			"memoryMB":   *mem,
-			"cpuCount":   *cpu,
+			"id":              *id,
+			"kernelPath":      *kernel,
+			"initrdPath":      *initrd,
+			"rootfsPath":      *rootfs,
+			"guestdImagePath": *guestd,
+			"memoryMB":        *mem,
+			"cpuCount":        *cpu,
 		}
 	case "startVM", "stopVM":
 		params = map[string]any{"id": *id}

@@ -15,7 +15,7 @@ import path from "node:path";
 import { HostClient, type ExecRun, type OutputStream } from "../host-client";
 import type { LoopControl, LoopEvent } from "../host-client/types";
 import { WorkspaceWatcher, type WorkspaceUpdate } from "../workspace/watcher";
-import { resolveBundleDir, rootfsFileName } from "./bundle";
+import { guestdImageFileName, resolveBundleDir, rootfsFileName } from "./bundle";
 import { SessionStore } from "./store";
 
 export type SessionLifecycle = "starting" | "active" | "hibernating" | "inactive" | "resuming" | "error";
@@ -81,6 +81,7 @@ export class SessionManager {
   private readonly vmId: string;
   private readonly bundleDir: string;
   private readonly rootfsName: string;
+  private readonly guestdImageName: string;
   private readonly egressAllow: string[];
   private readonly bootTimeoutMs: number;
   private readonly idleMs: number;
@@ -102,6 +103,7 @@ export class SessionManager {
       arch: opts.arch,
     });
     this.rootfsName = rootfsFileName(platform);
+    this.guestdImageName = guestdImageFileName(platform);
     this.egressAllow = opts.egressAllow ?? ["api.anthropic.com"];
     this.bootTimeoutMs = opts.bootTimeoutMs ?? (Number(process.env.ATELIER_BOOT_TIMEOUT_MS) || 120_000);
     this.idleMs = opts.idleMs ?? (Number(process.env.ATELIER_IDLE_MS) || 10 * 60_000);
@@ -319,6 +321,7 @@ export class SessionManager {
         kernelPath: path.join(this.bundleDir, "vmlinuz"),
         initrdPath: path.join(this.bundleDir, "initrd"),
         rootfsPath: path.join(this.bundleDir, this.rootfsName),
+        guestdImagePath: path.join(this.bundleDir, this.guestdImageName),
         memoryMB: 0,
         cpuCount: 0,
       });

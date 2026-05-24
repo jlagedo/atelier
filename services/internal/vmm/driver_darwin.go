@@ -129,7 +129,25 @@ func (d *darwinDriver) Create(_ context.Context, cfg VMConfig) error {
 	if err != nil {
 		return fmt.Errorf("vm: rootfs block device: %w", err)
 	}
-	config.SetStorageDevicesVirtualMachineConfiguration([]vz.StorageDeviceConfiguration{blk})
+	storage := []vz.StorageDeviceConfiguration{blk}
+
+	// guestd volume: its own ro ext4 image attached as a second disk (-> /dev/vdb).
+	// init.sh mounts it by label (LABEL=guestd) and execs guestd from it, so guestd
+	// iterates without rebuilding the rootfs. Same trust model as the rootfs above
+	// (ro, opaque image; no host-fs mapping). Empty path = baked guestd (no second disk).
+	if cfg.GuestdImagePath != "" {
+		guestdDisk, err := vz.NewDiskImageStorageDeviceAttachment(cfg.GuestdImagePath, true)
+		if err != nil {
+			return fmt.Errorf("vm: guestd volume attachment: %w", err)
+		}
+		guestdBlk, err := vz.NewVirtioBlockDeviceConfiguration(guestdDisk)
+		if err != nil {
+			return fmt.Errorf("vm: guestd volume block device: %w", err)
+		}
+		storage = append(storage, guestdBlk)
+		d.log.Info("attaching guestd volume", "vm", cfg.ID, "path", cfg.GuestdImagePath)
+	}
+	config.SetStorageDevicesVirtualMachineConfiguration(storage)
 
 	// Entropy: a virtio-rng source keeps Linux boot from stalling on early
 	// getrandom() before the guest gathers its own entropy.

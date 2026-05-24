@@ -67,11 +67,19 @@ modprobe vmw_vsock_virtio_transport 2>/dev/null || true
 # it no-ops where virtiofs is built-in or absent (e.g. the Hyper-V bundle, which mounts 9p).
 modprobe virtiofs 2>/dev/null || true
 
-# guestd becomes the long-running PID 1. Fall back to a shell if it isn't shipped
-# (e.g. a bundle built without it) so the VM still boots and stays debuggable.
-if [ -x /usr/sbin/guestd ]; then
-  echo "atelier guest init: starting guestd (vsock RPC server) ..."
-  exec /usr/sbin/guestd
+# guestd becomes the long-running PID 1 (the vsock RPC server). It is NOT baked into the
+# rootfs — it ships as its own read-only ext4 volume (image/build.sh guestd; LABEL=guestd)
+# attached as a second disk, so guestd can be rebuilt in seconds without rebuilding the whole
+# rootfs. Mount it by label so it's device-order-independent and needs no udev (libblkid scans
+# /dev directly). The volume is the sole delivery path on every target; a missing/unmountable
+# volume drops to a shell so the failure is visible on the serial console.
+# /opt/guestd is baked into the rootfs (image/build.sh) because the root is read-only — a
+# runtime `mkdir` there would EROFS-fail (and, under `set -e`, kill PID 1). Keep a tolerant
+# mkdir anyway so a missing mountpoint degrades to a shell instead of a panic.
+mkdir -p /opt/guestd 2>/dev/null || true
+if mount -t ext4 -o ro -L guestd /opt/guestd 2>/dev/null && [ -x /opt/guestd/guestd ]; then
+  echo "atelier guest init: starting guestd from volume (LABEL=guestd) ..."
+  exec /opt/guestd/guestd
 fi
-echo "atelier guest init: guestd not installed — dropping to shell"
+echo "atelier guest init: guestd volume (LABEL=guestd) not mounted — dropping to shell"
 exec /bin/sh

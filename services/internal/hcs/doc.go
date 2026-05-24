@@ -48,6 +48,11 @@ type DocConfig struct {
 	// RootFSReadOnly attaches the root disk read-only (default false: rw).
 	RootFSReadOnly bool
 
+	// GuestdImagePath, when set, attaches the guestd volume (its own ro ext4-in-VHD)
+	// as a second SCSI disk (surfaced in-guest as /dev/sdb). init.sh mounts it by
+	// LABEL=guestd and execs guestd from it — guestd is not baked into the rootfs.
+	GuestdImagePath string
+
 	// MemoryMB / ProcessorCount default to 2048 / 2 when zero.
 	MemoryMB       uint64
 	ProcessorCount int32
@@ -82,15 +87,26 @@ func MakeLCOWDoc(c DocConfig) ([]byte, error) {
 		cpu = 2
 	}
 
+	// SCSI controller 0: the rootfs at LUN 0 (/dev/sda) and, when shipped, the guestd
+	// volume at LUN 1 (/dev/sdb, always read-only). init.sh mounts the latter by label.
+	scsiAttachments := map[string]Attachment{
+		"0": {
+			Type:     "VirtualDisk",
+			Path:     c.RootFSPath,
+			ReadOnly: c.RootFSReadOnly,
+		},
+	}
+	if c.GuestdImagePath != "" {
+		scsiAttachments["1"] = Attachment{
+			Type:     "VirtualDisk",
+			Path:     c.GuestdImagePath,
+			ReadOnly: true,
+		}
+	}
+
 	devices := &Devices{
 		Scsi: map[string]Scsi{
-			"0": {Attachments: map[string]Attachment{
-				"0": {
-					Type:     "VirtualDisk",
-					Path:     c.RootFSPath,
-					ReadOnly: c.RootFSReadOnly,
-				},
-			}},
+			"0": {Attachments: scsiAttachments},
 		},
 		HvSocket: &HvSocket2{
 			HvSocketConfig: &HvSocketSystemConfig{

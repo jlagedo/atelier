@@ -77,8 +77,8 @@ The orchestrator (zero-dep Node, runs on both OSes) drives the chain in order �
 protogen → host build (cgo + codesign, done **in-process**, no per-OS shell script) → VM image →
 desktop → verify — branching only for the irreducible platform bits: `codesign` on macOS (VZ refuses
 an unsigned broker) and the `wsl` prefix for the Docker image build on Windows (unverified from a
-Mac). `guestd` is cross-compiled into the rootfs by the image build (not a host binary); verify also
-linux-cross-compiles it.
+Mac). `guestd` is **not** baked into the rootfs — it ships as its own ro volume (`guestd.{raw,vhd}`),
+cross-compiled by the image build and attached as a second disk; verify also linux-cross-compiles it.
 
 The image build lives in `image/build.sh` — one cross-OS bash+Docker script (native on macOS, via
 `wsl` on Windows). It writes to `image/bundle/<target>/` by default; the orchestrator redirects it
@@ -138,8 +138,9 @@ Conventions:
 
 Module: `github.com/jlagedo/atelier/services`. Protocol (Hop 2, design §8): JSON-RPC 2.0 with
 Content-Length framing, over a named pipe on Windows / a unix socket for dev. Three binaries under
-`cmd/`: **`host`** (the privileged broker), **`guestd`** (the in-VM daemon, cross-compiled into the
-rootfs by `image/build.sh`), **`vmctl`** (dev CLI).
+`cmd/`: **`host`** (the privileged broker), **`guestd`** (the in-VM daemon, shipped as its own ro
+volume — `image/build.sh guestd` — attached as a second disk, **not** baked into the rootfs, so it
+iterates without rebuilding the image), **`vmctl`** (dev CLI).
 
 ```sh
 cd services
@@ -246,10 +247,17 @@ Builds the utility-VM bundle (kernel + initrd + ext4 rootfs VHD), Cowork's `clau
 analog (design §7). Sources are tracked under `image/{rootfs,initrd,kernel,guest}`; build output
 goes to `image/bundle/` (gitignored). The matched kernel + `/lib/modules` + boot initramfs all come
 from one Ubuntu 22.04 Docker build (so the §7 coupling holds by construction); the same build
-cross-compiles `guestd` and bakes the in-guest agent (`stage_context` assembles a small Docker
+cross-compiles `gvforwarder` and bakes the in-guest agent (`stage_context` assembles a small Docker
 context from `packages/{agent,provider,protocol}` source and runs `npm install` inside the
 target-arch build — `--platform linux/amd64` or `linux/arm64`). Big artifacts (multi-GB VHDs) are
 **not** committed — produced here and stored externally, not in git/LFS.
+
+`guestd` is **not** baked into the rootfs: `image/build.sh guestd` ships it as its own tiny ro ext4
+**volume** (`guestd.raw` for VZ / `guestd.vhd` for HCS, `LABEL=guestd`), attached as a second disk
+and mounted+exec'd by `image/guest/init.sh`. This is the fast dev loop — rebuild only the volume
+(~10s: compile + `mke2fs`, no rootfs export/apt/npm) and reboot, instead of the whole image.
+`createVM` carries its host path (`guestdImagePath`); `vmctl createVM -guestd <img>` and the desktop
+Session Manager both supply it from the bundle. `make all` / `build:all` include it automatically.
 
 A build `TARGET` (default `windows-amd64-hyperv`) selects guest arch + Docker platform + GOARCH +
 disk format + per-target output dir; output goes to `<base>/<target>/`, where `<base>` is `bundle`

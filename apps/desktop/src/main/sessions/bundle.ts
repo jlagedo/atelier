@@ -19,6 +19,13 @@ export function rootfsFileName(platform: NodeJS.Platform = process.platform): st
   return platform === "win32" ? "rootfs.vhd" : "rootfs.raw";
 }
 
+// guestd ships as its own ro volume (not baked into the rootfs) so it can be rebuilt
+// without the whole image; attached as a second disk and mounted by init.sh (LABEL=guestd).
+// Same disk-format split as the rootfs: HCS wants a VHD, VZ takes raw ext4 (image/build.sh).
+export function guestdImageFileName(platform: NodeJS.Platform = process.platform): string {
+  return platform === "win32" ? "guestd.vhd" : "guestd.raw";
+}
+
 export interface BundleResolveInput {
   optsBundleDir?: string; // constructor option (highest precedence)
   env?: NodeJS.ProcessEnv; // for ATELIER_BUNDLE_DIR (defaults to process.env)

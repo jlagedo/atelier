@@ -54,9 +54,12 @@ func (d *windowsDriver) Create(ctx context.Context, cfg VMConfig) error {
 		KernelFilePath: cfg.KernelPath,
 		InitrdPath:     cfg.InitrdPath,
 		RootFSPath:     cfg.RootFSPath,
-		MemoryMB:       cfg.MemoryMB,
-		ProcessorCount: cfg.CPUCount,
-		ConsolePipe:    pipe,
+		// guestd ships as its own ro volume, SCSI-attached as a second disk (/dev/sdb)
+		// and mounted by init.sh (LABEL=guestd); it is not baked into the rootfs.
+		GuestdImagePath: cfg.GuestdImagePath,
+		MemoryMB:        cfg.MemoryMB,
+		ProcessorCount:  cfg.CPUCount,
+		ConsolePipe:     pipe,
 		// Root is immutable (CRIT-05): attach the rootfs read-only and boot `ro`. The
 		// agent's writable surfaces are the workspace/session shares and the boot-time
 		// tmpfs mounts (image/guest/init.sh); the freshly-built ext4 is clean so a
@@ -73,6 +76,9 @@ func (d *windowsDriver) Create(ctx context.Context, cfg VMConfig) error {
 	paths := []string{cfg.RootFSPath, cfg.KernelPath}
 	if cfg.InitrdPath != "" {
 		paths = append(paths, cfg.InitrdPath)
+	}
+	if cfg.GuestdImagePath != "" {
+		paths = append(paths, cfg.GuestdImagePath)
 	}
 	for _, p := range paths {
 		if err := hcs.GrantVMAccess(cfg.ID, p); err != nil {

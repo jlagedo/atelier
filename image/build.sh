@@ -12,7 +12,7 @@
 # coupling rule of design.md §7 holds by construction). `rootfs` builds the ext4;
 # `kernel`/`initrd` extract + pin vmlinuz/initrd from /boot of that same tree.
 #
-# Usage: image/build.sh {check|rootfs|initrd|kernel|bundle|all|clean}
+# Usage: image/build.sh {check|rootfs|initrd|kernel|guestd|bundle|all|clean}
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -66,6 +66,7 @@ stage_context() {
 
 cmd_check() {
   log "target:  $TARGET (arch=$ARCH platform=$DOCKER_PLATFORM goarch=$GOARCH disk=$DISK out=$OUT)"
+  log "guestd:  shipped as its own volume (guestd.$([ "$DISK" = raw ] && echo raw || echo vhd)), not baked into the rootfs"
   log "tool readiness:"
   for t in docker go qemu-img sha256sum; do
     if have "$t"; then printf '  ok    %s\n' "$t"; else printf '  MISSING %s\n' "$t"; fi
@@ -103,14 +104,11 @@ ensure_tree() {
   rm -rf "$WORK/rootfs"; mkdir -p "$WORK/rootfs"
   tar -x -C "$WORK/rootfs" -f "$WORK/rootfs.tar"
 
-  # Cross-compile the guest daemon (design.md §8 Hop 3). CGO_ENABLED=0 => fully static.
-  # The binaries are staged in $WORK/bin and installed into the ext4 by the imager step
-  # (cmd_rootfs), not into the host tree (which is only used for /boot extraction).
-  have go || die "go not found (needed to cross-compile the guest daemon, services/cmd/guestd)"
+  # gvforwarder is baked into the rootfs (installed by the imager step below); guestd is NOT —
+  # it ships as its own volume built separately by cmd_guestd, so it iterates without an image
+  # rebuild. Both need the Go toolchain + a staging dir under $WORK/bin.
+  have go || die "go not found (needed to cross-compile the guest network forwarder, gvforwarder)"
   mkdir -p "$WORK/bin"
-  log "building guest daemon (guestd, linux/$GOARCH static)"
-  local gout; gout="$(pwd)/$WORK/bin/guestd"
-  ( cd ../services && env GOOS=linux GOARCH="$GOARCH" CGO_ENABLED=0 go build -trimpath -o "$gout" ./cmd/guestd )
 
   # Guest network forwarder (gvforwarder, design.md §8 Hop 3 channel 2 — S4.1):
   # gvisor-tap-vsock's cmd/vm at the exact version services/go.mod pins (go install
@@ -165,8 +163,8 @@ cmd_rootfs() {
 mkdir -p /rootfs
 tar -x -C /rootfs -f /rootfs.tar
 install -D -m 0755 /init.sh     /rootfs/sbin/init
-install -D -m 0755 /guestd      /rootfs/usr/sbin/guestd
 install -D -m 0755 /gvforwarder /rootfs/usr/sbin/gvforwarder
+mkdir -p /rootfs/opt/guestd
 printf "nameserver 192.168.127.1\n" > /rootfs/etc/resolv.conf
 chmod 0755 /rootfs/usr /rootfs/usr/bin /rootfs/usr/sbin /rootfs/bin /rootfs/sbin /rootfs/etc
 chmod 0644 /rootfs/etc/passwd
@@ -175,7 +173,6 @@ chown -R 0:0 /rootfs/usr /rootfs/etc
 mke2fs -q -t ext4 -L atelier-root -d /rootfs -r 1 -N 0 -m 1 /rootfs.ext4 4G'
   local icid; icid="$(docker create atelier-imager bash -c "$build")"
   docker cp "$WORK/rootfs.tar"      "$icid:/rootfs.tar"
-  docker cp "$WORK/bin/guestd"      "$icid:/guestd"
   docker cp "$WORK/bin/gvforwarder" "$icid:/gvforwarder"
   docker cp guest/init.sh           "$icid:/init.sh"
   if ! docker start -a "$icid"; then
@@ -224,7 +221,7 @@ cmd_bundle() {
   mkdir -p "$OUT"
   log "assembling bundle in $OUT/ (pin kernel+initrd+rootfs with sha256 .origin markers)"
   written=0
-  for f in vmlinuz initrd rootfs.vhd rootfs.raw rootfs.ext4; do
+  for f in vmlinuz initrd rootfs.vhd rootfs.raw rootfs.ext4 guestd.vhd guestd.raw; do
     if [ -f "$OUT/$f" ]; then
       sha256sum "$OUT/$f" | awk '{print $1}' > "$OUT/$f.origin"
       printf '  pinned %s -> %s.origin\n' "$f" "$f"
@@ -244,9 +241,52 @@ built:  $(date -u +%Y-%m-%dT%H:%M:%SZ)
 EOF
 }
 
+# cmd_guestd builds the guestd volume — guestd's own tiny ro ext4, shipped as a separate disk
+# so guestd iterates in seconds without rebuilding the rootfs (design.md §7/§8). Self-contained:
+# it does NOT call ensure_tree (no rootfs export/apt/npm). Cross-compile guestd, mke2fs -d a
+# labeled ext4 INSIDE the imager (perms preserved, no host mke2fs), then emit raw (VZ attaches
+# as-is) or convert to VHD (HCS SCSI disk), mirroring cmd_rootfs's disk emit.
+cmd_guestd() {
+  have go     || die "go not found (needed to cross-compile guestd, services/cmd/guestd)"
+  have docker || die "docker not found (needed to mke2fs the guestd volume in the imager)"
+  mkdir -p "$WORK/bin" "$OUT"
+  log "building guest daemon (guestd, linux/$GOARCH static) for the guestd volume"
+  local gout; gout="$(pwd)/$WORK/bin/guestd"
+  ( cd ../services && env GOOS=linux GOARCH="$GOARCH" CGO_ENABLED=0 go build -trimpath -o "$gout" ./cmd/guestd )
+
+  log "building imager image (e2fsprogs) for in-Linux ext4 population"
+  docker build --platform "$DOCKER_PLATFORM" -t atelier-imager imager
+
+  log "packing guestd volume (LABEL=guestd, /guestd) — tiny ext4 via mke2fs -d"
+  local build='set -eu
+mkdir -p /stage
+install -D -m 0755 /guestd /stage/guestd
+mke2fs -q -t ext4 -L guestd -d /stage -r 1 -N 0 -m 0 /guestd.ext4 64M'
+  local icid; icid="$(docker create atelier-imager bash -c "$build")"
+  docker cp "$WORK/bin/guestd" "$icid:/guestd"
+  if ! docker start -a "$icid"; then
+    docker rm -f "$icid" >/dev/null 2>&1 || true
+    die "imager failed to build the guestd volume"
+  fi
+  docker cp "$icid:/guestd.ext4" "$WORK/guestd.ext4"
+  docker rm -f "$icid" >/dev/null 2>&1 || true
+
+  if [ "$DISK" = raw ]; then
+    log "emitting raw guestd volume for $TARGET (VZ attaches it as-is)"
+    cp "$WORK/guestd.ext4" "$OUT/guestd.raw"
+  elif have qemu-img; then
+    log "converting guestd volume ext4 -> VHD (HCS SCSI disk)"
+    qemu-img convert -f raw -O vpc "$WORK/guestd.ext4" "$OUT/guestd.vhd"
+  else
+    die "qemu-img missing — needed to convert the guestd volume to VHD for $TARGET"
+  fi
+  log "guestd volume done"
+}
+
 # rootfs first builds the tree once; kernel/initrd extract from the retained
-# $WORK/rootfs (ensure_tree is memoized for the invocation).
-cmd_all() { cmd_rootfs; cmd_kernel; cmd_initrd; cmd_bundle; }
+# $WORK/rootfs (ensure_tree is memoized for the invocation). guestd ships as its own
+# volume (cmd_guestd), built before the bundle pins everything.
+cmd_all() { cmd_rootfs; cmd_kernel; cmd_initrd; cmd_guestd; cmd_bundle; }
 
 # OUT/WORK are per-target (bundle/$TARGET, .work/$TARGET), so removing them wholesale never
 # touches bundle/README.md or the other target's output.
@@ -257,8 +297,9 @@ case "${1:-}" in
   rootfs) cmd_rootfs ;;
   initrd) cmd_initrd ;;
   kernel) cmd_kernel ;;
+  guestd) cmd_guestd ;;
   bundle) cmd_bundle ;;
   all)    cmd_all ;;
   clean)  cmd_clean ;;
-  *) echo "usage: $0 {check|rootfs|initrd|kernel|bundle|all|clean}" >&2; exit 2 ;;
+  *) echo "usage: $0 {check|rootfs|initrd|kernel|guestd|bundle|all|clean}" >&2; exit 2 ;;
 esac
