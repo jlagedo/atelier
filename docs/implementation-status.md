@@ -500,9 +500,10 @@ Tiny but blocking. No product code; just make the toolchain usable.
   out-of-cage tools (`WebFetch`/`WebSearch`) + unknowns (`src/seams/policy.ts`). **callModel** escapes
   via the **existing egress jail** (S4.1): `vmctl agent` calls `setEgressPolicy(["api.anthropic.com"])`
   then execs the agent over the broker — so **no new guestd/broker/protocol code was needed**.
-  Packaging: the rootfs now ships **NodeSource Node 22** (apt's is v12) and the agent + `node_modules`
-  baked in at `/opt/atelier/packages/agent` (`image/rootfs/Dockerfile` + a staged build context in
-  `image/build.sh`); runs via `tsx`. Live run against `vm0`: `node v22.22.2`, agent did built-in
+  Packaging: the rootfs ships **NodeSource Node 22** (apt's is v12) as the runtime; the agent +
+  `node_modules` ship on the guestd volume at `/opt/atelier/packages/agent` (`image/agent/Dockerfile`
+  + `stage_agent_ctx` in `image/build.sh`, packed by `cmd_guestd`; mounted at `/opt`), **not** baked
+  into the rootfs; runs via `tsx`. Live run against `vm0`: `node v22.22.2`, agent did built-in
   Read → Write and produced `/workspace/summary.csv` (grand total **37.50**, identical on the host via
   9p), the write **audited** by policy; exit 0. **Containment proof:** clearing the allowlist
   (`setEgressPolicy []`) makes the model unreachable from the cage (`curl api.anthropic.com` →

@@ -48,7 +48,7 @@ const isMac = process.platform === 'darwin';
 const exe = isWin ? '.exe' : '';
 const target = isMac ? 'darwin-arm64-vz' : 'windows-amd64-hyperv';
 const rootfsName = isMac ? 'rootfs.raw' : 'rootfs.vhd';
-const guestdName = isMac ? 'guestd.raw' : 'guestd.vhd'; // guestd ships as its own volume (not baked)
+const guestdName = isMac ? 'guestd.raw' : 'guestd.vhd'; // guest payload volume: guestd + agent (not baked into rootfs)
 
 // ----- args ---------------------------------------------------------------------------------------
 

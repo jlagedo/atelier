@@ -164,7 +164,7 @@ func main() {
 
 	// agent (S5b.1) runs the agent loop INSIDE the guest (Topology B). We open
 	// egress to the model host (default api.anthropic.com; -allow overrides), then
-	// exec the in-guest agent CLI baked into the rootfs at /opt/atelier. The loop's
+	// exec the in-guest agent CLI shipped on the guestd volume at /opt/atelier. The loop's
 	// tools are the SDK's built-ins acting on the guest fs; only the model call
 	// leaves the cage. The API key rides in via the exec env (the operator's env);
 	// telemetry/autoupdate are disabled so the allowlist can stay tight.

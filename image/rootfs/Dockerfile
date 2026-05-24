@@ -43,8 +43,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       linux-image-virtual-hwe-24.04 \
     && rm -rf /var/lib/apt/lists/*
 
-# Modern Node + npm (NodeSource). The in-guest agent loop (Topology B, S5b.1) and
-# the SDK require Node >=18; pin the 22.x line to match packages/agent's engines.
+# Modern Node + npm (NodeSource). The in-guest agent loop (Topology B, S5b.1) runs via
+# tsx under this Node runtime; the SDK requires Node >=18, pin the 22.x line to match
+# packages/agent's engines. (The agent's own code + node_modules are NOT baked here — they
+# ship on the guestd volume; see /opt below and image/agent/Dockerfile.)
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
@@ -52,22 +54,16 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 # /workspace is the only persistent mount (9p/virtiofs share from the host).
 RUN mkdir -p /workspace
 
-# In-guest agent loop (Topology B, S5b.1, design.md §8): the same TS loop as the
-# host (Topology A) but running in the cage, using the SDK's built-in tools on the
-# guest fs. image/build.sh stages packages/{agent,provider,protocol} into the build
-# context (source only); we install the agent's runtime deps here so they're baked
-# into the rootfs (linux/amd64, correct platform binaries). Run via tsx; the agent
-# imports provider/protocol by relative path, so the layout must be preserved.
-COPY packages /opt/atelier/packages
-RUN cd /opt/atelier/packages/agent \
-    && npm ci --omit=dev \
-    && npm cache clean --force
+# /opt is the mountpoint for the guestd volume (LABEL=guestd), which carries BOTH guestd
+# (/opt/guestd/guestd) and the in-guest agent (/opt/atelier) — neither is baked into the
+# rootfs, so both iterate in seconds without a rootfs rebuild (image/build.sh guestd,
+# image/guest/init.sh). It exists in the base image; the mount shadows it at boot.
 
-# Non-root agent user (CRIT-01): the in-guest agent drops to uid 1001 via bwrap. /opt
-# stays root-owned (the agent only reads/execs it, and root is read-only at runtime); the
-# agent's writable HOME is /home/atelier (a tmpfs at boot — see image/guest/init.sh).
-# /sessions is the parent of per-session 9p mount points (also a tmpfs at boot), so
-# guestd can mkdir under it on the read-only root.
+# Non-root agent user (CRIT-01): the in-guest agent drops to uid 1001 via bwrap. The agent
+# tree under /opt is root-owned and read-only at runtime (the agent only reads/execs it); its
+# writable HOME is /home/atelier (a tmpfs at boot — see image/guest/init.sh). /sessions is the
+# parent of per-session 9p mount points (also a tmpfs at boot), so guestd can mkdir under it on
+# the read-only root.
 RUN useradd -u 1001 -m -d /home/atelier -s /usr/sbin/nologin atelier \
     && mkdir -p /sessions
 

@@ -39,34 +39,35 @@ die() { printf '\033[1;31m[image] error:\033[0m %s\n' "$*" >&2; exit 1; }
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
-# stage_context assembles a SMALL, controlled Docker build context in $WORK/ctx so
-# the rootfs Dockerfile can COPY the in-guest agent (Topology B, S5b.1). The repo
-# root is too big to send as context (rootfs.vhd, .git, node_modules); instead we
-# copy just the Dockerfile + packages/{agent,provider,protocol} SOURCE (no
-# node_modules/dist) and build from there. npm install runs INSIDE the Docker build
-# (linux/amd64) so the baked node_modules has the right platform binaries.
+# stage_pkg DEST PKG — copy packages/PKG SOURCE (no node_modules/dist/.git) into
+# DEST/packages/PKG. Used to assemble a small, controlled Docker build context (the repo
+# root is too big to send — rootfs.vhd, .git, node_modules).
 stage_pkg() {
-  local p="$1"
-  mkdir -p "$WORK/ctx/packages/$p"
+  local dest="$1" p="$2"
+  mkdir -p "$dest/packages/$p"
   ( cd "../packages/$p" && tar --exclude=node_modules --exclude=dist --exclude=.git -cf - . ) \
-    | ( cd "$WORK/ctx/packages/$p" && tar -xf - )
+    | ( cd "$dest/packages/$p" && tar -xf - )
 }
 
-stage_context() {
+# stage_agent_ctx assembles the in-guest agent's Docker build context in $WORK/agentctx so
+# image/agent/Dockerfile can COPY + npm-install the agent (Topology B, S5b.1). The agent is
+# packed into the guestd volume (cmd_guestd), NOT baked into the rootfs. npm install runs INSIDE
+# that build (linux/$GOARCH via --platform) so the node_modules has the right platform binaries.
+stage_agent_ctx() {
   # protocol/src is generated (gitignored). It must exist before we stage it.
   [ -f "../packages/protocol/src/index.ts" ] \
     || die "packages/protocol/src is missing — run 'npm run protogen' at the repo root first"
-  rm -rf "$WORK/ctx"
-  mkdir -p "$WORK/ctx/packages"
-  cp rootfs/Dockerfile "$WORK/ctx/Dockerfile"
-  stage_pkg agent
-  stage_pkg provider
-  stage_pkg protocol
+  rm -rf "$WORK/agentctx"
+  mkdir -p "$WORK/agentctx/packages"
+  cp agent/Dockerfile "$WORK/agentctx/Dockerfile"
+  stage_pkg "$WORK/agentctx" agent
+  stage_pkg "$WORK/agentctx" provider
+  stage_pkg "$WORK/agentctx" protocol
 }
 
 cmd_check() {
   log "target:  $TARGET (arch=$ARCH platform=$DOCKER_PLATFORM goarch=$GOARCH disk=$DISK out=$OUT)"
-  log "guestd:  shipped as its own volume (guestd.$([ "$DISK" = raw ] && echo raw || echo vhd)), not baked into the rootfs"
+  log "volume:  guestd + in-guest agent shipped together on one volume (guestd.$([ "$DISK" = raw ] && echo raw || echo vhd)), not baked into the rootfs"
   log "tool readiness:"
   for t in docker go qemu-img sha256sum; do
     if have "$t"; then printf '  ok    %s\n' "$t"; else printf '  MISSING %s\n' "$t"; fi
@@ -86,11 +87,10 @@ ensure_tree() {
   have docker || die "docker not found (needed to build/export the Ubuntu rootfs + kernel)"
   mkdir -p "$WORK/rootfs" "$OUT"
 
-  log "staging build context (Dockerfile + packages/{agent,provider,protocol})"
-  stage_context
-
+  # The rootfs no longer COPYs the agent (it ships on the guestd volume — cmd_guestd), so its
+  # build context is just image/rootfs/ (the Dockerfile). No package staging needed here.
   log "building rootfs container image ($ROOTFS_TAG, $DOCKER_PLATFORM)"
-  docker build --platform "$DOCKER_PLATFORM" -t "$ROOTFS_TAG" "$WORK/ctx"
+  docker build --platform "$DOCKER_PLATFORM" -t "$ROOTFS_TAG" rootfs
 
   log "exporting container filesystem (tar preserves perms; the ext4 is built from it in Linux)"
   cid="$(docker create "$ROOTFS_TAG")"
@@ -104,9 +104,9 @@ ensure_tree() {
   rm -rf "$WORK/rootfs"; mkdir -p "$WORK/rootfs"
   tar -x -C "$WORK/rootfs" -f "$WORK/rootfs.tar"
 
-  # gvforwarder is baked into the rootfs (installed by the imager step below); guestd is NOT —
-  # it ships as its own volume built separately by cmd_guestd, so it iterates without an image
-  # rebuild. Both need the Go toolchain + a staging dir under $WORK/bin.
+  # gvforwarder is baked into the rootfs (installed by the imager step below); guestd + the
+  # in-guest agent are NOT — they ship on the guestd volume built separately by cmd_guestd, so
+  # they iterate without an image rebuild. gvforwarder needs the Go toolchain + $WORK/bin.
   have go || die "go not found (needed to cross-compile the guest network forwarder, gvforwarder)"
   mkdir -p "$WORK/bin"
 
@@ -164,7 +164,7 @@ mkdir -p /rootfs
 tar -x -C /rootfs -f /rootfs.tar
 install -D -m 0755 /init.sh     /rootfs/sbin/init
 install -D -m 0755 /gvforwarder /rootfs/usr/sbin/gvforwarder
-mkdir -p /rootfs/opt/guestd
+mkdir -p /rootfs/opt
 printf "nameserver 192.168.127.1\n" > /rootfs/etc/resolv.conf
 chmod 0755 /rootfs/usr /rootfs/usr/bin /rootfs/usr/sbin /rootfs/bin /rootfs/sbin /rootfs/etc
 chmod 0644 /rootfs/etc/passwd
@@ -241,29 +241,53 @@ built:  $(date -u +%Y-%m-%dT%H:%M:%SZ)
 EOF
 }
 
-# cmd_guestd builds the guestd volume — guestd's own tiny ro ext4, shipped as a separate disk
-# so guestd iterates in seconds without rebuilding the rootfs (design.md §7/§8). Self-contained:
-# it does NOT call ensure_tree (no rootfs export/apt/npm). Cross-compile guestd, mke2fs -d a
-# labeled ext4 INSIDE the imager (perms preserved, no host mke2fs), then emit raw (VZ attaches
-# as-is) or convert to VHD (HCS SCSI disk), mirroring cmd_rootfs's disk emit.
+# cmd_guestd builds the guestd volume — one ro ext4 shipped as a separate disk so guestd AND the
+# in-guest agent iterate in seconds without rebuilding the rootfs (design.md §7/§8). It carries
+# both: guestd (/opt/guestd/guestd, the vsock RPC daemon) and the agent (/opt/atelier, Topology B
+# — code + node_modules). init.sh mounts the volume ro at /opt. Self-contained vs the rootfs (no
+# ensure_tree, no apt/kernel), but the agent's node_modules DO need a target-arch npm install, so
+# this builds image/agent/Dockerfile (npm ci) and exports /opt/atelier from it. Cross-compile
+# guestd, pack a labeled ext4 INSIDE the imager (perms preserved, sized from the staged tree),
+# then emit raw (VZ attaches as-is) or convert to VHD (HCS SCSI disk), mirroring cmd_rootfs.
 cmd_guestd() {
   have go     || die "go not found (needed to cross-compile guestd, services/cmd/guestd)"
-  have docker || die "docker not found (needed to mke2fs the guestd volume in the imager)"
+  have docker || die "docker not found (needed to build the agent payload + mke2fs the volume)"
   mkdir -p "$WORK/bin" "$OUT"
   log "building guest daemon (guestd, linux/$GOARCH static) for the guestd volume"
   local gout; gout="$(pwd)/$WORK/bin/guestd"
   ( cd ../services && env GOOS=linux GOARCH="$GOARCH" CGO_ENABLED=0 go build -trimpath -o "$gout" ./cmd/guestd )
 
+  log "staging agent build context (agent/Dockerfile + packages/{agent,provider,protocol})"
+  stage_agent_ctx
+  local agent_tag="atelier-agent:${UBUNTU_VERSION}-${ARCH}"
+  log "building agent payload image ($agent_tag, $DOCKER_PLATFORM) — npm ci for linux/$GOARCH"
+  docker build --platform "$DOCKER_PLATFORM" -t "$agent_tag" "$WORK/agentctx"
+  log "exporting agent tree (/opt/atelier) from the payload image"
+  local acid; acid="$(docker create "$agent_tag")"
+  rm -rf "$WORK/agent"; mkdir -p "$WORK/agent"
+  docker cp "$acid:/opt/atelier" "$WORK/agent/atelier"   # -> $WORK/agent/atelier/packages/...
+  docker rm -f "$acid" >/dev/null 2>&1 || true
+
   log "building imager image (e2fsprogs) for in-Linux ext4 population"
   docker build --platform "$DOCKER_PLATFORM" -t atelier-imager imager
 
-  log "packing guestd volume (LABEL=guestd, /guestd) — tiny ext4 via mke2fs -d"
+  log "packing guestd volume (LABEL=guestd; /guestd + /atelier) — ext4 via mke2fs -d"
+  # Combined payload: guestd binary + the agent tree, both root-owned (read-only at runtime; the
+  # agent drops to uid 1001 via bwrap). Size from the staged tree (node_modules dominates) + 128M
+  # headroom so mke2fs -d always fits. node_modules has thousands of tiny files, so the default
+  # inode budget (~1/16KB) under-provisions — set -N from the actual file count + margin or the
+  # populate fails with "out of inodes". mke2fs -d needs no mount/loop/privilege.
   local build='set -eu
-mkdir -p /stage
-install -D -m 0755 /guestd /stage/guestd
-mke2fs -q -t ext4 -L guestd -d /stage -r 1 -N 0 -m 0 /guestd.ext4 64M'
+mkdir -p /stage/guestd
+install -D -m 0755 /guestd /stage/guestd/guestd
+cp -a /atelier /stage/atelier
+chown -R 0:0 /stage
+sz=$(($(du -sm /stage | cut -f1) + 128))
+ninodes=$(($(find /stage | wc -l) + 4096))
+mke2fs -q -t ext4 -L guestd -d /stage -r 1 -N "$ninodes" -m 0 /guestd.ext4 "${sz}M"'
   local icid; icid="$(docker create atelier-imager bash -c "$build")"
-  docker cp "$WORK/bin/guestd" "$icid:/guestd"
+  docker cp "$WORK/bin/guestd"    "$icid:/guestd"
+  docker cp "$WORK/agent/atelier" "$icid:/atelier"
   if ! docker start -a "$icid"; then
     docker rm -f "$icid" >/dev/null 2>&1 || true
     die "imager failed to build the guestd volume"

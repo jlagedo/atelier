@@ -61,9 +61,10 @@ for (const a of process.argv.slice(2)) {
 
 // Which phases run this invocation. --only narrows to one; otherwise all three.
 const want = (p) => !flags.only || flags.only === p;
-// The image phase always (re)builds the cheap guestd volume; the heavy rootfs+kernel+initrd image
-// is opt-in (--image, or implied by --only=image). So a default run produces a fresh guestd next
-// to a reused image, and `--image` / `--only=image` rebuilds the whole bundle.
+// The image phase always (re)builds the guestd volume (which now carries both guestd AND the
+// in-guest agent — code + node_modules); the heavy rootfs+kernel+initrd image is opt-in (--image,
+// or implied by --only=image). So a default run produces a fresh guest payload volume next to a
+// reused image, and `--image` / `--only=image` rebuilds the whole bundle.
 const buildFullImage = want('image') && (flags.image || flags.only === 'image');
 const buildGuestd = want('image') && !buildFullImage;
 
@@ -263,8 +264,10 @@ function imageBuild() {
     imageRun('all'); // -> build/<config>/image/<target>/{vmlinuz,initrd,rootfs.*,guestd.*,*.origin,manifest.txt}
     info(`image/${target}/ -> build/${flags.config}/image/${target}/`);
   } else {
-    // Default: the heavy image is skipped; only the guestd volume is (re)built — fast (~10s) and the
-    // piece that iterates most. The rootfs/kernel/initrd are reused from a prior --image run.
+    // Default: the heavy image is skipped; only the guestd volume is (re)built — the piece that
+    // iterates most (guestd + the in-guest agent). The rootfs/kernel/initrd are reused from a prior
+    // --image run. NOTE: this reuses init.sh from that rootfs, so after a change to the volume's
+    // mount layout (e.g. moving the agent onto the volume) one full --image rebuild is needed first.
     section('VM image: guestd volume only (full image skipped — pass --image to build it)');
     imageRun('guestd'); // -> build/<config>/image/<target>/guestd.{raw,vhd}
     info(`image/${target}/guestd.* -> build/${flags.config}/image/${target}/`);
@@ -304,7 +307,7 @@ exec "$APP/Contents/MacOS/Atelier" "$@"
 function desktop() {
   section('JS dependencies');
   npm(['--prefix', 'apps/desktop', 'install']);
-  npm(['--prefix', 'packages/agent', 'install']); // for the verify phase; runtime deps ship baked in the rootfs
+  npm(['--prefix', 'packages/agent', 'install']); // for the verify phase; runtime deps ship on the guestd volume
 
   // Package the Electron app for both configs so build/<config>/desktop/ is runnable. Debug pays the
   // Forge packaging cost too; for fast host-only iteration, run the desktop via `npm run dev`.
