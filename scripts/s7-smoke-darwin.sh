@@ -5,18 +5,18 @@
 #
 #   BLACK-BOX (broker + vmctl): boots a VM the way the product does and exercises the
 #   real attach/detach RPCs. It (1) reproduces the S6 single-workspace mount, then
-#   (2) drives the multi-session path (-tag/-target). With the code as written this
-#   second part is expected to FAIL with a rollback: there is one virtio-fs device with
-#   one fixed tag ("workspace"), so guestd's per-share-tag `mount -t virtiofs <tag>`
-#   can't match a second share and the broker rolls the host share back. Capturing that
-#   precisely is the point — it is the gap S7 must close.
+#   (2) drives the multi-session path (-tag/-target) — the shipped S7 base/<tag> shape:
+#   the single virtio-fs device is mounted once at /sessions and each session is a named
+#   subdir, so two sessions live concurrently as /sessions/<tag>, and detaching one leaves
+#   the other intact. (Before S7 this rolled back, because guestd mounted the per-session
+#   tag instead of the device tag; that is the gap this PR closes.)
 #
 #   WHITE-BOX (gated Go probe): compiles services/internal/vmm's tests, codesigns the
 #   test binary with the virtualization entitlement, and runs TestS7RuntimeShareProbe.
-#   That probe drives the driver directly (host-only SetShare, no broker rollback) to
-#   answer validation #1: does a share added after start() become visible, with/without
-#   a remount, and what is the multi-share topology. Its log ends with a VERDICT INPUTS
-#   block to paste into macos-port-plan.md §Files Door.
+#   That probe drives the driver directly (host-only SetShare) to pin the shipped shape:
+#   the lone "workspace" tag mounts at /workspace (S6); a session set mounts the device
+#   once at the base and appears as /sessions/<tag>, with live add + sibling-safe detach
+#   visible without a remount.
 #
 # Usage:
 #   scripts/s7-smoke-darwin.sh                 # build everything, then black-box, then probe
@@ -114,21 +114,28 @@ blackbox() {
     bad "single share: attachWorkspace failed"
   fi
 
-  # --- Phase B: multi-session via the product RPCs ---
-  echo; echo "[B] multi-session (-tag/-target) — exercising the product path"
-  local any_multi=0
-  for s in s1 s2; do
-    if vm attachWorkspace -id vm0 -path "$work/$s" -tag "$s" -target "/sessions/$s" >/dev/null 2>&1; then
-      any_multi=1
-      local ls; ls="$(vm exec -id vm0 -- ls -A "/sessions/$s" 2>&1 || true)"
-      ok "multi $s: attached and mounted (/sessions/$s = $ls)"
-      vm detachWorkspace -id vm0 -tag "$s" >/dev/null 2>&1 || true
-    else
-      info "multi $s: attachWorkspace rolled back (expected gap — see header; broker can't hold a 2nd virtio-fs tag)"
-    fi
-  done
-  [[ "$any_multi" == 1 ]] && ok "multi-session path works through vmctl" \
-                          || info "multi-session via vmctl is non-functional today → the white-box probe & S7 redesign cover this"
+  # --- Phase B: multi-session via the product RPCs (the shipped S7 base/<tag> shape) ---
+  echo; echo "[B] multi-session (-tag/-target): two sessions on one VM"
+  vm attachWorkspace -id vm0 -path "$work/s1" -tag s1 -target /sessions/s1 >/dev/null 2>&1 \
+    && ok "multi s1: attached" || { bad "multi s1: attach failed"; tail -8 /tmp/atelier-s7-broker.log; }
+  vm attachWorkspace -id vm0 -path "$work/s2" -tag s2 -target /sessions/s2 >/dev/null 2>&1 \
+    && ok "multi s2: attached (2nd live session on one VM)" || { bad "multi s2: attach failed"; tail -8 /tmp/atelier-s7-broker.log; }
+
+  # Both sessions visible concurrently, each at its own /sessions/<tag> subdir.
+  local ls1 ls2
+  ls1="$(vm exec -id vm0 -- ls -A /sessions/s1 2>&1 || true)"
+  ls2="$(vm exec -id vm0 -- ls -A /sessions/s2 2>&1 || true)"
+  grep -q b.txt <<<"$ls1" && ok "multi s1: b.txt at /sessions/s1" || bad "multi s1: b.txt NOT at /sessions/s1 ($ls1)"
+  grep -q c.txt <<<"$ls2" && ok "multi s2: c.txt at /sessions/s2" || bad "multi s2: c.txt NOT at /sessions/s2 ($ls2)"
+
+  # Sibling-safe detach: drop s1; s2 must survive (the base mount stays for live sessions).
+  vm detachWorkspace -id vm0 -tag s1 >/dev/null 2>&1 && ok "multi s1: detached" || bad "multi s1: detach failed"
+  local after1 after2
+  after1="$(vm exec -id vm0 -- ls -A /sessions/s1 2>&1 || true)"
+  after2="$(vm exec -id vm0 -- ls -A /sessions/s2 2>&1 || true)"
+  grep -q b.txt <<<"$after1" && bad "multi: /sessions/s1 should be empty after detach ($after1)" || ok "multi: /sessions/s1 gone after detach"
+  grep -q c.txt <<<"$after2" && ok "multi: sibling /sessions/s2 survived s1 detach" || bad "multi: sibling /sessions/s2 lost after s1 detach ($after2)"
+  vm detachWorkspace -id vm0 -tag s2 >/dev/null 2>&1 && ok "multi s2: detached" || bad "multi s2: detach failed"
 
   vm stopVM -id vm0 >/dev/null 2>&1 || true
   ok "stopVM clean"

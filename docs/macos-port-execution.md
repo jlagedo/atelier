@@ -3,7 +3,9 @@
 > **Companion to [`macos-port-plan.md`](./macos-port-plan.md).** That doc decides *what*
 > and *why* (architecture, API validation, framework mapping). This doc is the **execution
 > tracker**: it cuts the port into thin, reviewable, demoable slices and records progress.
-> **Last updated:** 2026-05-23 (S7 spike resolved — runtime-share behavior verified; impl pending).
+> **Last updated:** 2026-05-23 (S7 base/<tag> rework landed + verified on Apple Silicon;
+> S8 mount + in-guest loop wiring done — the agent turn is blocked only on egress, which
+> the NAT crutch never actually carried, so it moves to S9).
 
 ## How to use this doc
 
@@ -33,9 +35,9 @@
 | S4 | dev signing + macOS boot spike (Create/Start/Stop) | M3 | ☑ | — |
 | S5 | guest control plane — `DialGuest` + `exec` | M4 | ☑ | — |
 | S6 | virtio-fs single workspace share | M5 | ☑ | — |
-| S7 | runtime add/remove + multi-session smoke test | M5 | ◐ spike resolved | |
-| S8 | agent loop end-to-end (NAT crutch allowed) | M6 | ☐ | |
-| S9 | network containment — vsock egress seam, drop NAT | M7 | ☐ | |
+| S7 | runtime add/remove + multi-session smoke test | M5 | ☑ base/<tag> rework | |
+| S8 | agent loop end-to-end (NAT crutch allowed) | M6 | ◐ mount+loop done; egress→S9 | |
+| S9 | network containment — vsock egress seam, drop NAT | M7 | ☐ (blocks S8's turn) | |
 | S10 | packaging, notarization, install docs | M8 | ☐ | |
 
 ### Dependency order
@@ -291,7 +293,7 @@ S4 NAT crutch for egress until S9 replaces it.
 
 ---
 
-### S7 — runtime add/remove + multi-session smoke test  ◐
+### S7 — runtime add/remove + multi-session smoke test  ☑
 
 - **Goal:** resolve the plan's **single remaining unverified spike** (validation #1): does the
   guest see a share **added after `start()`** without a remount nudge, and does
@@ -330,9 +332,19 @@ S4 NAT crutch for egress until S9 replaces it.
     back today, reproduced by the black-box layer); (2) the `buildShare` 1↔2 single/multiple flip
     moves a lone share's files between the root and a `workspace/` subdir — so always use
     `MultipleDirectoryShare` for a stable layout.
-  - **Remaining (the Exit's "chosen shape is implemented"):** rework the broker `attachWorkspace` +
-    guestd mount so multi-session mounts the single device at a base and addresses `<base>/<tag>`
-    (and pins `MultipleDirectoryShare`), replacing today's per-tag mount that rolls back.
+  - **Landed (2026-05-23, base/<tag> shape implemented + verified on Apple Silicon):**
+    `driver_darwin.go` `buildShare` now pins `MultipleDirectoryShare` for sessions (the lone
+    legacy `"workspace"` tag stays `SingleDirectoryShare`), so a session's files sit at a stable
+    `/sessions/<tag>` for any count (no 1↔2 flip). `guestd` `mount_linux.go` mounts the single
+    device — by its fixed tag `vsock.WorkspaceShareTag`, not the per-session tag — **once at the
+    base** (`/sessions`, idempotent via a `/proc/mounts` check); each session appears as the
+    `<tag>` subdir from the host `SetShare` (the broker runs `SetShare` before `guestMount`), and
+    per-session `unmount` is a no-op (the subdir vanishes host-side; the base stays for live
+    sessions). Legacy `/workspace` and the 9p (Windows) path are untouched. The broker/desktop
+    protocol is unchanged — the manager's existing `/sessions/<appId>` target already matches.
+    `scripts/s7-smoke-darwin.sh` now asserts the multi-session path **succeeds** (was: expected
+    rollback): black-box shows two sessions live at `/sessions/s1`+`/sessions/s2` with sibling-safe
+    detach; the white-box probe confirms live add with no remount + idempotent detach. Smoke green.
 
 ---
 
@@ -354,6 +366,25 @@ S4 NAT crutch for egress until S9 replaces it.
   from Windows unless S7 forced a macOS-specific policy (call it out if so).
 - **Depends:** S5, S6 (S7 informs session policy), S3.
 - **Risk:** Medium. First full top-to-bottom integration.
+- **Landed (partial, 2026-05-23) — mount + in-guest loop wiring done; agent turn blocked on
+  egress (→ S9).** No desktop code changed: the Session Manager runtime path is already
+  platform-agnostic and its per-session `/sessions/<appId>` protocol works on macOS once S7's
+  base/<tag> shape is in place (verified — `npm typecheck/lint/test` green, 16/16). Verified
+  end-to-end on Apple Silicon up to the model call: a VM boots, the per-session workspace mounts
+  at `/sessions/<tag>` (host folder visible in the guest), `setEgressPolicy` is accepted, and
+  `cli-guest` launches and runs in-guest — the turn then fails only at the model HTTP call with
+  `ConnectionRefused`.
+  - **Egress finding (corrects the plan's NAT assumption):** the S4 NAT crutch does **not**
+    actually carry egress. The VZ NAT NIC (`enp0s1`) is attached at the hypervisor but never
+    configured in the guest (the image has no DHCP client), `/etc/resolv.conf` is a read-only
+    static file, and the guest's default route + DNS point at `192.168.127.1` via the (currently
+    dead) gvisor `tap0`. So the guest is wired **exclusively** for the gvisor-tap-vsock path.
+  - **Why this defers cleanly to S9:** the guest side of that path is already complete (static
+    `tap0`, route, DNS, `gvforwarder` dialing `vsock://2:1024`). The only missing piece is the
+    **host** `StartEgress` (still `ErrUnsupported`). So S9 makes egress — and this S8 turn — work
+    with **zero guest changes**, and it is the real containment (not the throwaway NAT crutch).
+    The remaining S8 exit ("one streamed turn with a file write landing on the host") is gated on
+    S9 and re-runs there.
 
 ---
 
@@ -384,6 +415,11 @@ S4 NAT crutch for egress until S9 replaces it.
   fully removed; `io.Closer` wiring matches Manager expectations.
 - **Depends:** S5 (vsock), S8 (so the agent loop exercises real egress).
 - **Risk:** Medium. The adapter + the shared `netjail.Start` signature change touch Windows.
+- **Note (2026-05-23):** S9 now **gates S8's agent turn** — verified during S8 that the NAT
+  crutch never carried egress, so egress only works once `StartEgress` lands. Good news: the
+  guest is already fully wired for this path (static `tap0`/route/DNS, `gvforwarder` →
+  `vsock://2:1024`), so S9 is **host-only** (the `netjail.Start` listener seam + the darwin VZ
+  vsock listener; then drop the `Create()` NAT attachment). No guest changes expected.
 
 ---
 

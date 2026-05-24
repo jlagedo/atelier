@@ -10,6 +10,17 @@ decisions, and glossary: [`docs/design.md`](docs/design.md); slice-by-slice impl
 
 This file is the source of truth for how to build, run, test, and what conventions to follow.
 
+## Working efficiently in this repo
+
+This repo is small (~175 files) but its docs are large. Keep the main context lean and fast:
+- For any "where is X / how does Y work / which files touch Z" question, use the **Explore**
+  subagent (or a general-purpose Agent) instead of grepping and reading inline. Have it return
+  conclusions + `file:line`, not file dumps — exploration then stays out of the main context.
+- Do **not** reflexively open the big design docs. The repo-layout table and the "Where things
+  live" map below, plus the relevant source file, are usually enough. Only read `docs/design.md`,
+  `docs/implementation-status.md`, `docs/claude-cowork-internals.md`, and the other multi-hundred-line
+  docs when a task genuinely needs that depth — and read the relevant section, not the whole file.
+
 ## Repo layout
 
 | Dir | What | State |
@@ -25,6 +36,22 @@ This file is the source of truth for how to build, run, test, and what conventio
 
 Generated/build output is gitignored: `apps/desktop/.vite`, `apps/desktop/out`, `**/node_modules`,
 `packages/protocol/src`, `services/pkg/protocol`, `services/bin`, `image/.work`, `image/bundle`.
+
+### Where things live (jump here, don't search)
+
+| To touch… | Go to |
+|---|---|
+| Policy gate / containment chokepoint | `services/internal/broker/broker.go` |
+| Files door (workspace path jailing) | `services/internal/broker/files.go` |
+| macOS VZ driver | `services/internal/vmm/driver_darwin.go` |
+| VM lifecycle | `services/internal/vmm/manager.go` |
+| Egress jail (default-deny network) | `services/internal/netjail/network.go` |
+| Windows HCS bindings | `services/internal/hcs/computecore_windows.go` |
+| Session Manager (host state machine) | `apps/desktop/src/main/sessions/manager.ts` |
+| Hop-2 named-pipe JSON-RPC client | `apps/desktop/src/main/host-client/client.ts` |
+| In-guest agent loop (live path) | `packages/agent/src/cli-guest.ts` |
+| Host agent loop + broker tools | `packages/agent/src/cli.ts`, `packages/agent/src/broker/client.ts` |
+| Protocol (canonical schema) | `packages/protocol/schema/protocol.json` |
 
 ## Build the whole stack
 

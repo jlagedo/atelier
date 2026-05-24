@@ -296,6 +296,15 @@ Two facts the probe pinned down that the implementation must honor:
   S7's implementation should therefore **always use `VZMultipleDirectoryShare`** (even for
   one entry) so the guest layout is stable across the session count.
 
+**Implemented (2026-05-23, S7).** Both facts above are now honored in code and verified on
+Apple Silicon: `driver_darwin.go` `buildShare` pins `VZMultipleDirectoryShare` for sessions
+(the lone legacy `"workspace"` tag stays `VZSingleDirectoryShare`), and `guestd`
+`mount_linux.go` mounts the single device — by its fixed tag, not the per-session tag — **once
+at the base** (`/sessions`), so each session is a stable `/sessions/<tag>` subdir. The
+`scripts/s7-smoke-darwin.sh` black-box layer that used to reproduce the rollback now passes the
+multi-session path (two sessions live, sibling-safe detach). The broker/desktop protocol was
+unchanged.
+
 The broker's host-side file jail remains mandatory either way. The guest mount is for
 compute convenience; the privileged boundary still mediates `readFile` and `writeFile`.
 

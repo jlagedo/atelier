@@ -18,8 +18,10 @@ mount -t tmpfs    tmpfs    /tmp   2>/dev/null || true
 
 # Read-only root (CRIT-05): the rootfs is mounted read-only, so the few paths that need
 # runtime writes are tmpfs (ephemeral, per-boot; sized to bound RAM). /run and /var/tmp are
-# general runtime scratch; /sessions is the parent for per-session 9p mount points (guestd
-# mkdirs under it — so it MUST be writable on a ro root); /home/atelier is the non-root
+# general runtime scratch; /sessions is the parent for per-session mount points (under
+# Hyper-V guestd mkdirs a 9p mount per session here; under VZ guestd mounts the single
+# virtio-fs device once at /sessions and each session is a <tag> subdir, S7 — either way it
+# MUST be writable on a ro root); /home/atelier is the non-root
 # agent's writable HOME (CRIT-01), chowned to that uid after the tmpfs is mounted. Tolerate
 # "already mounted" (initramfs may have done some) so a re-mount never wedges PID 1.
 # Explicit mode= on every tmpfs: tmpfs defaults its root dir to 1777 (world-writable,

@@ -390,14 +390,18 @@ func cloneShares(in map[string]*vz.SharedDirectory) map[string]*vz.SharedDirecto
 	return out
 }
 
-// buildShare maps the tracked set onto a VZDirectoryShare. One entry uses a
-// SingleDirectoryShare so the guest's `mount -t virtiofs <tag> <target>` lands the
-// directory directly at <target> (the S6 single-workspace shape). Zero entries clears the
-// device with an empty MultipleDirectoryShare. Two or more expose each entry as a named
-// subdirectory — the multi-session target semantics are settled in S7.
+// buildShare maps the tracked set onto a VZDirectoryShare. The lone legacy
+// "workspace" tag uses a SingleDirectoryShare so the guest's `mount -t virtiofs workspace
+// /workspace` lands the directory directly at the device root (the S6 single-workspace
+// shape). Every other set — a single per-session tag, or two or more of anything — uses a
+// MultipleDirectoryShare, which exposes each entry as a named subdirectory under the device
+// root. Pinning sessions to MultipleDirectoryShare keeps the layout stable at
+// <base>/<tag> for ANY session count (S7): a lone session no longer collapses to the root,
+// so adding a second session never flips an existing one's path. Zero entries clears the
+// device with an empty MultipleDirectoryShare.
 func buildShare(shares map[string]*vz.SharedDirectory) (vz.DirectoryShare, error) {
 	if len(shares) == 1 {
-		for _, sd := range shares {
+		if sd, ok := shares[vsock.WorkspaceShareTag]; ok {
 			return vz.NewSingleDirectoryShare(sd)
 		}
 	}
