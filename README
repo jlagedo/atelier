@@ -35,6 +35,20 @@ Linux utility VM — one cage, N sessions: each /sessions/<id> mount + its own a
 | Desktop app, agent, codegen | **Node ≥ 22.12** |
 | Model calls | **`ANTHROPIC_API_KEY`** in the environment that launches the app |
 
+### Build everything (one command)
+
+```sh
+npm run build:all                      # clean build + verify  -> build/debug/{host,vmctl}
+npm run build:all -- --config=release  # stripped + packaged, self-contained -> build/release/
+```
+
+`scripts/build-all.mjs` (zero-dep Node) detects your OS and runs the whole chain from zero — git
+submodule → protocol codegen → host broker (codesigned on macOS) → VM image → desktop deps → verify
+— staging artifacts into `build/<config>/`. Flags: `--deep` (also wipe `node_modules` + image cache
+for a true from-zero), `--no-verify`, `--skip-image` (host-only, fast). Then run as in step 4 below.
+
+Prefer to drive each component yourself? The manual steps:
+
 ### macOS (Apple Silicon)
 
 ```sh

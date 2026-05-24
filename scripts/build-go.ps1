@@ -10,7 +10,12 @@ $PSNativeCommandUseErrorActionPreference = $true
 Push-Location (Resolve-Path (Join-Path $PSScriptRoot ".."))
 try {
   npm run protogen
-  go -C services build -o bin/ ./cmd/host ./cmd/vmctl
+  # Optional release knobs set by the orchestrator (scripts/build-all.mjs); empty by default.
+  $buildArgs = @('-C', 'services', 'build')
+  if ($env:ATELIER_GOFLAGS) { $buildArgs += $env:ATELIER_GOFLAGS.Split(' ', [StringSplitOptions]::RemoveEmptyEntries) }
+  if ($env:ATELIER_LDFLAGS) { $buildArgs += "-ldflags=$($env:ATELIER_LDFLAGS)" }
+  $buildArgs += @('-o', 'bin/', './cmd/host', './cmd/vmctl')
+  go @buildArgs
   Write-Host "built services\bin\host.exe + vmctl.exe" -ForegroundColor Green
 }
 finally {

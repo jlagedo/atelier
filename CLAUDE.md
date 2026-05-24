@@ -55,8 +55,24 @@ Generated/build output is gitignored: `apps/desktop/.vite`, `apps/desktop/out`, 
 
 ## Build the whole stack
 
-The three trees build independently; the only cross-cut is the generated protocol (TS + Go) which
-both `services` and the agent need. Top-level orchestration:
+One command builds + verifies everything from zero and stages artifacts into `build/<config>/`:
+
+```sh
+npm run build:all                      # debug (default): clean + build + verify -> build/debug/
+npm run build:all -- --config=release  # stripped Go + packaged desktop + VM bundle -> build/release/
+npm run build:all -- --deep            # true from-zero: also wipe node_modules + image/.work
+npm run build:all -- --no-verify       # skip tests/typecheck/lint
+npm run build:all -- --skip-image      # fast host-only iteration (skip the Docker image)
+```
+
+`scripts/build-all.mjs` (zero-dep Node, runs on both OSes) drives the chain in order — submodule →
+clean → protogen → host build → VM image → desktop → stage → verify — branching per platform
+(codesign on macOS, `wsl make` for the image on Windows; the Windows path is unverified from a Mac).
+It reuses the per-OS host scripts and `make -C image` below. `guestd` is cross-compiled into the
+rootfs by the image build (not a host binary), and verify also linux-cross-compiles it.
+
+The three trees also build independently; the only cross-cut is the generated protocol (TS + Go) which
+both `services` and the agent need. Manual top-level orchestration:
 
 ```sh
 # macOS
@@ -69,6 +85,9 @@ npm --prefix apps/desktop install                 # desktop deps (agent deps are
 (cd image && ./build.sh check && ./build.sh all)  # WSL2 — bakes guestd + agent into rootfs
 npm --prefix apps/desktop install
 ```
+
+The host scripts honor optional `ATELIER_GOFLAGS`/`ATELIER_LDFLAGS` (set by `build:all --config=release`
+for stripped binaries). Generated/staged build output (`build/`) is gitignored.
 
 Then run the broker (`services/bin/host`, elevated) and the app (`npm run dev`). See the root
 [`README`](README) for the full run guide + the `vmctl` terminal path + dev-without-VM.
@@ -87,8 +106,13 @@ npm run typecheck    # tsc --noEmit
 npm run lint         # oxlint
 npm run format       # oxfmt (code only)
 npm test             # vitest
-npm run package      # full Forge build (no window)
+npm run package      # full Forge build (no window) -> apps/desktop/out/
 ```
+
+`package` needs the `yauzl@^3.3.1` override in `package.json`: `electron-forge`'s `extract-zip@2.0.1`
+pins `yauzl@2.10.0`, whose inflate stream deadlocks on large entries under Node 24+, making
+`electron-forge package` silently exit 0 with no `out/`. The override is still required on every
+upgrade path (even `@electron/packager@20` pins `extract-zip@2`).
 
 Process layout:
 - `src/main` — Node main process. `host-client/` is the Hop-2 named-pipe JSON-RPC client to the Go

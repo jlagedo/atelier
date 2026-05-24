@@ -15,6 +15,7 @@
     "typecheck": "npm --prefix apps/desktop run typecheck",
     "test": "npm --prefix apps/desktop run test",
     "protogen": "node tools/protogen/protogen.mjs",
+    "build:all": "node scripts/build-all.mjs",
     "agent": "npm --prefix packages/agent run dev --"
   }
 }
