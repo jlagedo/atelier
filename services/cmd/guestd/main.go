@@ -47,6 +47,7 @@ func main() {
 	srv.Register("execInput", g.execInput) // S6.1: feed stdin of a running exec session
 	srv.Register("mount", g.mount)         // Files door (S3.1): mount a host 9p share
 	srv.Register("unmount", g.unmount)     // Files door (S3.1): unmount a share
+	srv.Register("setTime", g.setTime)     // host pushes wall-clock time (no RTC under VZ)
 
 	if err := srv.Serve(context.Background(), ln); err != nil {
 		log.Error("rpc serve stopped", "err", err)
@@ -255,6 +256,31 @@ func (g *guest) unmount(_ context.Context, raw json.RawMessage) (any, error) {
 		return nil, &rpc.Error{Code: rpc.CodeInternal, Message: err.Error()}
 	}
 	g.log.Info("unmounted share", "target", p.Target)
+	return nil, nil
+}
+
+// setTimeParams carries the host's wall-clock time in unix milliseconds. The
+// value only ever rides this Go-only Hop-3 call, so it never touches a JS wire
+// (no 2^53 concern); the broker is the source and stamps time.Now().UnixMilli().
+type setTimeParams struct {
+	UnixMs int64 `json:"unixMs"`
+}
+
+// setTime steps the guest's CLOCK_REALTIME to the host's wall clock. The slim
+// virtual-hwe kernel ships no built-in RTC and VZ offers no time-sync, so without
+// this the guest sits at 1970 and TLS to the model fails ("cert not yet valid").
+func (g *guest) setTime(_ context.Context, raw json.RawMessage) (any, error) {
+	var p setTimeParams
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "bad params: " + err.Error()}
+	}
+	if p.UnixMs <= 0 {
+		return nil, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "unixMs must be positive"}
+	}
+	if err := setSystemClock(p.UnixMs); err != nil {
+		return nil, &rpc.Error{Code: rpc.CodeInternal, Message: "set clock: " + err.Error()}
+	}
+	g.log.Info("clock set", "unixMs", p.UnixMs)
 	return nil, nil
 }
 

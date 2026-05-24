@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Obtain + pin the guest kernel (design.md §7). We do NOT hand-compile and we do
 # NOT download separately: the matched kernel is installed by the rootfs Docker
-# build (linux-image-generic-hwe-22.04), so its vmlinuz, /lib/modules/<ver>, and
+# build (linux-image-virtual-hwe-24.04), so its vmlinuz, /lib/modules/<ver>, and
 # boot initramfs all come from one apt transaction — the coupling rule holds by
 # construction. This script just extracts vmlinuz from that built tree and pins it.
 #

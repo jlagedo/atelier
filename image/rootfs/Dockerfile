@@ -1,7 +1,7 @@
 # Rootfs source for the utility VM (design.md §7). We don't run this as a
 # container — `image/build.sh rootfs` does `docker export` of it and pours the
 # result into an ext4 VHD. glibc (Ubuntu) is deliberate: Python wheels just work.
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -12,11 +12,15 @@ ENV DEBIAN_FRONTEND=noninteractive
 #
 # The matched guest kernel (design.md §7 coupling rule) is installed here too, so
 # the kernel, its /lib/modules/<ver>, and the boot initramfs all come from ONE apt
-# transaction — they can never drift. linux-image-generic-hwe-22.04 mirrors
-# Cowork's 6.8.0-*-generic and pulls linux-modules{,-extra} (hv_*, virtio, 9p,
-# ext4/overlay/fuse). initramfs-tools is explicit (the kernel meta only recommends
-# it, and --no-install-recommends would drop it) so the kernel postinst generates
-# /boot/initrd.img-<ver>. image/build.sh extracts vmlinuz + initrd from /boot.
+# transaction — they can never drift. linux-image-virtual-hwe-24.04 is the rolling
+# HWE kernel trimmed for VM guests: the same generic kernel binary, but it pulls
+# only the base linux-modules set (NOT linux-modules-extra) to slim /lib/modules.
+# We rely on that base set carrying every driver this VM needs (hv_*, virtio incl.
+# virtio-vsock + virtiofs, 9p, ext4/overlay/fuse) — proven at boot by the modprobe
+# + virtiofs checks in image/guest/init.sh. initramfs-tools is explicit (the kernel
+# meta only recommends it, and --no-install-recommends would drop it) so the kernel
+# postinst generates /boot/initrd.img-<ver>. image/build.sh extracts vmlinuz +
+# initrd from /boot.
 # Networking is static (CRIT-01/05 hardening): guestd configures tap0 itself
 # (192.168.127.2/24, gateway .1) and runs gvforwarder with -preexisting, so no DHCP
 # client is needed. iproute2 brings the interface up (and inspects egress); curl
@@ -36,7 +40,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       iproute2 \
       curl \
       initramfs-tools \
-      linux-image-generic-hwe-22.04 \
+      linux-image-virtual-hwe-24.04 \
     && rm -rf /var/lib/apt/lists/*
 
 # Modern Node + npm (NodeSource). The in-guest agent loop (Topology B, S5b.1) and

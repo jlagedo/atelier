@@ -4,7 +4,7 @@
 // Why this exists: unit tests cover the broker doors against fake drivers (services/internal/...),
 // and s7-smoke-darwin.sh proves the runtime-share shape. Neither boots the *shipped* broker and
 // drives every door the way the product does. This harness does: it builds (or reuses) build/<config>/,
-// spawns the real `host` over a unix socket, boots a real VM via VZ, and exercises all 11 protocol
+// spawns the real `host` over a unix socket, boots a real VM via VZ, and exercises all 12 protocol
 // doors + the in-guest agent loop end to end through the `vmctl` dev CLI — the same Hop-2 wire the
 // desktop app uses.
 //
@@ -13,7 +13,7 @@
 // than aborting on the first failure (a battery, not a build), exiting non-zero if any door fails.
 //
 // Coverage (a real boot, so VZ + a codesigned broker + the image bundle are required):
-//   getStatus  createVM  startVM  exec  execInput  attachWorkspace  detachWorkspace
+//   getStatus  createVM  startVM  setTime  exec  execInput  attachWorkspace  detachWorkspace
 //   readFile   writeFile setEgressPolicy  stopVM   + the guest agent loop (Topology B)
 // The Files door is host-side and jailed to the legacy /workspace root, while the same folder is
 // exposed to guest exec over the fs share (virtio-fs on VZ, 9p on HCS) — so we prove the
@@ -316,6 +316,17 @@ async function runBattery(work) {
   await test('startVM boots the guest', () => {
     const r = vmctl('startVM', ['-id', 'vm0'], { timeout: 180000 });
     assert(r.status === 0, `boot failed: ${r.err}\n${tail(fs.readFileSync(BROKER_LOG, 'utf8'))}`);
+  });
+
+  await test('setTime pushes the host wall clock into the guest', () => {
+    // The slim virtual-hwe kernel has no RTC and VZ offers no time-sync, so the
+    // guest boots at 1970; the host must push its clock or the agent's TLS fails.
+    const r = vmctl('setTime', ['-id', 'vm0']);
+    assert(r.status === 0, `setTime failed: ${r.err}`);
+    const y = vmctl('exec', ['-id', 'vm0', '--', 'date', '-u', '+%Y']);
+    assert(y.status === 0, `date exit ${y.status}: ${y.err}`);
+    const year = parseInt(y.out.trim(), 10);
+    assert(year >= 2026, `guest clock not seeded: year ${JSON.stringify(y.out)}`);
   });
 
   await test('exec runs a command and streams output', () => {

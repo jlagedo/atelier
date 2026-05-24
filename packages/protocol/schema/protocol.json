@@ -12,7 +12,8 @@
     { "name": "detachWorkspace", "params": "DetachWorkspaceParams", "result": null },
     { "name": "readFile", "params": "ReadFileParams", "result": "FileContent" },
     { "name": "writeFile", "params": "WriteFileParams", "result": null },
-    { "name": "setEgressPolicy", "params": "SetEgressPolicyParams", "result": null }
+    { "name": "setEgressPolicy", "params": "SetEgressPolicyParams", "result": null },
+    { "name": "setTime", "params": "SetTimeParams", "result": null }
   ],
   "types": {
     "Status": {
@@ -33,6 +34,7 @@
     "ReadFileParams": { "path": "string" },
     "WriteFileParams": { "path": "string", "content": "string" },
     "FileContent": { "path": "string", "content": "string", "size": "int" },
-    "SetEgressPolicyParams": { "allow": "string[]" }
+    "SetEgressPolicyParams": { "allow": "string[]" },
+    "SetTimeParams": { "id": "string" }
   }
 }

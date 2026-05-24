@@ -188,6 +188,7 @@ func (b *Broker) Register(s *rpc.Server) {
 	s.Register("readFile", b.readFile)
 	s.Register("writeFile", b.writeFile)
 	s.Register("setEgressPolicy", b.setEgressPolicy)
+	s.Register("setTime", b.setTime)
 }
 
 // CreateVMParams describes a VM to create. KernelPath/RootFSPath are host paths

@@ -90,6 +90,11 @@ export class HostClient {
     return this.withConn((c) => c.call<void>("setEgressPolicy", { allow }));
   }
 
+  /** Push the host wall clock into the guest (no RTC under VZ → guest boots at 1970). */
+  setTime(id: string): Promise<void> {
+    return this.withConn((c) => c.call<void>("setTime", { id }));
+  }
+
   /** Push a stdin chunk into a persistent exec session (host→guest input). */
   execInput(p: ExecInputParams): Promise<void> {
     return this.withConn((c) => c.call<void>("execInput", p));

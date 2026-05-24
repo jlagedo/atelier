@@ -7,7 +7,7 @@
 # (the build-all.mjs orchestrator points it at ../build/<config>/image so all artifacts land in
 # one tree); the per-target subdir ($TARGET) is always appended.
 #
-# The matched kernel (linux-image-generic-hwe-22.04) + its /lib/modules + the boot
+# The matched kernel (linux-image-virtual-hwe-24.04) + its /lib/modules + the boot
 # initramfs are produced by the rootfs Docker build (one apt transaction, so the
 # coupling rule of design.md §7 holds by construction). `rootfs` builds the ext4;
 # `kernel`/`initrd` extract + pin vmlinuz/initrd from /boot of that same tree.
@@ -17,7 +17,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-UBUNTU_VERSION="22.04"
+UBUNTU_VERSION="24.04"
 
 # A build TARGET selects everything platform-specific in one place: the guest ARCH, the
 # Docker build platform, the Go cross-compile GOARCH, the disk format, and the per-target

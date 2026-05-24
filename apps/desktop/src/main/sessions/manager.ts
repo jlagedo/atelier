@@ -170,6 +170,9 @@ export class SessionManager {
 
     await this.host.attachWorkspace({ id: this.vmId, path: folder, target: s.guestPath, tag: s.tag });
     await this.startWatcher(s);
+    // Seed the guest clock before the loop's first model call: TLS fails if the
+    // guest is still at 1970 (no RTC under VZ). The broker also resyncs every 30s.
+    await this.host.setTime(this.vmId);
     this.startLoop(s, apiKey);
 
     await this.store.save({ appId, folder, title: s.title, sdkSessionId: "", transcript: [], status: "active", updatedAt: Date.now() });
@@ -222,6 +225,9 @@ export class SessionManager {
     this.setStatus(s, "resuming");
     await this.host.attachWorkspace({ id: this.vmId, path: s.folder, target: s.guestPath, tag: s.tag });
     await this.startWatcher(s);
+    // Resume after hibernate also re-seeds the clock: the guest may have drifted
+    // across host sleep, and the next model call must see a valid wall clock.
+    await this.host.setTime(this.vmId);
     this.startLoop(s, apiKey, s.sdkSessionId || undefined);
     await this.store.patch(appId, { status: "active" });
     s.status = "active";

@@ -106,7 +106,7 @@ npm run e2e:host -- --config=release   # against build/release/
 npm run e2e:host -- --skip-build       # reuse build/<config>/ as-is
 ```
 
-`scripts/e2e-host.mjs` spawns the real broker, boots `vm0`, and exercises all 11 protocol doors plus
+`scripts/e2e-host.mjs` spawns the real broker, boots `vm0`, and exercises all 12 protocol doors plus
 the in-guest agent loop through `vmctl` — both share models (legacy `/workspace` + Files door and
 concurrent `/sessions/<tag>`), the egress jail, and host↔guest file bridging both ways. It needs the
 same prerequisites as a real run (VZ + codesigned broker + image bundle); the agent check also needs

@@ -8,8 +8,10 @@ import (
 	"log/slog"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/jlagedo/atelier/services/internal/netjail"
+	"github.com/jlagedo/atelier/services/internal/rpc"
 	"github.com/jlagedo/atelier/services/internal/vsock"
 )
 
@@ -33,6 +35,9 @@ type instance struct {
 	// shares tracks the VM's live workspace shares by tag -> port. Guarded by
 	// Manager.mu.
 	shares map[string]uint32
+	// stopSync cancels the per-VM time-resync goroutine (Start → Stop). Nil until
+	// the VM is started. Guarded by Manager.mu.
+	stopSync context.CancelFunc
 }
 
 // NewManager returns a Manager backed by the platform's default driver.
@@ -93,6 +98,14 @@ func (m *Manager) Start(ctx context.Context, id string) error {
 		inst.egress = eg
 		m.mu.Unlock()
 	}
+	// Push the host wall clock into the guest: once now (boot seed) and every 30s
+	// after (self-heals after host sleep). Detached context — it must outlive Start
+	// and live until Stop cancels it.
+	syncCtx, cancel := context.WithCancel(context.Background())
+	m.mu.Lock()
+	inst.stopSync = cancel
+	m.mu.Unlock()
+	go m.syncTimeLoop(syncCtx, id)
 	m.log.Info("vm started", "vm", id)
 	return nil
 }
@@ -108,6 +121,10 @@ func (m *Manager) Stop(ctx context.Context, id string) error {
 		_ = inst.egress.Close()
 	}
 	m.mu.Lock()
+	if inst.stopSync != nil {
+		inst.stopSync()
+		inst.stopSync = nil
+	}
 	delete(m.vms, id)
 	m.mu.Unlock()
 	m.log.Info("vm stopped", "vm", id, "err", err)
@@ -124,6 +141,47 @@ func (m *Manager) DialGuest(ctx context.Context, id string) (net.Conn, error) {
 		return nil, err
 	}
 	return conn, nil
+}
+
+// SeedTime pushes the host's current wall-clock time to the guest's CLOCK_REALTIME
+// over the control plane (Hop 3). The host is the time source — the broker stamps
+// time.Now() so no timestamp ever rides a JS wire. Used by both the setTime door
+// and the periodic resync loop. The guest has no other clock source, so this
+// always steps (no drift threshold); stepping CLOCK_REALTIME leaves CLOCK_MONOTONIC
+// untouched.
+func (m *Manager) SeedTime(ctx context.Context, id string) error {
+	if _, ok := m.get(id); !ok {
+		return fmt.Errorf("vm: %q not found", id)
+	}
+	conn, err := m.DialGuest(ctx, id)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	return rpc.NewClient(conn).Call(ctx, "setTime",
+		map[string]any{"id": id, "unixMs": time.Now().UnixMilli()}, nil)
+}
+
+// syncTimeLoop seeds the guest clock immediately (boot seed) then every 30s
+// (self-heals after host sleep/resume within one tick). Errors are logged and
+// retried — a failed sync must never crash the goroutine or the broker. The boot
+// seed leans on DialGuest's retry to absorb guestd not yet listening.
+func (m *Manager) syncTimeLoop(ctx context.Context, id string) {
+	if err := m.SeedTime(ctx, id); err != nil {
+		m.log.Warn("boot time seed failed (will retry next tick)", "vm", id, "err", err)
+	}
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := m.SeedTime(ctx, id); err != nil {
+				m.log.Warn("periodic time seed failed (will retry next tick)", "vm", id, "err", err)
+			}
+		}
+	}
 }
 
 // AttachWorkspace shares hostPath into the running VM as a tagged workspace

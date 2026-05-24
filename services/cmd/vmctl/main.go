@@ -17,6 +17,7 @@
 //	vmctl readFile  -path notes.txt                      (prints to stdout)
 //	vmctl writeFile -path out.txt [-content "..."]       (else reads stdin)
 //	vmctl setEgressPolicy -allow pypi.org,files.pythonhosted.org  (empty = deny all)
+//	vmctl setTime  -id vm0                               (push host wall clock into the guest)
 //	vmctl agent    -id vm0 -- "<task>"   (S5b.1: run the agent loop INSIDE the guest)
 package main
 
@@ -195,6 +196,15 @@ func main() {
 		}
 		fmt.Fprintf(os.Stderr, "[agent] egress allowlist: %s\n", strings.Join(allowList, ", "))
 
+		// Seed the guest clock right before the loop: the model call does TLS, which
+		// fails ("cert not yet valid") if the guest is still at 1970 (no RTC under VZ).
+		// Hard guarantee on top of the manager's boot/30s resync.
+		var tRes json.RawMessage
+		if err := client.Call(context.Background(), "setTime", map[string]any{"id": *id}, &tRes); err != nil {
+			fmt.Fprintf(os.Stderr, "agent: setTime: %v\n", err)
+			os.Exit(1)
+		}
+
 		genv := map[string]string{
 			"ANTHROPIC_API_KEY":                        apiKey,
 			"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
@@ -281,7 +291,7 @@ func main() {
 			"memoryMB":        *mem,
 			"cpuCount":        *cpu,
 		}
-	case "startVM", "stopVM":
+	case "startVM", "stopVM", "setTime":
 		params = map[string]any{"id": *id}
 	case "detachWorkspace":
 		params = map[string]any{"id": *id, "tag": *tag}
