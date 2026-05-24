@@ -267,12 +267,11 @@ S4 NAT crutch for egress until S9 replaces it.
   v3.7.1 (and upstream `main`) only expose the **config-time** `SetDirectoryShare`; the
   `internal/objc` package is unimportable and `*vz.VirtualMachine` hides its raw pointer, so
   the runtime accessor can't be added with a local shim.
-  - **Fork** (`github.com/jlagedo/vz`, cloned to `~/Developer/vz`, branch
-    `feat/runtime-directory-share` off `v3.7.1`): added `VirtualMachine.DirectorySharingDevices()`
-    + runtime `VirtioFileSystemDevice.SetShare` (mirrors `SocketDevices`; `setShare` runs on the
-    VM's serial dispatch queue). Wired via `replace github.com/Code-Hex/vz/v3 =>
-    /Users/jlagedo/Developer/vz` in `services/go.mod`. **Upstream PR deferred** until the change
-    is exercised more broadly (the `replace` + fork are the interim).
+  - **Fork** (`github.com/jlagedo/vz`, branch `feat/runtime-directory-share` off `v3.7.1`): added
+    `VirtualMachine.DirectorySharingDevices()` + runtime `VirtioFileSystemDevice.SetShare` (mirrors
+    `SocketDevices`; `setShare` runs on the VM's serial dispatch queue). Wired via a `replace`
+    directive pointing at a local clone in `services/go.mod`. **Upstream PR deferred** until the
+    change is exercised more broadly (the `replace` + fork are the interim).
   - **Host** (`driver_darwin.go`): caches the runtime `fsdev` on `Start` (next to `socket`),
     tracks an authoritative `shares map[string]*vz.SharedDirectory` (the device has no readable
     getter), and on attach/detach rebuilds the whole share and swaps it with `fsdev.SetShare`.
