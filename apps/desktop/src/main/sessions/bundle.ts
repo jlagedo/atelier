@@ -6,7 +6,8 @@
 
 import path from "node:path";
 
-// TARGET names from image/build.sh — must match image/bundle/<target>/.
+// TARGET names from image/build.sh — must match the per-target subdir under the bundle base
+// (the orchestrator's build/<config>/image/<target>/, or image/bundle/<target>/ for manual builds).
 export function bundleTarget(platform: NodeJS.Platform = process.platform, arch: string = process.arch): string {
   if (platform === "win32") return "windows-amd64-hyperv";
   if (platform === "darwin") return `darwin-${arch}-vz`; // arm64 today (S2)

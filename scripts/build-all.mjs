@@ -4,22 +4,31 @@
 // Why this exists: a full build is otherwise a hand-run sequence (submodule -> protogen ->
 // host build -> VM image -> desktop) spread across bash/PowerShell/Make, easy to get wrong on a
 // fresh clone, with outputs scattered across services/bin, image/bundle, and apps/desktop. This
-// drives the whole chain in order and stages the final artifacts into a single build/<config>/ tree.
+// file is the SINGLE source of truth for the build: it drives the whole chain in order and writes
+// every final artifact into one tree, build/<config>/.
 //
 // Node is the host because it's already required on both dev OSes (engines.node >=22.12) and runs
-// identically on macOS and Windows; it branches on process.platform to dispatch the right native
-// tools (codesign on macOS, `wsl make` for the Docker-based image build on Windows). Zero deps.
+// identically on macOS and Windows; it branches on process.platform for the irreducibly
+// platform-specific bits (codesign on macOS — VZ refuses to boot an unsigned broker; the `wsl`
+// prefix for the Docker-based image build on Windows). The Go host build + codesign live here
+// directly (no per-OS shell script); only the image build stays in image/build.sh (bash + Docker,
+// run natively on macOS and via wsl on Windows — one cross-OS script, not a duplicated pair).
+// Zero deps.
 //
 // Usage:
-//   node scripts/build-all.mjs                      debug (default): clean(light) + build + verify
-//   node scripts/build-all.mjs --config=release     strip Go, package desktop, copy image+app into build/release
+//   node scripts/build-all.mjs                      debug (default): clean(light) + build all + verify
+//   node scripts/build-all.mjs --config=release     strip Go symbols, self-contained build/release
+//   node scripts/build-all.mjs --only=host          just protogen + host binaries (+codesign on mac)
+//   node scripts/build-all.mjs --only=image         just the VM image bundle
+//   node scripts/build-all.mjs --only=desktop       just the packaged desktop app
 //   node scripts/build-all.mjs --deep               true from-zero: also wipe node_modules + image/.work
 //   node scripts/build-all.mjs --no-verify          build artifacts only
 //   node scripts/build-all.mjs --skip-image         fast host-only iteration (skip the heavy Docker image)
+//
+// All artifacts land in build/<config>/: host(.exe), vmctl(.exe), image/<target>/, desktop/.
 
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -32,19 +41,28 @@ const target = isMac ? 'darwin-arm64-vz' : 'windows-amd64-hyperv';
 
 // ----- args ---------------------------------------------------------------------------------------
 
-const flags = { config: 'debug', deep: false, verify: true, skipImage: false };
+const flags = { config: 'debug', deep: false, verify: true, skipImage: false, only: null };
+const phases = ['host', 'image', 'desktop'];
 for (const a of process.argv.slice(2)) {
   if (a === '--deep') flags.deep = true;
   else if (a === '--no-verify') flags.verify = false;
   else if (a === '--skip-image') flags.skipImage = true;
   else if (a === '--release' || a === '--config=release') flags.config = 'release';
   else if (a === '--debug' || a === '--config=debug') flags.config = 'debug';
-  else if (a === '-h' || a === '--help') {
+  else if (a.startsWith('--only=')) {
+    flags.only = a.slice('--only='.length);
+    if (!phases.includes(flags.only)) die(`--only must be one of: ${phases.join(', ')}`);
+  } else if (a === '-h' || a === '--help') {
     const header = fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n');
-    console.log(header.slice(1, 18).map((l) => l.replace(/^\/\/ ?/, '')).join('\n'));
+    console.log(header.slice(1, 28).map((l) => l.replace(/^\/\/ ?/, '')).join('\n'));
     process.exit(0);
   } else die(`unknown flag: ${a} (try --help)`);
 }
+
+// Which phases run this invocation. --only narrows to one; otherwise all three. The image phase is
+// additionally gated by --skip-image.
+const want = (p) => !flags.only || flags.only === p;
+const buildImage = want('image') && !flags.skipImage;
 
 // ----- tiny helpers -------------------------------------------------------------------------------
 
@@ -84,6 +102,19 @@ function npm(args, opts = {}) {
   return isWin ? run('npm.cmd', args, { shell: true, ...opts }) : run('npm', args, opts);
 }
 
+// Run an image/build.sh subcommand with the output base redirected into build/<config>/image. The
+// path is RELATIVE to the image/ dir (../build/...) so it resolves identically on macOS and inside
+// WSL — no Windows<->WSL path translation. On Windows the env is passed inline to `wsl bash -lc`
+// (WSLENV is finicky); on macOS it's a plain env on the bash child.
+const imageOutBase = path.posix.join('..', 'build', flags.config, 'image');
+function imageRun(subcmd) {
+  if (isWin) {
+    run('wsl', ['bash', '-lc', `cd image && TARGET=${target} ATELIER_OUT_BASE='${imageOutBase}' ./build.sh ${subcmd}`]);
+  } else {
+    run('bash', ['build.sh', subcmd], { cwd: rel('image'), env: { TARGET: target, ATELIER_OUT_BASE: imageOutBase } });
+  }
+}
+
 // capture stdout, tolerating failure (returns null). Used for best-effort version probes.
 function tryCapture(cmd, args, opts = {}) {
   const res = spawnSync(cmd, args, { cwd: repoRoot, encoding: 'utf8', ...opts });
@@ -101,10 +132,6 @@ const rel = (...p) => path.join(repoRoot, ...p);
 function rm(...p) {
   fs.rmSync(rel(...p), { recursive: true, force: true });
 }
-function copyInto(src, destDir) {
-  fs.mkdirSync(destDir, { recursive: true });
-  fs.cpSync(src, path.join(destDir, path.basename(src)), { recursive: true, force: true });
-}
 
 // ----- phases -------------------------------------------------------------------------------------
 
@@ -113,11 +140,11 @@ function preflight() {
   if (!isMac && !isWin) die(`unsupported platform '${process.platform}' (darwin or win32 only)`);
 
   const required = ['node', 'npm', 'go', 'git'];
-  if (!flags.skipImage) {
+  if (buildImage) {
     required.push('docker');
-    required.push(isWin ? 'wsl' : 'make');
+    required.push(isWin ? 'wsl' : 'bash'); // image build is bash + Docker (via wsl on Windows); no make
   }
-  if (isMac) required.push('codesign', 'bash');
+  if (isMac && want('host')) required.push('codesign'); // ad-hoc sign the broker for the VZ entitlement
 
   const missing = required.filter((t) => !have(t));
   if (missing.length) die(`missing required tool(s): ${missing.join(', ')}`);
@@ -126,13 +153,13 @@ function preflight() {
   info(`npm     ${tryCapture(isWin ? 'npm.cmd' : 'npm', ['--version'], { shell: isWin }) ?? '?'}`);
   info(`go      ${(tryCapture('go', ['version']) ?? '?').replace(/^go version /, '')}`);
   info(`git     ${(tryCapture('git', ['--version']) ?? '?').replace(/^git version /, '')}`);
-  if (!flags.skipImage) {
+  if (buildImage) {
     info(`docker  ${tryCapture('docker', ['--version']) ?? '?'}`);
     if (tryCapture('docker', ['info', '--format', '{{.ServerVersion}}']) === null)
       die('docker daemon is not reachable (start OrbStack/Docker Desktop, or pass --skip-image)');
   }
-  info(`platform ${process.platform} -> config=${flags.config}, target=${target}` +
-    `${flags.deep ? ', deep' : ''}${flags.skipImage ? ', skip-image' : ''}${flags.verify ? '' : ', no-verify'}`);
+  info(`platform ${process.platform} -> config=${flags.config}, target=${target}, ` +
+    `phases=${flags.only ?? 'all'}${flags.deep ? ', deep' : ''}${flags.skipImage ? ', skip-image' : ''}${flags.verify ? '' : ', no-verify'}`);
 }
 
 function submodule() {
@@ -143,30 +170,44 @@ function submodule() {
 
 function clean() {
   section(`Clean (${flags.deep ? 'deep' : 'light'})`);
-  // Generated source (imported by module path) + per-component build outputs.
+  // Generated source (imported by module path) is always regenerated by protogen below.
   rm('packages/protocol/src/index.ts');
   rm('services/pkg/protocol/protocol.go');
+  // Drop any stale services/bin from older or manual builds — the orchestrator now writes the host
+  // binaries straight into build/<config>/, so services/bin should not shadow them.
   for (const b of ['host', 'vmctl', 'guestd']) {
     rm('services/bin', b);
     rm('services/bin', `${b}.exe`);
   }
-  rm('apps/desktop/.vite');
-  rm('apps/desktop/out');
-  rm('build', flags.config);
-  // Only drop the VM bundle when we're going to rebuild it — otherwise --skip-image would
-  // destroy a working ~4GB artifact. image/.work scratch is kept for a fast rootfs rebuild.
-  if (!flags.skipImage) rm('image/bundle', target);
-  info(`removed generated code, services/bin, desktop build output, build/${flags.config}` +
-    `${flags.skipImage ? '' : `, image/bundle/${target}`}`);
+
+  // Only remove the build/<config>/ subtrees the running phases will rebuild — so --only and
+  // --skip-image never destroy a sibling artifact (e.g. the ~4GB image bundle on a host-only run).
+  const cleaned = [];
+  if (want('host')) {
+    rm('build', flags.config, `host${exe}`);
+    rm('build', flags.config, `vmctl${exe}`);
+    cleaned.push(`host${exe},vmctl${exe}`);
+  }
+  if (want('desktop')) {
+    rm('apps/desktop/.vite');
+    rm('apps/desktop/out');
+    rm('build', flags.config, 'desktop');
+    cleaned.push('desktop/');
+  }
+  if (buildImage) {
+    rm('build', flags.config, 'image', target);
+    cleaned.push(`image/${target}/`);
+  }
+  info(`removed generated code, services/bin, build/${flags.config}/{${cleaned.join(', ')}}`);
 
   if (flags.deep) {
     for (const d of ['', 'apps/desktop', 'packages/agent', 'packages/provider', 'packages/protocol', 'tools/protogen'])
       rm(d, 'node_modules');
     info('removed all node_modules');
-    if (!flags.skipImage) {
-      // Wipe Docker scratch so the rootfs is fully re-exported (Docker layer cache still persists).
-      if (isWin) run('wsl', ['make', '-C', 'image', 'clean', `TARGET=${target}`]);
-      else run('make', ['-C', 'image', 'clean', `TARGET=${target}`]);
+    if (buildImage) {
+      // Wipe Docker scratch (.work/<target>) so the rootfs is fully re-exported (the Docker layer
+      // cache still persists). build.sh clean removes $WORK and $OUT (build/<config>/image/<target>).
+      imageRun('clean');
       info('wiped image/.work (full rootfs re-export on next build)');
     }
   }
@@ -179,11 +220,27 @@ function protogen() {
 
 function hostBuild() {
   section(`Host binaries (${flags.config})`);
-  // Release strips symbols and trims paths; debug keeps them. The per-OS scripts read these envs.
-  const env =
-    flags.config === 'release' ? { ATELIER_GOFLAGS: '-trimpath', ATELIER_LDFLAGS: '-s -w' } : {};
-  if (isMac) run('bash', ['scripts/build-sign-darwin.sh'], { env });
-  else run('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'scripts/build-go.ps1'], { env });
+  const dest = rel('build', flags.config);
+  fs.mkdirSync(dest, { recursive: true });
+
+  // host instantiates the VM via cgo (VZ on macOS); CGO_ENABLED=1 is required. Release strips
+  // symbols + trims paths; debug keeps them. `-o <dir>` writes both binaries into build/<config>/.
+  const args = ['-C', 'services', 'build'];
+  if (flags.config === 'release') args.push('-trimpath', '-ldflags=-s -w');
+  args.push('-o', dest, './cmd/host', './cmd/vmctl');
+  run('go', args, { env: { CGO_ENABLED: '1' } });
+  info(`host${exe}, vmctl${exe} -> build/${flags.config}/`);
+
+  if (isMac) {
+    // Virtualization.framework refuses to run unless the broker is codesigned with
+    // com.apple.security.virtualization under the hardened runtime, and cgo invalidates the
+    // signature on every rebuild — so (re)sign here. vmctl is a plain RPC client; no entitlement.
+    section('Codesign broker (virtualization entitlement)');
+    const entitlements = rel('services/packaging/darwin/atelier-vm.entitlements');
+    const host = path.join(dest, 'host');
+    run('codesign', ['--force', '--sign', '-', '--options', 'runtime', '--entitlements', entitlements, host]);
+    run('codesign', ['--display', '--entitlements', '-', host]);
+  }
 }
 
 function imageBuild() {
@@ -192,52 +249,43 @@ function imageBuild() {
     return;
   }
   section('VM image bundle');
-  if (isMac) run('make', ['-C', 'image', 'darwin']);
-  else {
-    warn('Windows image build runs under WSL2 and is not verified from this repo author\'s macOS machine');
-    run('wsl', ['make', '-C', 'image', 'windows']);
-  }
+  if (isWin)
+    warn("Windows image build runs under WSL2 and is not verified from this repo author's macOS machine");
+  imageRun('all'); // -> build/<config>/image/<target>/{vmlinuz,initrd,rootfs.*,*.origin,manifest.txt}
+  info(`image/${target}/ -> build/${flags.config}/image/${target}/`);
 }
 
 function desktop() {
   section('JS dependencies');
   npm(['--prefix', 'apps/desktop', 'install']);
   npm(['--prefix', 'packages/agent', 'install']); // for the verify phase; runtime deps ship baked in the rootfs
-  if (flags.config === 'release') {
-    section('Desktop package');
-    npm(['--prefix', 'apps/desktop', 'run', 'package']);
-  }
-}
 
-function stage() {
-  section(`Stage -> build/${flags.config}`);
-  const dest = rel('build', flags.config);
-  fs.mkdirSync(dest, { recursive: true });
-  copyInto(rel('services/bin', `host${exe}`), dest);
-  copyInto(rel('services/bin', `vmctl${exe}`), dest);
-  info(`host${exe}, vmctl${exe}`);
-  if (flags.config === 'release') {
-    if (!flags.skipImage) {
-      copyInto(rel('image/bundle', target), path.join(dest, 'image'));
-      info(`image/${target}/ (copied bundle)`);
-    } else {
-      warn('release with --skip-image: VM bundle not staged');
-    }
-    // electron-forge writes to apps/desktop/out. Don't fail the whole build if packaging
-    // produced nothing (a known finalize quirk surfaces here) — warn and stage the rest.
-    const out = rel('apps/desktop/out');
-    if (fs.existsSync(out)) {
-      const desktopDir = path.join(dest, 'desktop');
-      fs.rmSync(desktopDir, { recursive: true, force: true });
-      fs.cpSync(out, desktopDir, { recursive: true, force: true });
-      info('desktop/ (packaged app)');
-    } else {
-      warn('apps/desktop/out missing — desktop package not staged (check `npm --prefix apps/desktop run package`)');
-    }
+  // Package the Electron app for both configs so build/<config>/desktop/ is runnable. Debug pays the
+  // Forge packaging cost too; for fast host-only iteration, run the desktop via `npm run dev`.
+  section('Desktop package');
+  npm(['--prefix', 'apps/desktop', 'run', 'package']);
+
+  // electron-forge writes to apps/desktop/out (its own scratch). Stage the final app into
+  // build/<config>/desktop/. Don't fail the whole build if packaging produced nothing (a known
+  // finalize quirk surfaces here) — warn and move on.
+  section(`Stage desktop -> build/${flags.config}/desktop`);
+  const out = rel('apps/desktop/out');
+  if (fs.existsSync(out)) {
+    const desktopDir = rel('build', flags.config, 'desktop');
+    fs.rmSync(desktopDir, { recursive: true, force: true });
+    fs.mkdirSync(path.dirname(desktopDir), { recursive: true });
+    fs.cpSync(out, desktopDir, { recursive: true, force: true });
+    info('desktop/ (packaged app)');
+  } else {
+    warn('apps/desktop/out missing — desktop package not staged (check `npm --prefix apps/desktop run package`)');
   }
 }
 
 function verify() {
+  if (flags.only) {
+    section(`Verify (skipped: --only=${flags.only})`);
+    return;
+  }
   if (!flags.verify) {
     section('Verify (skipped)');
     return;
@@ -252,7 +300,8 @@ function verify() {
   // exercise its !linux stubs. Compile it for its real linux target too, so a break in
   // egress/mount/sandbox _linux.go is caught here even when --skip-image is set.
   const guestArch = isMac ? 'arm64' : 'amd64';
-  const probe = path.join(os.tmpdir(), `atelier-guestd-probe-${process.pid}`);
+  const probe = rel('build', flags.config, `.guestd-probe-${process.pid}`);
+  fs.mkdirSync(path.dirname(probe), { recursive: true });
   run('go', ['-C', 'services', 'build', '-o', probe, './cmd/guestd'],
     { env: { GOOS: 'linux', GOARCH: guestArch, CGO_ENABLED: '0' } });
   fs.rmSync(probe, { force: true });
@@ -268,30 +317,35 @@ function verify() {
 }
 
 function summary() {
-  section(`Done (${flags.config}) in ${elapsed()}`);
+  section(`Done (${flags.config}${flags.only ? `, only=${flags.only}` : ''}) in ${elapsed()}`);
   const destAbs = rel('build', flags.config);
-  const staged = fs.readdirSync(destAbs).sort();
-  console.log(`  build/${flags.config}/ contains: ${staged.join(', ')}`);
+  const staged = fs.existsSync(destAbs) ? fs.readdirSync(destAbs).sort() : [];
+  console.log(`  build/${flags.config}/ contains: ${staged.join(', ') || '(nothing)'}`);
   if (flags.config === 'release') {
     console.log('  release/ is the self-contained deliverable');
-  } else {
-    console.log('  next:');
-    console.log(`    sudo build/${flags.config}/host -addr /tmp/atelier-host.sock   # elevated broker`);
-    console.log(`    ATELIER_BUNDLE_DIR=image/bundle/${target} npm run dev          # desktop (dev)`);
+    return;
   }
+  console.log('  next:');
+  // macOS drives VZ via a codesigned binary with the virtualization entitlement — no root needed.
+  // Only the Windows/HCS broker must run elevated.
+  if (isWin) {
+    console.log(`    build\\${flags.config}\\host.exe -addr \\\\.\\pipe\\atelier-host   # broker (run elevated)`);
+  } else {
+    console.log(`    build/${flags.config}/host -addr /tmp/atelier-host.sock              # broker`);
+  }
+  console.log(`    ATELIER_BUNDLE_DIR=build/${flags.config}/image/${target} npm run dev   # desktop (dev)`);
 }
 
 // ----- main ---------------------------------------------------------------------------------------
 
 try {
   preflight();
-  submodule();
+  if (want('host')) submodule();
   clean();
   protogen();
-  hostBuild();
-  imageBuild();
-  desktop();
-  stage();
+  if (want('host')) hostBuild();
+  if (want('image')) imageBuild();
+  if (want('desktop')) desktop();
   verify();
   summary();
 } catch (err) {

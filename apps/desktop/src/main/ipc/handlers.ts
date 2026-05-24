@@ -31,10 +31,11 @@ export function registerIpcHandlers(): IpcBackend {
     host: (up) => broadcast(IpcChannel.WorkHost, { up }),
   };
   // Where the per-target VM bundle lives: packaged app keeps it under Resources (wired by
-  // S10 packaging); in dev it's the repo's image/bundle, with app root = apps/desktop.
+  // S10 packaging); in dev it's the orchestrator's output (build/debug/image), with app root =
+  // apps/desktop. ATELIER_BUNDLE_DIR overrides this (e.g. to point at build/release/image).
   const bundleBaseDir = app.isPackaged
     ? path.join(process.resourcesPath, "bundle")
-    : path.join(app.getAppPath(), "..", "..", "image", "bundle");
+    : path.join(app.getAppPath(), "..", "..", "build", "debug", "image");
   const manager = new SessionManager(host, store, emit, { bundleBaseDir });
   void manager.init();
 

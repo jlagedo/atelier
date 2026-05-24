@@ -3,7 +3,9 @@
 # Build the utility-VM image bundle (design.md §7): a pinned set of
 # kernel (vmlinuz) + boot initramfs (initrd) + Ubuntu rootfs (ext4 in a VHD),
 # mirroring Cowork's claudevm.bundle. Sources live in image/{rootfs,initrd,kernel,guest};
-# outputs go to image/bundle/ (gitignored).
+# outputs go to image/bundle/ (gitignored). The output BASE is overridable via ATELIER_OUT_BASE
+# (the build-all.mjs orchestrator points it at ../build/<config>/image so all artifacts land in
+# one tree); the per-target subdir ($TARGET) is always appended.
 #
 # The matched kernel (linux-image-generic-hwe-22.04) + its /lib/modules + the boot
 # initramfs are produced by the rootfs Docker build (one apt transaction, so the
@@ -28,7 +30,7 @@ case "$TARGET" in
   darwin-arm64-vz)      ARCH="aarch64"; DOCKER_PLATFORM="linux/arm64"; GOARCH="arm64"; DISK="raw" ;;
   *) echo "image: unknown TARGET '$TARGET' (want: windows-amd64-hyperv | darwin-arm64-vz)" >&2; exit 2 ;;
 esac
-OUT="bundle/$TARGET"
+OUT="${ATELIER_OUT_BASE:-bundle}/$TARGET"   # base overridable (orchestrator -> ../build/<config>/image)
 WORK=".work/$TARGET"      # per-target: never mix arch trees/tars/binaries across targets
 ROOTFS_TAG="atelier-rootfs:${UBUNTU_VERSION}-${ARCH}"
 

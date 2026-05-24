@@ -38,49 +38,50 @@ Linux utility VM — one cage, N sessions: each /sessions/<id> mount + its own a
 ### Build everything (one command)
 
 ```sh
-npm run build:all                      # clean build + verify  -> build/debug/{host,vmctl}
-npm run build:all -- --config=release  # stripped + packaged, self-contained -> build/release/
+npm run build:all                      # clean build + verify        -> build/debug/
+npm run build:all -- --config=release  # stripped + self-contained   -> build/release/
 ```
 
-`scripts/build-all.mjs` (zero-dep Node) detects your OS and runs the whole chain from zero — git
-submodule → protocol codegen → host broker (codesigned on macOS) → VM image → desktop deps → verify
-— staging artifacts into `build/<config>/`. Flags: `--deep` (also wipe `node_modules` + image cache
-for a true from-zero), `--no-verify`, `--skip-image` (host-only, fast). Then run as in step 4 below.
+`scripts/build-all.mjs` (zero-dep Node) is the single source of truth for the build. It detects your
+OS and runs the whole chain from zero — git submodule → protocol codegen → host broker (codesigned
+on macOS) → VM image → packaged desktop → verify — writing **every artifact into one tree**,
+`build/<config>/`:
 
-Prefer to drive each component yourself? The manual steps:
-
-### macOS (Apple Silicon)
-
-```sh
-# 1. Build host broker + dev CLI (regenerates protocol bindings, codesigns)
-./scripts/build-sign-darwin.sh          # -> services/bin/{host,vmctl}
-
-# 2. Build the VM image bundle
-make -C image darwin                    # -> image/bundle/darwin-arm64-vz/{vmlinuz,initrd,rootfs.raw}
-
-# 3. Install desktop deps
-npm --prefix apps/desktop install
-
-# 4. Run — in two shells
-services/bin/host                       # privileged broker, listens on /tmp/atelier-host.sock
-npm --prefix apps/desktop start         # desktop app (ANTHROPIC_API_KEY must be set)
+```
+build/<config>/
+  host(.exe), vmctl(.exe)        # Go broker + dev CLI (broker codesigned on macOS)
+  image/<target>/                # vmlinuz, initrd, rootfs.raw|vhd, *.origin, manifest.txt
+  desktop/                       # packaged Electron app
 ```
 
-### Windows
+Flags: `--deep` (also wipe `node_modules` + image cache for a true from-zero), `--no-verify`,
+`--skip-image` (host-only, fast), and `--only=host|image|desktop` to build a single phase. Then run
+as below.
+
+### Build one phase at a time
+
+The same orchestrator drives each component — no per-OS build scripts:
 
 ```sh
-# 1. Build host broker + dev CLI
-.\scripts\build-go.ps1                  # -> services\bin\{host,vmctl}.exe
+node scripts/build-all.mjs --only=host     # protocol + broker/vmctl (codesigned on macOS)
+node scripts/build-all.mjs --only=image    # VM image bundle (Docker; via WSL on Windows)
+node scripts/build-all.mjs --only=desktop  # packaged desktop app
+```
 
-# 2. Build the VM image bundle (in WSL)
-cd image && ./build.sh check && ./build.sh all   # -> image/bundle/windows-amd64-hyperv/...
+(`image/build.sh` still runs standalone for image-only hacking; by default it writes to
+`image/bundle/<target>/`. The orchestrator redirects it into `build/<config>/image/` via
+`ATELIER_OUT_BASE`.)
 
-# 3. Install desktop deps
-npm --prefix apps/desktop install
+### Run
 
-# 4. Run — elevated, in two shells
-services\bin\host
-npm --prefix apps/desktop start
+```sh
+# macOS (Apple Silicon) — broker needs no root (codesigned with the VZ entitlement)
+build/debug/host                                                       # broker -> /tmp/atelier-host.sock
+ATELIER_BUNDLE_DIR=build/debug/image/darwin-arm64-vz npm run dev       # desktop (ANTHROPIC_API_KEY set)
+
+# Windows — broker must run elevated
+build\debug\host.exe
+$env:ATELIER_BUNDLE_DIR="build\debug\image\windows-amd64-hyperv"; npm run dev
 ```
 
 In the app: **Work → New work → pick a folder.** The app boots `vm0`, mounts the folder, opens egress to `api.anthropic.com`, and launches the in-guest agent. Tasks stream in; deliverables land in your folder. Idle sessions hibernate and resume on selection.
@@ -88,6 +89,7 @@ In the app: **Work → New work → pick a folder.** The app boots `vm0`, mounts
 ### Terminal path (no Electron)
 
 ```sh
+B=build/debug/image/darwin-arm64-vz   # the bundle dir (use vmctl from build/debug/)
 vmctl createVM -id vm0 -kernel $B/vmlinuz -initrd $B/initrd -rootfs $B/rootfs.raw
 vmctl startVM  -id vm0
 vmctl attachWorkspace -id vm0 -path /path/to/folder

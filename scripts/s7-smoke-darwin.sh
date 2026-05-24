@@ -22,16 +22,17 @@
 #   scripts/s7-smoke-darwin.sh                 # build everything, then black-box, then probe
 #   ONLY=blackbox scripts/s7-smoke-darwin.sh   # just the vmctl smoke
 #   ONLY=whitebox scripts/s7-smoke-darwin.sh   # just the gated Go probe
-#   SKIP_BUILD=1 scripts/s7-smoke-darwin.sh    # reuse existing signed services/bin/host + bundle
+#   SKIP_BUILD=1 scripts/s7-smoke-darwin.sh    # reuse existing signed build/debug/host + bundle
 #   BUILD_BUNDLE=1 scripts/s7-smoke-darwin.sh  # force a guest-bundle rebuild (needed after guest changes)
 #
-# The guest bundle (image/bundle/darwin-arm64-vz) is built automatically when missing
-# via image/build.sh (Docker cross-arch build). It is NOT rebuilt when already present
-# unless BUILD_BUNDLE=1 — so after touching guest code (init.sh, guestd) pass that flag.
+# The guest bundle (build/debug/image/darwin-arm64-vz) is built automatically when missing
+# via the build-all.mjs orchestrator (--only=image, Docker cross-arch build). It is NOT rebuilt
+# when already present unless BUILD_BUNDLE=1 — so after touching guest code (init.sh, guestd) pass
+# that flag.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DEFAULT_BUNDLE="$REPO/image/bundle/darwin-arm64-vz"
+DEFAULT_BUNDLE="$REPO/build/debug/image/darwin-arm64-vz"
 BUNDLE="${ATELIER_BUNDLE_DIR:-$DEFAULT_BUNDLE}"
 ENTITLEMENTS="$REPO/services/packaging/darwin/atelier-vm.entitlements"
 ADDR="/tmp/atelier-s7-host.sock"
@@ -55,7 +56,7 @@ ensure_bundle() {
       exit 1
     fi
     hdr "build guest bundle (darwin-arm64-vz)"
-    ( cd "$REPO/image" && TARGET=darwin-arm64-vz ./build.sh all )
+    node "$REPO/scripts/build-all.mjs" --only=image --no-verify
   fi
   bundle_complete || { echo "bundle still incomplete at $BUNDLE after build"; exit 1; }
 }
@@ -63,12 +64,12 @@ ensure_bundle() {
 # ---- build + sign --------------------------------------------------------------------
 if [[ "${SKIP_BUILD:-}" != "1" ]]; then
   hdr "build + sign (broker, vmctl)"
-  "$REPO/scripts/build-sign-darwin.sh"
+  node "$REPO/scripts/build-all.mjs" --only=host --no-verify
 fi
 ensure_bundle
 
-HOST="$REPO/services/bin/host"
-VMCTL="$REPO/services/bin/vmctl"
+HOST="$REPO/build/debug/host"
+VMCTL="$REPO/build/debug/vmctl"
 # vmctl wants the subcommand FIRST (a leading "-" makes it fall back to getStatus),
 # so inject -addr right after the subcommand, not before it.
 vm() { local sub="$1"; shift; "$VMCTL" "$sub" -addr "$ADDR" "$@"; }
