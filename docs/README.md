@@ -12,6 +12,8 @@ Start here when the repo shape or history feels fuzzy. Each document has one job
 | [`ipc-security.md`](ipc-security.md) | Hop 2 App-to-Broker security gap and hardening ladder. |
 | [`vm-security-assessment.md`](vm-security-assessment.md) | Internal VM audit findings plus remediation status from the live Hyper-V verification. |
 | [`vm-hardening.md`](vm-hardening.md) | Forward-looking VM hardening roadmap after the audit fixes. |
+| [`security.md`](security.md) | Consolidated VM + IPC security notes (audit findings, hardening, threat model). |
+| [`openhands-adoption.md`](openhands-adoption.md) | Review + phased plan for replacing the in-guest agent with an OpenHands-SDK engine (provider-agnostic, WORK now, expand later). |
 
 Operational build/run/test commands live in the root [`README`](../README) and
 [`AGENTS.md`](../AGENTS.md).

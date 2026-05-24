@@ -187,7 +187,7 @@ npm run e2e:host -- --skip-build      # reuse build/<config>/ as-is (fast-fail i
 
 `scripts/e2e-host.mjs` spawns the **shipped** broker over a unix socket and exercises every door + the
 in-guest agent loop through `vmctl` — the real Hop-2 wire, which the Go unit tests (fake drivers) and
-`s7-smoke-darwin.sh` (share shape) don't cover. It splits the two share models into their own sections
+the S7 probe (`services/internal/vmm/s7_probe_darwin_test.go`, share shape) don't cover. It splits the two share models into their own sections
 (legacy `/workspace` + Files door; concurrent `/sessions/<tag>` — isolation, arbitrary targets,
 sibling-safe detach), plus the egress jail (default-deny blocks, allow reaches the model) and
 host↔guest bridging both ways. A real boot, so VZ + a codesigned broker + the image bundle are
@@ -319,7 +319,7 @@ macOS uses **Docker via OrbStack**; Windows uses **WSL2**.
   Windows-only paths. macOS builds need CGO + codesign — use `npm run build:all -- --only=host`.
 - End-to-end: `npm run e2e:host` boots a real VM and drives all 12 broker doors + the agent loop
   through the shipped broker (macOS/VZ; `scripts/e2e-host.mjs`) — the deepest integration check,
-  complementing the Go unit tests (fake drivers) and `s7-smoke-darwin.sh` (share shape).
+  complementing the Go unit tests (fake drivers) and the S7 probe (share shape).
 - State clearly when something can't be verified (HCS, Windows-only paths, restricted network)
   rather than claiming success.
 

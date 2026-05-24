@@ -2,7 +2,8 @@
 // End-to-end battery for the host broker (`npm run e2e:host`).
 //
 // Why this exists: unit tests cover the broker doors against fake drivers (services/internal/...),
-// and s7-smoke-darwin.sh proves the runtime-share shape. Neither boots the *shipped* broker and
+// and the S7 probe (services/internal/vmm/s7_probe_darwin_test.go) proves the runtime-share shape.
+// Neither boots the *shipped* broker and
 // drives every door the way the product does. This harness does: it builds (or reuses) build/<config>/,
 // spawns the real `host` over a unix socket, boots a real VM via VZ, and exercises all 12 protocol
 // doors + the in-guest agent loop end to end through the `vmctl` dev CLI — the same Hop-2 wire the

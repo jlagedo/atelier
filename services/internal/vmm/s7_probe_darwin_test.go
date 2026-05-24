@@ -15,8 +15,13 @@
 //
 // This boots a real VM, so it is gated behind ATELIER_VZ_SMOKE and only runs on Apple
 // Silicon. The test binary instantiates Virtualization.framework in-process, so it must be
-// codesigned with com.apple.security.virtualization before it runs — use
-// scripts/s7-smoke-darwin.sh, which compiles, signs, and runs it for you.
+// codesigned with com.apple.security.virtualization before it runs. Build and sign via the
+// orchestrator (npm run build:all -- --only=host), then run with CGO_ENABLED=1:
+//
+//	ATELIER_VZ_SMOKE=1 ATELIER_BUNDLE_DIR=<bundle> \
+//	  go test -v -run TestS7RuntimeShareProbe ./internal/vmm/
+//
+// If the test binary is not codesigned, VZ will refuse to start and the test will fail.
 package vmm_test
 
 import (
@@ -44,7 +49,7 @@ const dummyMountPort uint32 = 564
 
 func TestS7RuntimeShareProbe(t *testing.T) {
 	if os.Getenv("ATELIER_VZ_SMOKE") == "" {
-		t.Skip("S7 probe boots a real VM; set ATELIER_VZ_SMOKE=1 and run the signed binary via scripts/s7-smoke-darwin.sh")
+		t.Skip("S7 probe boots a real VM; set ATELIER_VZ_SMOKE=1 and ATELIER_BUNDLE_DIR=<bundle> and run under a codesigned binary")
 	}
 	bundle := os.Getenv("ATELIER_BUNDLE_DIR")
 	if bundle == "" {

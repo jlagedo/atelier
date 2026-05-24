@@ -4,9 +4,14 @@ Scope: securing the **guest VM as the containment boundary** for an autonomous C
 that works on local files. The App-to-Broker IPC boundary is covered separately in
 [`ipc-security.md`](ipc-security.md).
 
-This document consolidates the live security assessment findings, remediation history, and the
-forward-looking hardening backlog. It tracks what is implemented, what remains open, and why the
-order matters.
+This document is the single register of security findings for the guest sandbox. Each issue —
+whether open, deferred, or fixed — appears **once**, with a stable ID, severity, status, evidence,
+and recommendation. Prior per-assessment IDs (`CRIT-*`, `HIGH-*`, `MED-*`, the 2026-05-24 numbered
+items, and the `C*`/`H*` backlog labels) are listed under **Prior refs** for traceability.
+
+> Severity/status reflect what was recorded by the assessments below; this revision only
+> consolidates and reformats — it does not re-verify. Where two assessments disagreed, the most
+> recent value is the headline and the older one is noted.
 
 ---
 
@@ -16,7 +21,7 @@ order matters.
 |------|-------------|----------|-------|
 | 2026-05-22 | Ubuntu 22.04.5 LTS · Linux 6.8.0 · x86_64 · Hyper-V | 6 critical, 6 high, 3 medium | Initial assessment |
 | 2026-05-22 | (same) | — | Remediations applied and verified on live HCS boot |
-| 2026-05-24 | Ubuntu 24.04.4 LTS · Linux 6.17.0 · aarch64 · Apple Silicon VZ VM | 1 critical, 3 high, 3 medium | Follow-up assessment post-remediation |
+| 2026-05-24 | Ubuntu 24.04.4 LTS · Linux 6.17.0 · aarch64 · Apple Silicon VZ VM | 1 critical, 3 high, 3 medium | Follow-up post-remediation |
 
 **Assessor:** Claude (sandboxed agent)
 
@@ -24,185 +29,313 @@ order matters.
 
 ## Current Posture
 
-The isolation spine is strong: Atelier uses a Hyper-V utility VM, a default-deny host-mediated
-egress path, a read-only root disk, and bubblewrap for the agent process. The remaining risk is
-concentrated in key residency, syscall filtering, resource limits, and shared-VM session separation.
+The isolation spine is strong: a dedicated Linux utility VM, a default-deny host-mediated egress
+path, a read-only root disk, and bubblewrap for the agent process. Remaining risk is concentrated in
+key residency, syscall filtering, resource limits, and shared-VM session separation.
 
-| Area | Current state | Code reference |
-|---|---|---|
-| Hypervisor boundary | Dedicated Linux utility VM driven by HCS | `services/internal/hcs`, `services/internal/vmm` |
-| Agent identity | Agent launched as uid/gid 1001, not root | `services/cmd/guestd/sandbox_linux.go` |
-| Agent process sandbox | bubblewrap user/pid/ipc/uts/mount namespaces; caps dropped | `services/cmd/guestd/sandbox_linux.go` |
-| Root filesystem | rootfs mounted read-only; writable paths are tmpfs/session shares | `services/internal/hcs/doc.go`, `image/guest/init.sh` |
-| Egress | runtime hostname allowlist with DNS pinning; default deny | `services/internal/netjail` |
-| Model credential | still passed into the in-guest process environment | `apps/desktop/src/main/sessions/manager.ts`, `packages/agent/src/cli-guest.ts` |
-| Seccomp | not applied yet | open |
-| Resource limits | no cgroup limits yet | open |
+| Area | Current state | Code reference | Finding |
+|---|---|---|---|
+| Hypervisor boundary | Dedicated Linux utility VM driven by HCS/VZ | `services/internal/hcs`, `services/internal/vmm` | — |
+| Agent identity | Launched as uid/gid 1001, not root | `services/cmd/guestd/sandbox_linux.go` | R-01 |
+| Agent process sandbox | bwrap user/pid/ipc/uts/mnt namespaces; caps dropped | `services/cmd/guestd/sandbox_linux.go` | R-01, R-03 |
+| Root filesystem | rootfs read-only; writable paths are tmpfs/session shares | `services/internal/hcs/doc.go`, `image/guest/init.sh` | R-02 |
+| Egress | runtime hostname allowlist + DNS pinning; default deny | `services/internal/netjail` | F-05 |
+| Model credential | still passed into the in-guest process environment | `apps/desktop/src/main/sessions/manager.ts`, `packages/agent/src/cli-guest.ts` | F-02 |
+| Seccomp | not applied yet | — | F-13 |
+| Resource limits | no cgroup limits yet | — | F-06 |
 
-### Finding Summary (2026-05-24)
-
-| Severity | Count |
-|---|---|
-| Critical | 1 |
-| High | 3 |
-| Medium | 3 |
+**Open finding counts (headline severity):** 2 critical · 10 high · 6 medium.
 
 ---
 
-## Open Findings (2026-05-24)
+## Open Findings
 
 ### Critical
 
-#### 1. Unprivileged User Namespace Creation Grants Full Capabilities
+#### F-01 · Unprivileged user-namespace creation grants full capabilities in-namespace
+- **Severity:** Critical · **Status:** Open · **First seen:** 2026-05-24 · **Prior refs:** 2026-05-24 #1
 
-**Command:**
+**Description.** Any process inside the sandbox can create a new user namespace and become apparent
+root with **all** capabilities scoped to that namespace. Capabilities are namespace-scoped (the outer
+kernel boundary still applies), but combined with no seccomp filter (F-13) and a potentially
+vulnerable kernel this is a viable privilege-escalation chain — unprivileged user namespaces are
+historically the primary source of Linux kernel-escape CVEs (Dirty Pipe, overlayfs escapes). With
+`CAP_NET_ADMIN` in a fresh user+net namespace an attacker could also manipulate the network stack.
+
+**Evidence.**
 ```bash
 unshare --user --map-root-user id
 # → uid=0(root) gid=0(root) groups=0(root)
-
 unshare --user --map-root-user cat /proc/self/status | grep Cap
-# CapPrm: 000001ffffffffff  ← ALL capabilities
-# CapEff: 000001ffffffffff  ← ALL capabilities effective
-# CapBnd: 000001ffffffffff  ← ALL capabilities in bounding set
+# CapPrm/CapEff/CapBnd: 000001ffffffffff   ← ALL capabilities
 ```
 
-Any process inside the sandbox can create a new user namespace and gain all Linux capabilities
-within that namespace as apparent root. With no seccomp filter, this is a meaningful attack surface:
+**Recommendation.** Disable unprivileged user namespaces
+(`kernel.unprivileged_userns_clone = 0`) or block the `CLONE_NEWUSER` flag in
+`clone()`/`unshare()` via a seccomp profile (see F-13, which closes this finding).
 
-- Can be used to exploit kernel vulnerabilities that require `CAP_SYS_ADMIN` or similar
-- With `CAP_NET_ADMIN` inside a user namespace + new network namespace, can manipulate network stack
-- Unprivileged user namespaces are historically the primary source of kernel privilege escalation
-  CVEs on Linux (e.g. Dirty Pipe, various overlayfs escapes)
+#### F-02 · Anthropic API key resident in guest environment and memory
+- **Severity:** Critical · **Status:** Open (deferred) · **First seen:** 2026-05-22 · **Prior refs:** CRIT-04, backlog C1
 
-The new user namespace is still subject to the outer kernel's security boundary — capabilities are
-scoped to the namespace — but combined with no seccomp and a potentially vulnerable kernel, it is a
-viable attack chain.
+**Description.** `ANTHROPIC_API_KEY` is injected into the in-guest process environment, readable from
+`/proc/PID/environ`, and was found in **73 distinct memory regions** across processes (heap, stack,
+anon mappings of the node runtime, the agent, and PID 1). Highest-value open finding: it enables key
+theft and increases the impact of exfiltration through the allowlisted endpoint.
 
-**Fix:**
-```bash
-# Option A: Disable unprivileged user namespaces entirely
-echo 0 > /proc/sys/kernel/unprivileged_userns_clone
-# or in sysctl.conf:
-kernel.unprivileged_userns_clone = 0
+**Evidence.** Key present in `manager.ts` launch env → `cli-guest.ts` process; visible via
+`/proc/PID/environ` and memory scan.
 
-# Option B: Restrict via seccomp
-# Block: CLONE_NEWUSER flag in clone()/unshare() syscalls via seccomp profile
-```
-
----
+**Recommendation.** Terminate model calls at a **host-side authenticated proxy**: the guest sends
+requests with no ambient key and the host injects a scoped credential (backlog C1). Interim: mount
+the secret via a tmpfs file readable only by the agent user; use per-session ephemeral keys revoked
+on VM teardown. **Rotate the exposed key now** (it was observed during assessment).
 
 ### High
 
-#### 2. `guestd` Binary and Mount Visible Inside Sandbox
+#### F-03 · guestd volume contents readable inside the sandbox
+- **Severity:** High · **Status:** Open · **First seen:** 2026-05-24 · **Prior refs:** 2026-05-24 #2, #3
 
-The `guestd` volume (`/dev/vdb /opt/guestd ext4 ro,nosuid,nodev,relatime`) is visible from inside
-the bwrap sandbox. The `guestd` ELF binary (4 MB, Go binary) is fully readable, including via a user
-namespace.
-
-Root cause: `--bind / /` in bwrap exposes all mounts. An attacker can enumerate host communication
-infrastructure and analyze the binary to understand the host communication protocol.
-
-**Fix:** Add `--tmpfs /opt/guestd` after `--bind / /` in the bwrap invocation. bwrap processes bind
-arguments in order, so a later entry shadows the earlier one for that path.
-
-```bash
-bwrap \
-  --bind / / \
-  --tmpfs /opt/guestd \   # shadows the real mount with an empty tmpfs
-  ...
+**Description.** `--bind / /` in the bwrap invocation exposes all host mounts, including the
+read-only guestd volume mounted at `/opt`. Both the `guestd` Go binary (`/opt/guestd/guestd`) and the
+entire in-guest agent source tree (`/opt/atelier`) are fully readable. This lets an in-sandbox
+attacker enumerate the host-comms layer and read the complete policy engine, broker client, and
+canonical RPC schema to aid targeted exploitation:
 ```
-
-**Verification:** Re-run `cat /proc/mounts` from inside a new session to confirm the shadow.
-
----
-
-#### 3. Agent Runtime Source Code Fully Readable
-
-The entire `/opt/atelier` tree is readable from inside the sandbox:
-
-```
-/opt/atelier/packages/agent/src/seams/policy.ts     ← full policy engine logic
+/opt/guestd/guestd                                   ← host comms binary (4 MB Go ELF)
+/opt/atelier/packages/agent/src/seams/policy.ts      ← full policy engine (allow/deny sets)
 /opt/atelier/packages/agent/src/broker/client.ts     ← broker client
 /opt/atelier/packages/agent/src/cli-guest.ts         ← guest entrypoint
-/opt/atelier/packages/protocol/schema/protocol.json  ← full RPC protocol schema
-/opt/atelier/packages/provider/src/index.ts          ← provider source
+/opt/atelier/packages/protocol/schema/protocol.json  ← full RPC schema (incl. setEgressPolicy)
 ```
 
-This exposes the complete policy evaluation logic (GUEST_ALLOW/GUEST_DENY sets, door
-classification), the full broker RPC protocol, and implementation details that aid targeted
-exploitation. The `setEgressPolicy` RPC is particularly notable — if reachable, it could be used
-to whitelist network egress.
+**Evidence.** `cat /proc/mounts` shows `/dev/vdb /opt ext4 ro,nosuid,nodev`; the paths above are
+readable, including from within a user namespace.
 
-**Fix:** Add `--tmpfs /opt/atelier` after `--bind / /` in the bwrap invocation (same pattern as
-the guestd fix).
+**Recommendation.** Shadow the mount with `--tmpfs /opt` placed **after** `--bind / /` (bwrap
+applies bind args in order; a later entry shadows the earlier path for that mount). Because guestd
+and the agent now share the single `/opt` volume, one `--tmpfs /opt` covers both (this previously
+required separate `/opt/guestd` and `/opt/atelier` shadows). Verify with `cat /proc/mounts` in a
+fresh session.
 
----
+#### F-04 · `kptr_restrict = 0` — kernel pointer restriction disabled
+- **Severity:** High · **Status:** Open · **First seen:** 2026-05-24 · **Prior refs:** 2026-05-24 #4, MED-01 (logged Medium on 2026-05-22)
 
-#### 4. `kptr_restrict = 0` — Kernel Pointer Restriction Disabled
+**Description.** Kernel pointers in `/proc/kallsyms` and similar interfaces are not restricted, aiding
+exploit development by defeating KASLR. `/proc/kallsyms` currently returns all-zero addresses (kernel
+ASLR + userns mapping), but the setting may still leak pointers via `/proc/net`, dmesg, etc.
 
-```bash
-cat /proc/sys/kernel/kptr_restrict  # → 0
-```
+**Evidence.** `cat /proc/sys/kernel/kptr_restrict → 0`.
 
-Kernel pointers in `/proc/kallsyms` and other interfaces are not restricted. `/proc/kallsyms`
-currently returns all-zero addresses (likely due to kernel ASLR + user namespace mapping), but the
-setting may leak pointers through other interfaces (`/proc/net`, dmesg, etc.).
+**Recommendation.** `kernel.kptr_restrict = 2` (hide from all users including root) in sysctl.
 
-**Fix:**
-```bash
-# sysctl.conf:
-kernel.kptr_restrict = 2   # hide from all users including root
-```
+#### F-05 · Egress allowlist is host-tight but not semantically tight
+- **Severity:** High · **Status:** Open (deferred) · **First seen:** 2026-05-22 · **Prior refs:** HIGH-06, backlog C2 (logged Critical)
 
----
+**Description.** The allowlist blocks arbitrary DNS and direct-IP egress, but after resolving
+`api.anthropic.com` via the gateway DNS, **TCP port 80 is reachable** alongside 443 — port 80 serves
+no purpose for an HTTPS API. More broadly, the lock still permits whatever the allowed endpoint
+exposes; the agent talks directly to the full provider API rather than through a narrow contract.
+
+**Evidence.** Post-DNS TCP connect to the allowed host succeeds on both 80 and 443; direct-by-IP TCP
+receives RST and non-DHCP UDP is dropped (good).
+
+**Recommendation.** Restrict the TCP allowlist to **443 only**; block link-local/RFC1918 metadata
+ranges. After F-02, put model traffic behind a narrow host-side proxy contract rather than direct
+provider access (backlog C2).
+
+#### F-06 · No cgroup resource limits
+- **Severity:** High · **Status:** Open · **First seen:** 2026-05-22 · **Prior refs:** HIGH-01, backlog H5
+
+**Description.** No memory/CPU/PID limits are applied to agent children. A runaway workload (fork
+bomb, runaway build, memory exhaustion) can consume all VM resources indefinitely.
+
+**Recommendation.** Set `memory.max`, `cpu.max`, and `pids.max` in the agent's cgroup v2 slice
+(e.g. 2 GB memory, 150% CPU).
+
+#### F-07 · No audit logging / no off-guest evidence forwarding
+- **Severity:** High · **Status:** Open · **First seen:** 2026-05-22 · **Prior refs:** HIGH-02, backlog H7
+
+**Description.** `auditd` is not running: no syscall-level trail, process-exec logging, or file-access
+recording inside the guest. Broker audit exists host-side, but a compromised guest can tamper with
+any local-only log.
+
+**Recommendation.** Enable auditd with rules covering `execve`, `open`/`openat` on sensitive paths,
+`ptrace`, network connect, and module load — and **forward off-guest via vsock** before the VM can
+tamper with the records.
+
+#### F-08 · Raw disk and physical memory devices present
+- **Severity:** High · **Status:** Open · **First seen:** 2026-05-22 · **Prior refs:** HIGH-04, backlog H4
+
+**Description.** `/dev/sda` (raw block device) and `/dev/mem` (physical memory) are present and
+readable. With `CAP_SYS_RAWIO` now dropped for the agent (R-01) this is lower severity than at
+original assessment, but the devices should be absent from the sandbox.
+
+**Recommendation.** Bind-mount `/dev/null` over `/dev/mem`; remove `/dev/sda` from the VM `/dev` if
+direct disk access is not required; enable kernel lockdown where compatible and mount with `nodev`.
+
+#### F-09 · Cross-session filesystem mount exposure
+- **Severity:** High · **Status:** Open · **First seen:** 2026-05-22 · **Prior refs:** HIGH-05, backlog H6
+
+**Description.** The product uses one shared VM with per-session shares under `/sessions/<id>`.
+Session separation therefore depends on the guest sandbox and mount permissions rather than a
+hypervisor boundary; foreign session mounts may be observable inside the VM.
+
+**Recommendation.** If tenant-style isolation becomes a goal, move to one session per VM, per-session
+mount views, or read-only/hidden foreign mounts.
+
+#### F-10 · Broker policy gate still `AllowAll` — irreversible tail ungated
+- **Severity:** High · **Status:** Open · **First seen:** 2026-05-22 · **Prior refs:** backlog H2
+
+**Description.** The broker has a `Gate` seam and audit log, but the active implementation is
+`AllowAll`, so host-side enforcement is not yet real per-method/per-door policy. The policy engine in
+the guest (`policy.ts`) correctly denies `WebFetch`/`WebSearch` and defaults-deny unknown tools, but
+the host gate is the durable boundary.
+
+**Recommendation.** Replace `AllowAll` with real policy. Keep routine work low-friction, but route
+irreversible actions (destructive deletes, publishing, pushing, sending, broad egress changes)
+through an `Ask` or `Deny` decision.
+
+#### F-11 · Workspace writes are not reversible
+- **Severity:** High · **Status:** Open · **First seen:** 2026-05-22 · **Prior refs:** backlog H1
+
+**Description.** Egress lockdown protects confidentiality but does not protect the user's files from
+destructive edits inside the allowed workspace.
+
+**Recommendation.** Add snapshots, copy-on-write work areas, or explicit checkpoints before risky
+operations.
+
+#### F-12 · No runtime backstops for anomalous behavior
+- **Severity:** High · **Status:** Open · **First seen:** 2026-05-22 · **Prior refs:** backlog H3
+
+**Description.** There is no mechanism to halt or escalate after repeated denied tool calls,
+unexpected egress attempts, or high-volume file/network activity.
+
+**Recommendation.** Add backstops enforced **outside** the guest (so a compromised process cannot
+disable them) that halt or escalate on those signals.
 
 ### Medium
 
-#### 5. No Seccomp Filter
+#### F-13 · No seccomp filter
+- **Severity:** Medium · **Status:** Open · **First seen:** 2026-05-22 · **Prior refs:** 2026-05-24 #5, CRIT-02 (logged Critical), backlog C5
 
-```
-Seccomp: 0
-Seccomp_filters: 0
-```
+**Description.** No syscall filtering is applied (`Seccomp: 0`, `Seccomp_filters: 0`). All ~350
+syscalls are reachable, which widens the kernel attack surface and, with F-01, enables the user-ns
+escalation chain.
 
-No syscall filtering is applied. Combined with user namespace capability escalation (#1), this
-significantly widens the attack surface for kernel exploits.
+**Recommendation.** Apply a cBPF profile via `bwrap --seccomp <fd>`, using Docker's default profile
+as a floor and additionally blocking `unshare`/`clone(CLONE_NEWUSER)` (closes F-01), `keyctl`,
+`perf_event_open`, `bpf`, `userfaultfd`, `ptrace`, `process_vm_readv`/`writev`, `kexec_load`, and
+module-loading syscalls where Node and the SDK do not need them.
 
-**Fix:** Apply a seccomp profile to the bwrap invocation:
-```bash
-bwrap --seccomp <fd> ...
-# Use a profile derived from Docker's default seccomp policy,
-# additionally blocking: unshare, clone (CLONE_NEWUSER), keyctl,
-# perf_event_open, bpf, userfaultfd
-```
+#### F-14 · Speculation store bypass not mitigated
+- **Severity:** Medium · **Status:** Open · **First seen:** 2026-05-24 · **Prior refs:** 2026-05-24 #6
+
+**Description.** The VM is not applying SSBD; lower risk on Apple Silicon than x86 but relevant for
+multi-tenant scenarios.
+
+**Evidence.** `Speculation_Store_Bypass: vulnerable`, `SpeculationIndirectBranch: unknown`.
+
+**Recommendation.** Add `spec_store_bypass_disable=seccomp` (or `=on`) to the kernel cmdline (current:
+`console=hvc0 root=/dev/vda ro noresume init=/sbin/init`).
+
+#### F-15 · Sensitive data readable in the agent home directory
+- **Severity:** Medium · **Status:** Open · **First seen:** 2026-05-24 · **Prior refs:** 2026-05-24 #7
+
+**Description.** `~/.claude.json` (contains a `userID` hash) and `~/.claude/policy-limits.json`
+(reveals the restriction config) are readable. The files are owned by `atelier`, so the agent needs
+read access.
+
+**Recommendation.** Move policy-limits out of the agent-readable path, or encrypt the sensitive
+fields.
+
+#### F-16 · Kernel module loading enabled at runtime
+- **Severity:** Medium · **Status:** Open · **First seen:** 2026-05-22 · **Prior refs:** MED-02
+
+**Description.** New kernel modules can be loaded at runtime (`kernel.modules_disabled = 0`). With
+`CAP_SYS_MODULE` dropped for the agent (R-01) the risk is reduced but not eliminated for
+control-plane processes.
+
+**Recommendation.** Set `kernel.modules_disabled = 1` post-boot (one-way) once no later dynamic module
+load is needed; enable kernel lockdown where compatible.
+
+#### F-17 · ICMP spoofed locally for all destinations
+- **Severity:** Medium · **Status:** Open · **First seen:** 2026-05-22 · **Prior refs:** MED-03
+
+**Description.** `gvforwarder` generates fake ICMP echo replies for all destinations without
+forwarding packets, so ping always succeeds — even for unreachable hosts — masking network partitions
+and misleading operators.
+
+**Recommendation.** Drop ICMP outright, or forward it honestly.
+
+#### F-18 · Tool-readable content is untrusted (prompt injection)
+- **Severity:** Medium · **Status:** Open · **First seen:** 2026-05-22 · **Prior refs:** backlog (medium)
+
+**Description.** Files, web pages, repo text, and tool errors can all carry prompt injection. Rendering
+attacker-controlled markdown images or remote links in a privileged UI context compounds the risk.
+
+**Recommendation.** Treat all tool-readable content as untrusted input; avoid rendering
+attacker-controlled markdown images/remote links in privileged UI contexts.
 
 ---
 
-#### 6. Speculation Store Bypass Vulnerable
+## Resolved Findings
 
-```
-Speculation_Store_Bypass: vulnerable
-SpeculationIndirectBranch: unknown
-```
+#### R-01 · Agent ran as unconstrained root with all capabilities — **Fixed & verified**
+- **Severity:** Critical · **First seen:** 2026-05-22 · **Prior refs:** CRIT-01, backlog C3
 
-The VM is not applying speculative execution mitigations (SSBD). On Apple Silicon this is lower
-risk than x86, but worth noting for multi-tenant scenarios.
+The agent and children ran as `uid=0` with all 41 capabilities (incl. `CAP_SYS_MODULE`,
+`CAP_SYS_ADMIN`, `CAP_SYS_PTRACE`, `CAP_SYS_RAWIO`, `CAP_DAC_OVERRIDE`). **Fix:** the agent is now
+launched inside bubblewrap as uid/gid **1001** with `--cap-drop ALL` and fresh user/pid/ipc/uts/mnt
+namespaces (net deliberately shared so egress still works), with the read-only root bind-mounted. A
+subtle gap was caught and closed: guestd (PID 1, root) launching bwrap mapped sandbox-uid 1001 onto
+host-uid-0 (`uid_map: 1001 0 1`), making the agent DAC-root; guestd now drops the child's real uid/gid
+to 1001 (`SysProcAttr.Credential`) **before** exec'ing bwrap, so the namespace can only map to
+host-1001. *Verified in-guest:* `id → uid=1001`; `CapEff/Prm/Bnd = 0`; `cat /etc/shadow → Permission
+denied`; `/workspace`, `/home/atelier`, `/tmp` writable, `/run`, `/sessions` denied; full agent run
+end-to-end. **Keep as an invariant for every non-operator execution path.**
 
-**Fix:** Add `spec_store_bypass_disable=seccomp` or `spec_store_bypass_disable=on` to kernel
-cmdline. Currently booted with: `console=hvc0 root=/dev/vda ro noresume init=/sbin/init`.
+#### R-02 · World-writable / mutable system filesystem — **Fixed & verified**
+- **Severity:** Critical · **First seen:** 2026-05-22 · **Prior refs:** CRIT-05, backlog C4
+
+System dirs and binaries were world-writable; root cause was `mke2fs -d` on a Windows host, which
+cannot preserve Unix owner/mode. **Fix:** the ext4 is now populated inside a Linux imager container
+(only the opaque blob crosses to the host); perms are normalized at build (`/usr`, `/etc`
+`0755 root:root`; `/etc/passwd` `0644`; `/etc/shadow` `0640`); the root disk is mounted read-only
+(`RootFSReadOnly` → SCSI `ReadOnly` + `ro` cmdline); writable paths are tmpfs with explicit modes
+(`/run`, `/sessions` `0755`; `/home/atelier` `0700`; `/var/tmp` `1777`; `/tmp` per-sandbox `0755`).
+*Verified:* `/usr/bin/bash 0755 root:root`, `/etc/shadow 0640`, `/` is `ro`, write to `/usr/bin →
+EROFS`.
+
+#### R-03 · Zero namespace isolation between processes — **Substantially addressed**
+- **Severity:** Critical · **First seen:** 2026-05-22 · **Prior refs:** CRIT-03
+
+Every process originally shared all namespaces with PID 1. **Fix:** bubblewrap gives the agent its own
+user, pid, ipc, uts, and mnt namespaces; the network namespace is intentionally shared (the egress
+jail is the boundary). The trusted control-plane processes (guestd, gvforwarder) still share
+namespaces among themselves.
+
+#### R-04 · SSH host keys world-readable — **Resolved**
+- **Severity:** High · **First seen:** 2026-05-22 · **Prior refs:** HIGH-03
+
+`openssh-server` (an unused listener) was removed from the image, so there are no host keys to expose.
+
+#### R-05 · DHCP client removed; static network config — **Applied** (hardening context)
+- **First seen:** 2026-05-22
+
+`isc-dhcp-client` was dropped. The guest now configures `tap0` statically (192.168.127.2, gw .1, fixed
+MAC) and runs gvforwarder with `-preexisting`. The host-side DNS-sinkhole + TCP allowlist is unchanged;
+egress allow/deny was re-verified (`api.anthropic.com` reachable; other hosts `NXDOMAIN`).
 
 ---
 
-#### 7. Sensitive Data in Readable Home Directory
+## Host-Side Issues (broker)
 
-```
-/home/atelier/.claude.json            → contains userID hash
-/home/atelier/.claude/policy-limits.json  → reveals restriction config
-```
+Issues found during verification that live on the host, not in the guest sandbox.
 
-The `userID` field and full policy-limits configuration are readable. These files are owned by
-`atelier` (the agent user) so the agent needs to read them. Consider moving policy-limits out of
-the agent-readable path or encrypting sensitive fields.
+| ID | Issue | Status |
+|---|---|---|
+| HS-01 | `stopVM` reported a phantom HCS error (`HcsCloseComputeSystem hresult=0x8f3a51f0`); the binding read a return value from a documented `void` function | **Fixed** (binding no longer reads the return) |
+| HS-02 | Broker can panic on VM teardown (`linuxkit/virtsock` hvsock `ioCompletionProcessor` — "The handle is invalid") when a VM is stopped mid-handshake | **Open** — pre-existing third-party-library race |
 
 ---
 
@@ -228,110 +361,30 @@ the agent-readable path or encrypting sensitive fields.
 
 ---
 
-## Fix Priority
+## Remediation Priority
 
-```
-1. [CRITICAL] Add seccomp profile + block CLONE_NEWUSER         → closes user ns escalation
-2. [HIGH]     --tmpfs /opt/guestd in bwrap                      → hides host comm layer
-3. [HIGH]     --tmpfs /opt/atelier in bwrap                     → hides runtime source
-4. [HIGH]     kernel.kptr_restrict = 2 in sysctl               → hides kernel pointers
-5. [MEDIUM]   Add seccomp to bwrap (--seccomp fd)               → reduces syscall surface
-6. [MEDIUM]   Add spec_store_bypass_disable to kernel cmdline   → spectre/ssb mitigation
-```
+Ordered by leverage; references the finding IDs above (no re-description here).
 
----
-
-## Hardening Backlog
-
-Forward-looking items ordered by priority. This section tracks what to build next.
-
-### Critical
-
-**C1 — Move the Anthropic credential out of the guest entirely.**
-Terminate model calls at a host-side authenticated proxy. The guest should send model requests with
-no ambient API key; the host injects a scoped credential. This closes the highest-value open finding
-from the audit (CRIT-04): the key is visible in the guest process environment and memory. It also
-reduces the impact of exfiltration attempts through the allowlisted Anthropic endpoint.
-
-**C2 — Make the egress lock semantically tight, not just host-tight.**
-The current allowlist blocks arbitrary DNS and direct-IP egress, but it still allows whatever
-authenticated behavior the permitted endpoint exposes. After C1, put model traffic behind a narrow
-proxy contract rather than letting the agent talk directly to the full provider API. Also close the
-audit's port-80 finding and block link-local/RFC1918 metadata ranges.
-
-**C3 — Drop root and capabilities.**
-Status: **implemented and verified for agent execs.** guestd drops the child's real uid/gid to 1001
-before execing bubblewrap, and bubblewrap drops all capabilities. Keep this as an invariant for
-every non-operator execution path.
-
-**C4 — Immutable rootfs and fixed system permissions.**
-Status: **implemented and verified.** The root disk is read-only and image population now happens
-in a Linux imager container so Unix ownership and modes survive. Continue to treat writable scratch
-as explicit and narrow.
-
-**C5 — Add seccomp.**
-Apply a cBPF seccomp profile through bubblewrap. Docker's default profile is a reasonable floor;
-then explicitly block dangerous syscalls such as `ptrace`, `process_vm_readv`, `process_vm_writev`,
-`kexec_load`, module loading, raw BPF, and privileged mount operations where Node and the SDK do
-not need them.
-
-### High
-
-**H1 — Make workspace writes reversible.**
-Egress lockdown protects confidentiality, but it does not protect a user's files from destructive
-edits inside the allowed workspace. Add snapshots, copy-on-write work areas, or explicit checkpoints
-before risky operations.
-
-**H2 — Gate the irreversible tail.**
-The broker has the `Gate` seam and audit log, but the active implementation still uses `AllowAll`.
-Replace it with real per-method/per-door policy. Keep routine work low-friction, but route
-irreversible actions such as destructive deletes, publishing, pushing, sending, or broad egress
-changes through an `Ask` or `Deny` decision.
-
-**H3 — Add runtime backstops.**
-Halt or escalate after repeated denied tool calls, unexpected egress attempts, or high-volume
-file/network activity. This should be enforced outside the guest so a compromised process cannot
-turn it off.
-
-**H4 — Kill raw hardware and kernel surfaces.**
-Enable kernel lockdown where compatible, restrict `/dev/mem`-style access, mount with `nodev` where
-possible, and minimize the exposed device model.
-
-**H5 — Add cgroup v2 resource limits.**
-Set memory, CPU, and PID caps for agent children to contain fork bombs, runaway builds, and
-accidental memory exhaustion.
-
-**H6 — Hide or isolate foreign session mounts.**
-The product now uses one shared VM with per-session shares under `/sessions/<id>`. That is
-efficient, but it means session separation depends on the guest sandbox and mount permissions.
-Follow up with one session per VM, per-session mount views, or read-only/hidden foreign mounts if
-tenant-style isolation becomes a goal.
-
-**H7 — Forward audit evidence off-guest.**
-Broker audit exists on the host side. Add guest-side process/audit events only if they are
-forwarded out of the VM, because a compromised guest can tamper with local-only logs.
-
-### Medium
-
-- Set `kernel.kptr_restrict=2`, `kernel.dmesg_restrict=1`, and
-  `kernel.unprivileged_bpf_disabled=1`.
-- Lock module loading after boot if no later dynamic module load is needed.
-- Treat tool-readable content as untrusted. Files, web pages, repo text, and tool errors can all
-  carry prompt injection.
-- Avoid rendering attacker-controlled markdown images or remote links in privileged UI contexts.
+1. **F-13 + F-01** — seccomp profile blocking `CLONE_NEWUSER` → closes the user-namespace escalation chain.
+2. **F-02** — move the Anthropic credential to a host-side proxy → closes the highest-value data finding.
+3. **F-03** — `--tmpfs /opt` in bwrap → hides the host-comms binary and runtime source.
+4. **F-04** — `kernel.kptr_restrict = 2` → hides kernel pointers.
+5. **F-05** — restrict egress to 443 + block metadata ranges → tightens the network lock.
+6. **F-06** — cgroup v2 limits → contains runaway workloads.
+7. **F-10** — replace the broker `AllowAll` gate → gates the irreversible tail.
+8. **F-14, F-16** — `spec_store_bypass_disable` on cmdline; `modules_disabled = 1` post-boot.
 
 ---
 
 ## Architecture Notes
 
-The vsock transport (`vmw_vsock_virtio_transport`) is loaded and active — this is the guestd ↔
-host communication channel. The broker RPC protocol (`protocol.json`) exposes powerful operations
-including `setEgressPolicy` and `attachWorkspace`. Ensuring the vsock channel is not reachable from
-within the bwrap sandbox (no `/dev/vsock` exposed — ✅ already the case) is important to maintain.
+The vsock transport (`vmw_vsock_virtio_transport`) is the guestd ↔ host channel. The broker RPC
+protocol (`protocol.json`) exposes powerful operations including `setEgressPolicy` and
+`attachWorkspace`; keeping the vsock channel unreachable from inside the bwrap sandbox
+(no `/dev/vsock` exposed — ✅ already the case) is important to maintain.
 
-The policy engine (`policy.ts`) correctly denies `WebFetch`/`WebSearch` and defaults to deny for
-unknown tools. The `AllowAll` comment in the source (`"the broker's server-side gate remains
-AllowAll today"`) indicates the host-side enforcement is not yet fully hardened — worth revisiting.
+The policy engine (`policy.ts`) denies `WebFetch`/`WebSearch` and defaults to deny for unknown tools.
+The `AllowAll` host-side gate (F-10) is the remaining gap.
 
 All VM network traffic flows through a user-space proxy chain:
 
@@ -343,220 +396,10 @@ VM (tap0) ──► gvforwarder (user-space, /dev/net/tun)
 ```
 
 The host-side vsock proxy implements a **DNS-sinkhole + TCP allowlist** pattern:
-- Only `api.anthropic.com` resolves via the gateway DNS (all others return `NXDOMAIN`)
-- TCP connections are only permitted after a DNS lookup for an allowed hostname
-- Direct-by-IP TCP connections receive an instant RST
-- All UDP (except DHCP) is silently dropped
-
----
-
-## Assessment History (2026-05-22)
-
-This section documents the original findings and the remediations applied, explaining how the
-current posture was reached.
-
-### Original Environment
-
-| Property | Value |
-|----------|-------|
-| OS | Ubuntu 22.04.5 LTS (Jammy Jellyfish) |
-| Kernel | 6.8.0-117-generic |
-| Hypervisor | Microsoft Hyper-V (VMBus 5.3) |
-| Architecture | x86_64 |
-| Network Interface | tap0 — 192.168.127.2/24 |
-| Network Transport | gvforwarder → vsock://2:1024 → HyperV host proxy |
-| Init Process | /usr/sbin/guestd (custom, not systemd) |
-| Running User | root (uid=0, gid=0) — **before remediation** |
-
-### Original Finding Index
-
-| ID | Severity | Title | Status |
-|----|----------|-------|--------|
-| CRIT-01 | Critical | Unconstrained root with all capabilities | ✅ Fixed & verified |
-| CRIT-02 | Critical | No seccomp syscall filtering | ⏳ Deferred (bwrap can carry it) |
-| CRIT-03 | Critical | Zero namespace isolation between processes | ✅ Substantially addressed |
-| CRIT-04 | Critical | API key exposed in env vars & process memory | ⏳ Deferred — rotate now |
-| CRIT-05 | Critical | World-writable system filesystem | ✅ Fixed & verified |
-| HIGH-01 | High | No cgroup resource limits | ◻ Not yet addressed |
-| HIGH-02 | High | No audit logging | ◻ Not yet addressed |
-| HIGH-03 | High | SSH host keys world-readable/writable | ✅ Resolved (SSH removed) |
-| HIGH-04 | High | /dev/mem and /dev/sda directly readable | ◻ Not yet addressed |
-| HIGH-05 | High | Cross-session filesystem mount exposure | ◻ Not yet addressed |
-| HIGH-06 | High | Port 80 open on vNIC filter alongside 443 | ⏳ Deferred |
-| MED-01 | Medium | `kernel.kptr_restrict=0` | ◻ Not yet addressed |
-| MED-02 | Medium | `kernel.modules_disabled=0` | ◻ Not yet addressed |
-| MED-03 | Medium | ICMP spoofed locally for all destinations | ◻ Not yet addressed |
-
-### What Was Fixed
-
-**CRIT-05 — World-writable system filesystem.**
-Root cause: the build extracted the rootfs and ran `mke2fs -d` on the Windows host, which cannot
-preserve Unix owner/mode, so everything landed world-writable. The ext4 is now populated inside a
-Linux "imager" container; only the opaque ext4 blob crosses to Windows. Sensitive perms are
-normalized at build (`/usr`, `/etc` `0755 root:root`; `/etc/passwd` `0644`; `/etc/shadow` `0640`).
-The root disk is additionally mounted read-only (`RootFSReadOnly` → SCSI `ReadOnly` + `ro` cmdline);
-the few writable paths are tmpfs with explicit, non-world-writable modes (`/run`, `/sessions` `0755`;
-`/home/atelier` `0700`; `/var/tmp` `1777`; `/tmp` per-sandbox `0755`).
-*Verified in-guest:* `/usr/bin/bash` `0755 root:root`, `/etc/shadow` `0640`, `/` is `ro`, write to
-`/usr/bin` → `EROFS`.
-
-**CRIT-01 — Unconstrained root.**
-The agent is launched inside bubblewrap as uid/gid **1001** with `--cap-drop ALL` and fresh
-user/pid/ipc/uts namespaces (net deliberately shared so egress still works); the read-only root is
-bind-mounted so system paths stay immutable. A subtle gap was caught during verification: with
-guestd (PID 1, root) launching bwrap as root, bwrap's user namespace mapped sandbox-uid 1001 onto
-host-uid-0 (`uid_map: 1001 0 1`) — so the agent reported uid 1001 but was DAC-root and could read
-`/etc/shadow`. guestd now drops the child's real uid/gid to 1001 (`SysProcAttr.Credential`) before
-exec'ing bwrap, so the namespace can only map to host-1001 and host-uid-0 files become foreign.
-*Verified in-guest:* `id` → `uid=1001`; `CapEff/Prm/Bnd = 0`; `cat /etc/shadow` → Permission
-denied; `/workspace`, `/home/atelier`, `/tmp` writable; `/run`, `/sessions` denied; a real agent
-run completed end-to-end.
-
-**CRIT-03 — Namespace isolation — substantially addressed for the agent.**
-bubblewrap gives the agent its own user, pid, ipc, uts, and mount namespaces. The network namespace
-is intentionally shared (the egress jail is the boundary). The trusted control-plane processes
-(guestd, gvforwarder) still share namespaces among themselves.
-
-**HIGH-03 — SSH host keys — resolved.**
-`openssh-server` was removed from the image (an unused listener), so there are no host keys to
-expose.
-
-**Networking change.**
-DHCP was removed (`isc-dhcp-client` dropped). The guest now configures `tap0` statically
-(192.168.127.2, gw .1, fixed MAC) and runs gvforwarder with `-preexisting`. The host-side
-DNS-sinkhole + TCP allowlist is unchanged; egress allow/deny was re-verified (`api.anthropic.com`
-reachable; other hosts `NXDOMAIN`).
-
-### Still Open from Original Assessment
-
-- **CRIT-04** — API key still injected via env var. **Rotate the key now** (it was exposed during
-  the assessment) and move to a tmpfs file / short-lived scoped key.
-- **CRIT-02** — No seccomp yet; bubblewrap can carry a cBPF profile via `--seccomp` next.
-- **HIGH-06** — Port 80 still reachable post-DNS; gate the allowlist to 443.
-- HIGH-01/02/04/05, MED-01/02/03 — not yet addressed.
-
-### Original Finding Detail
-
-#### CRIT-01 — Process Running as Unconstrained Root ✅ Fixed
-
-The Claude agent and all child processes ran as `uid=0 gid=0 (root)` with all 41 Linux
-capabilities granted and no restrictions.
-
-| Capability | Risk |
-|------------|------|
-| `CAP_SYS_MODULE` | Load arbitrary kernel modules (rootkit insertion) |
-| `CAP_SYS_ADMIN` | Mount filesystems, manipulate namespaces, bypass many controls |
-| `CAP_SYS_PTRACE` | Read/write memory of any process |
-| `CAP_SYS_RAWIO` | Direct hardware access (disk, memory ports) |
-| `CAP_SYS_BOOT` | Reboot or kexec a new kernel |
-| `CAP_MAC_OVERRIDE` | Bypass AppArmor/SELinux |
-| `CAP_NET_ADMIN` | Reconfigure network interfaces, routing, firewall rules |
-| `CAP_DAC_OVERRIDE` | Bypass all filesystem permission checks |
-
-**Remediation applied:** bubblewrap launch as uid/gid 1001, `--cap-drop ALL`, guestd drops child
-uid before exec.
-
-#### CRIT-02 — No Seccomp Filtering ⏳ Deferred
-
-No seccomp profile applied; all ~350 Linux syscalls available. Combined with full root capabilities,
-dangerous syscalls (`ptrace`, `process_vm_readv`, `kexec_load`, `init_module`) were freely callable.
-
-**Remediation:** Apply Docker's default seccomp profile as a minimum baseline via
-`bwrap --seccomp <fd>`.
-
-#### CRIT-03 — Zero Namespace Isolation ✅ Substantially addressed
-
-Every process shared all namespaces with PID 1. Any process could observe and interact with every
-other process's filesystem view, network stack, IPC objects, and process tree without any
-kernel-enforced boundary.
-
-**Remediation applied:** bwrap provides agent with dedicated user/pid/ipc/uts/mnt namespaces.
-
-#### CRIT-04 — API Key Exposed in Environment Variables ⏳ Deferred
-
-`ANTHROPIC_API_KEY` was readable from `/proc/PID/environ` for every process. Found in **73
-distinct memory regions** across all running processes — heap, stack, and anonymous mappings of
-the node runtime, the agent binary, and PID 1 (guestd).
-
-**Remediation:** Mount secrets via a tmpfs file readable only by the agent user. Use per-session
-ephemeral keys revoked when the VM terminates. **Rotate the key immediately.**
-
-#### CRIT-05 — World-Writable System Filesystem ✅ Fixed
-
-System directories and binaries were world-writable (`/usr/bin`, `/etc`, `/etc/passwd`,
-`/etc/shadow`, shell + node binaries). Root cause: mke2fs on Windows host doesn't preserve Unix
-permissions.
-
-**Remediation applied:** ext4 populated inside Linux imager container; root disk mounted
-read-only; writable paths are tmpfs with explicit modes.
-
-#### HIGH-01 — No Cgroup Resource Limits ◻ Open
-
-No memory or CPU limits applied via cgroups. A runaway workload can exhaust all VM memory or
-consume 100% CPU indefinitely.
-
-**Remediation:** Set `memory.max` and `cpu.max` in the agent's cgroup slice (e.g. 2 GB memory,
-150% CPU).
-
-#### HIGH-02 — No Audit Logging ◻ Open
-
-`auditd` is not running. No syscall-level audit trail, no process execution logging, no file
-access recording.
-
-**Remediation:** Enable auditd with rules covering `execve`, `open`/`openat` on sensitive paths,
-`ptrace`, network connect, module load. Forward logs to the host via vsock before the VM can
-tamper with them.
-
-#### HIGH-04 — Raw Disk and Physical Memory Accessible ◻ Open
-
-Both `/dev/sda` (raw block device) and `/dev/mem` (physical memory) were present and readable.
-With `CAP_SYS_RAWIO` (now dropped by bwrap), this is lower severity than before, but the devices
-should still be absent.
-
-**Remediation:** Bind-mount `/dev/null` over `/dev/mem`; remove `/dev/sda` from the VM's `/dev`
-if direct disk access is not required.
-
-#### HIGH-05 — Cross-Session Filesystem Mount Exposure ◻ Open
-
-Three separate session workspaces were mounted inside a single VM via 9p/VirtioFS, all
-`rw,relatime` with no access restrictions. Each VM should receive only its own session mount.
-
-#### HIGH-06 — Port 80 Open on vNIC Filter ⏳ Deferred
-
-After resolving `api.anthropic.com` via the gateway DNS, TCP port 80 is reachable as well as 443.
-Port 80 serves no purpose for an HTTPS API.
-
-**Remediation:** Restrict the TCP allowlist to port 443 only.
-
-#### MED-01 — `kptr_restrict = 0` ◻ Open
-
-Kernel symbol addresses visible in `/proc/kallsyms`. Aids exploit development by defeating KASLR.
-
-**Remediation:** `sysctl -w kernel.kptr_restrict=2`
-
-#### MED-02 — `kernel.modules_disabled = 0` ◻ Open
-
-New kernel modules can be loaded at runtime. With `CAP_SYS_MODULE` (now dropped for the agent),
-this risk is reduced but not eliminated for control-plane processes.
-
-**Remediation:** `sysctl -w kernel.modules_disabled=1` (post-boot, one-way).
-
-#### MED-03 — ICMP Spoofed Locally ◻ Open
-
-`gvforwarder` generates fake ICMP echo replies for all destinations without forwarding packets.
-Ping always succeeds even for completely unreachable hosts, misleading operators and masking
-network partitions.
-
-**Remediation:** Drop ICMP outright, or forward honestly.
-
-### Host-Side Issues Found During Verification
-
-- **broker `stopVM` reported a phantom HCS error** (`HcsCloseComputeSystem hresult=0x8f3a51f0`):
-  the binding interpreted a return value from `HcsCloseComputeSystem`, which is documented `void`.
-  **Fixed** (binding no longer reads the return).
-- **broker can panic on VM teardown** (`linuxkit/virtsock` hvsock `ioCompletionProcessor` —
-  "The handle is invalid") when a VM is stopped while its egress connection is mid-handshake.
-  Pre-existing third-party-library race; **open**.
+- Only `api.anthropic.com` resolves via the gateway DNS (all others return `NXDOMAIN`).
+- TCP connections are only permitted after a DNS lookup for an allowed hostname.
+- Direct-by-IP TCP connections receive an instant RST.
+- All UDP (except DHCP) is silently dropped.
 
 ---
 
