@@ -1,4 +1,13 @@
-# Atelier
+<div align="center">
+  <img src="apps/desktop/assets/icon.png" width="96" alt="Atelier icon" />
+  <h1>Atelier</h1>
+  <p><strong>A quiet workshop for your files.</strong></p>
+  <p>Ask in plain language. Atelier reads and edits files in your workspace<br>and runs code inside a contained sandbox — every change gated and audited.</p>
+  <br/>
+  <img src="docs/screenshot.png" alt="Atelier desktop app" width="860" />
+</div>
+
+---
 
 A desktop AI workspace inspired by [Anthropic's Claude Cowork](https://www.anthropic.com/research/claude-cowork), with its own twists: **cross-OS** (Apple Virtualization.framework on macOS, HCS on Windows), a persistent multi-session model (one VM, N concurrent agent loops), and hibernate/resume to bound memory.
 
