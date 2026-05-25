@@ -17,6 +17,7 @@
     "protogen": "node tools/protogen/protogen.mjs",
     "build:all": "node scripts/build-all.mjs",
     "e2e:host": "node scripts/e2e-host.mjs",
+    "test:partisan": "node scripts/test-partisan.mjs",
     "artisan": "npm --prefix packages/artisan run dev --"
   }
 }

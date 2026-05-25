@@ -2,7 +2,7 @@
 
 | Field | Detail |
 |---|---|
-| Status | **Phase 1 done** (commit `28df76c`) — one-shot `--task` over NDJSON, verified live on a real model call. Phase 2 (serve/resume) next. |
+| Status | **Phase 2 implemented** — `--serve`/`--resume` coded; awaiting live verification. Phase 1 done (commit `28df76c`). |
 | Project | **partisan** — Python (OpenHands SDK) successor to artisan, behind the same NDJSON wire |
 | Goal | Replace the Anthropic-locked in-guest agent with a provider-agnostic one (LiteLLM) |
 | Approach | Embed the SDK **in-process** (`LocalConversation` + `callbacks`); NDJSON only at the host↔guest edge |
@@ -135,7 +135,7 @@ Built (`packages/partisan/`, uv + Python 3.14):
 
 Resolved from source: `ObservationEvent` has **no** `is_error` (errors are distinct event types ⇒ `isError:false`); `result` = last assistant `MessageEvent` text after `run()` returns; `run()` blocks (no stdout lock needed yet).
 
-### Phase 2 — serve (`--serve`, `--resume`)
+### Phase 2 — serve (`--serve`, `--resume`) ⏳ implemented, pending live verification
 *Exit:* multi-turn over NDJSON; `export_context`→`context{}`; relaunch `--resume <id>` continues.
 
 - stdin reader **thread** → control queue; main thread runs turns; **all stdout under one lock**.

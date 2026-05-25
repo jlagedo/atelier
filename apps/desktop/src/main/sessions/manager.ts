@@ -12,10 +12,12 @@
 
 import crypto from "node:crypto";
 import path from "node:path";
-import { HostClient, type ExecRun, type OutputStream } from "../host-client";
-import type { LoopControl, LoopEvent } from "../host-client/types";
+import { HostClient } from "../host-client";
+import type { LoopEvent } from "../host-client/types";
 import { WorkspaceWatcher, type WorkspaceUpdate } from "../workspace/watcher";
+import { brokerTransport } from "./broker-transport";
 import { runnerImageFileName, resolveBundleDir, rootfsFileName } from "./bundle";
+import { PartisanClient } from "./client";
 import { SessionStore } from "./store";
 
 export type SessionLifecycle = "starting" | "active" | "hibernating" | "inactive" | "resuming" | "error";
@@ -56,7 +58,6 @@ const GUEST_AGENT = "src/cli-guest.ts";
 const RENDERABLE = new Set(["text", "tool_use", "tool_result", "policy", "result"]);
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-const b64line = (obj: LoopControl) => Buffer.from(JSON.stringify(obj) + "\n", "utf8").toString("base64");
 
 interface LiveSession {
   appId: string;
@@ -66,14 +67,12 @@ interface LiveSession {
   guestPath: string;
   status: SessionLifecycle;
   sdkSessionId: string;
-  run?: ExecRun;
+  client?: PartisanClient;
   watcher?: WorkspaceWatcher;
-  stdoutBuf: string;
   transcript: unknown[];
   lastActivity: number;
   idleTimer?: NodeJS.Timeout;
   intentionalStop: boolean;
-  exportWaiter?: { resolve: (ev: Extract<LoopEvent, { type: "context" }>) => void; reject: (e: unknown) => void };
 }
 
 export class SessionManager {
@@ -165,7 +164,6 @@ export class SessionManager {
       guestPath: `/sessions/${appId}`,
       status: "starting",
       sdkSessionId: "",
-      stdoutBuf: "",
       transcript: [],
       lastActivity: Date.now(),
       intentionalStop: false,
@@ -197,7 +195,7 @@ export class SessionManager {
     if (!s) throw new Error(`unknown session ${appId}`);
     if (s.status !== "active") throw new Error(`session ${appId} is ${s.status}`);
     this.bumpActivity(s);
-    await this.host.execInput({ id: this.vmId, sessionId: appId, data: b64line({ type: "user", text }) });
+    await s.client?.user(text);
   }
 
   async resume(appId: string): Promise<void> {
@@ -217,7 +215,6 @@ export class SessionManager {
         guestPath: `/sessions/${appId}`,
         status: "resuming",
         sdkSessionId: stored.sdkSessionId,
-        stdoutBuf: "",
         transcript: stored.transcript ?? [],
         lastActivity: Date.now(),
         intentionalStop: false,
@@ -251,9 +248,11 @@ export class SessionManager {
       s.idleTimer = undefined;
     }
     try {
-      const ctx = await this.exportContext(s, 30_000);
-      if (Array.isArray(ctx.transcript)) s.transcript = ctx.transcript;
-      if (ctx.sessionId) s.sdkSessionId = ctx.sessionId;
+      if (s.client) {
+        const ctx = await s.client.exportContext(30_000);
+        if (Array.isArray(ctx.transcript)) s.transcript = ctx.transcript;
+        if (ctx.sessionId) s.sdkSessionId = ctx.sessionId;
+      }
     } catch {
       // Export timed out — keep the last-known transcript + sdkSessionId.
     }
@@ -311,9 +310,9 @@ export class SessionManager {
     if (s) {
       s.intentionalStop = true;
       if (s.idleTimer) clearTimeout(s.idleTimer);
-      if (s.run) {
+      if (s.client) {
         try {
-          await this.host.execInput({ id: this.vmId, sessionId: appId, data: b64line({ type: "close" }) });
+          await s.client.close();
         } catch {
           /* loop may already be gone */
         }
@@ -331,7 +330,7 @@ export class SessionManager {
     for (const s of this.live.values()) {
       s.intentionalStop = true;
       if (s.idleTimer) clearTimeout(s.idleTimer);
-      s.run?.close();
+      s.client?.abort();
       s.watcher?.dispose();
       await this.safeDetach(s);
     }
@@ -413,40 +412,21 @@ export class SessionManager {
       const v = process.env[k];
       if (v) env[k] = v;
     }
-    const run = this.host.execStream(
-      { id: this.vmId, cmd: GUEST_TSX, args, cwd: GUEST_CWD, env, sessionId: s.appId },
-      (stream, data) => this.onOutput(s, stream, data),
+    const client = new PartisanClient(
+      brokerTransport(this.host, { id: this.vmId, cmd: GUEST_TSX, args, cwd: GUEST_CWD, env, sessionId: s.appId }),
+      {
+        onEvent: (ev) => this.handleEvent(s, ev),
+        // Not part of the JSON wire, but where the in-guest loop's crashes and stack
+        // traces surface — log it so a failing turn isn't silent.
+        onStderr: (text) => process.stderr.write(`[guest ${s.appId}] ${text}`),
+        onMalformed: (line) => console.error(`[session ${s.appId}] dropping malformed loop output: ${line}`),
+      },
     );
-    s.run = run;
-    run.result.then(
+    s.client = client;
+    client.done.then(
       (r) => this.onLoopEnd(s, r.exitCode, undefined),
       (e) => this.onLoopEnd(s, undefined, e),
     );
-  }
-
-  private onOutput(s: LiveSession, stream: OutputStream, data: Buffer): void {
-    if (stream === "stderr") {
-      // Not part of the JSON wire, but it's where the in-guest loop's crashes and
-      // stack traces surface — log it so a failing turn isn't silent (was: dropped).
-      process.stderr.write(`[guest ${s.appId}] ${data.toString("utf8")}`);
-      return;
-    }
-    s.stdoutBuf += data.toString("utf8");
-    for (;;) {
-      const nl = s.stdoutBuf.indexOf("\n");
-      if (nl < 0) break;
-      const line = s.stdoutBuf.slice(0, nl).trim();
-      s.stdoutBuf = s.stdoutBuf.slice(nl + 1);
-      if (!line) continue;
-      let ev: LoopEvent;
-      try {
-        ev = JSON.parse(line) as LoopEvent;
-      } catch {
-        console.error(`[session ${s.appId}] dropping malformed loop output: ${line}`);
-        continue;
-      }
-      this.handleEvent(s, ev);
-    }
   }
 
   private handleEvent(s: LiveSession, ev: LoopEvent): void {
@@ -456,11 +436,6 @@ export class SessionManager {
         s.sdkSessionId = ev.sessionId;
         void this.store.patch(s.appId, { sdkSessionId: ev.sessionId });
       }
-      return;
-    }
-    if (ev.type === "context") {
-      s.exportWaiter?.resolve(ev);
-      s.exportWaiter = undefined;
       return;
     }
     if (ev.type === "error") {
@@ -477,7 +452,7 @@ export class SessionManager {
   }
 
   private onLoopEnd(s: LiveSession, code: number | undefined, err: unknown): void {
-    s.run = undefined;
+    s.client = undefined;
     if (s.intentionalStop || s.status === "hibernating" || s.status === "inactive") return;
     // Unexpected exit while we believed it active.
     s.status = "error";
@@ -488,34 +463,14 @@ export class SessionManager {
     void this.store.patch(s.appId, { status: "inactive" });
   }
 
-  private exportContext(s: LiveSession, timeoutMs: number): Promise<Extract<LoopEvent, { type: "context" }>> {
-    return new Promise((resolve, reject) => {
-      const t = setTimeout(() => {
-        s.exportWaiter = undefined;
-        reject(new Error("export_context timed out"));
-      }, timeoutMs);
-      s.exportWaiter = {
-        resolve: (ev) => {
-          clearTimeout(t);
-          resolve(ev);
-        },
-        reject: (e) => {
-          clearTimeout(t);
-          reject(e);
-        },
-      };
-      void this.host.execInput({ id: this.vmId, sessionId: s.appId, data: b64line({ type: "export_context" }) });
-    });
-  }
-
   private async endRun(s: LiveSession, force = false): Promise<void> {
-    const run = s.run;
-    if (!run) return;
+    const client = s.client;
+    if (!client) return;
     // The loop closes its own input after export and exits; wait briefly then force.
     // A forced kill skips the grace window and closes immediately.
-    if (!force) await Promise.race([run.result.catch(() => undefined), sleep(5000)]);
-    run.close();
-    s.run = undefined;
+    if (!force) await Promise.race([client.done.catch(() => undefined), sleep(5000)]);
+    client.abort();
+    s.client = undefined;
   }
 
   private async enforceCap(exceptId: string): Promise<void> {

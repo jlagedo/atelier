@@ -1,7 +1,10 @@
 import "@testing-library/dom";
 
-// jsdom lacks matchMedia; the sidebar's use-mobile hook and the theme provider read it.
-if (!window.matchMedia) {
+// Some suites opt into the node environment (e.g. subprocess wire tests) where there is
+// no window/DOM — the jsdom shims below don't apply there.
+if (typeof window === "undefined") {
+  // node environment: nothing to polyfill.
+} else if (!window.matchMedia) {
   window.matchMedia = (query: string): MediaQueryList => ({
     matches: false,
     media: query,

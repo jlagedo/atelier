@@ -67,6 +67,8 @@ export interface SetEgressPolicyParams {
 /** A control message the host writes to the loop's stdin (one JSON per line). */
 export type LoopControl =
   | { type: "user"; text: string }
+  | { type: "interrupt" }
+  | { type: "pause" }
   | { type: "export_context" }
   | { type: "close" };
 
@@ -74,10 +76,12 @@ export type LoopControl =
 export type LoopEvent =
   | { type: "init"; sessionId: string }
   | { type: "text"; text: string }
+  | { type: "text_delta"; text: string }
   | { type: "tool_use"; id: string; name: string; input: unknown }
   | { type: "tool_result"; id: string; content: string; isError: boolean }
   | { type: "policy"; door: string; action: string; decision: "allow" | "deny"; reason: string; detail?: string }
   | { type: "result"; subtype: string; result: string }
   | { type: "turn_done" }
+  | { type: "interrupted" }
   | { type: "context"; sessionId: string; transcript: unknown[] }
   | { type: "error"; message: string };

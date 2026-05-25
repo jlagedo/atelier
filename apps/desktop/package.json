@@ -17,6 +17,7 @@
     "format": "oxfmt \"**/*.{ts,tsx}\"",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:wire": "vitest run src/main/sessions/partisan-subprocess.test.ts",
     "test:e2e": "playwright test"
   },
   "dependencies": {
