@@ -22,6 +22,7 @@ items, and the `C*`/`H*` backlog labels) are listed under **Prior refs** for tra
 | 2026-05-22 | Ubuntu 22.04.5 LTS · Linux 6.8.0 · x86_64 · Hyper-V | 6 critical, 6 high, 3 medium | Initial assessment |
 | 2026-05-22 | (same) | — | Remediations applied and verified on live HCS boot |
 | 2026-05-24 | Ubuntu 24.04.4 LTS · Linux 6.17.0 · aarch64 · Apple Silicon VZ VM | 1 critical, 3 high, 3 medium | Follow-up post-remediation |
+| 2026-05-24 | (same) | — | Seccomp profile added → F-01 + F-13 remediated |
 
 **Assessor:** Claude (sandboxed agent)
 
@@ -41,38 +42,16 @@ key residency, syscall filtering, resource limits, and shared-VM session separat
 | Root filesystem | rootfs read-only; writable paths are tmpfs/session shares | `services/internal/hcs/doc.go`, `image/guest/init.sh` | R-02 |
 | Egress | runtime hostname allowlist + DNS pinning; default deny | `services/internal/netjail` | F-05 |
 | Model credential | still passed into the in-guest process environment | `apps/desktop/src/main/sessions/manager.ts`, `packages/agent/src/cli-guest.ts` | F-02 |
-| Seccomp | not applied yet | — | F-13 |
+| Seccomp | cBPF profile applied via `bwrap --seccomp` (Docker default, no-cap) | `services/cmd/guestd/sandbox_linux.go`, `image/agent/seccomp` | F-13 |
 | Resource limits | no cgroup limits yet | — | F-06 |
 
-**Open finding counts (headline severity):** 2 critical · 10 high · 6 medium.
+**Open finding counts (headline severity):** 1 critical · 10 high · 5 medium.
 
 ---
 
 ## Open Findings
 
 ### Critical
-
-#### F-01 · Unprivileged user-namespace creation grants full capabilities in-namespace
-- **Severity:** Critical · **Status:** Open · **First seen:** 2026-05-24 · **Prior refs:** 2026-05-24 #1
-
-**Description.** Any process inside the sandbox can create a new user namespace and become apparent
-root with **all** capabilities scoped to that namespace. Capabilities are namespace-scoped (the outer
-kernel boundary still applies), but combined with no seccomp filter (F-13) and a potentially
-vulnerable kernel this is a viable privilege-escalation chain — unprivileged user namespaces are
-historically the primary source of Linux kernel-escape CVEs (Dirty Pipe, overlayfs escapes). With
-`CAP_NET_ADMIN` in a fresh user+net namespace an attacker could also manipulate the network stack.
-
-**Evidence.**
-```bash
-unshare --user --map-root-user id
-# → uid=0(root) gid=0(root) groups=0(root)
-unshare --user --map-root-user cat /proc/self/status | grep Cap
-# CapPrm/CapEff/CapBnd: 000001ffffffffff   ← ALL capabilities
-```
-
-**Recommendation.** Disable unprivileged user namespaces
-(`kernel.unprivileged_userns_clone = 0`) or block the `CLONE_NEWUSER` flag in
-`clone()`/`unshare()` via a seccomp profile (see F-13, which closes this finding).
 
 #### F-02 · Anthropic API key resident in guest environment and memory
 - **Severity:** Critical · **Status:** Open (deferred) · **First seen:** 2026-05-22 · **Prior refs:** CRIT-04, backlog C1
@@ -215,18 +194,6 @@ disable them) that halt or escalate on those signals.
 
 ### Medium
 
-#### F-13 · No seccomp filter
-- **Severity:** Medium · **Status:** Open · **First seen:** 2026-05-22 · **Prior refs:** 2026-05-24 #5, CRIT-02 (logged Critical), backlog C5
-
-**Description.** No syscall filtering is applied (`Seccomp: 0`, `Seccomp_filters: 0`). All ~350
-syscalls are reachable, which widens the kernel attack surface and, with F-01, enables the user-ns
-escalation chain.
-
-**Recommendation.** Apply a cBPF profile via `bwrap --seccomp <fd>`, using Docker's default profile
-as a floor and additionally blocking `unshare`/`clone(CLONE_NEWUSER)` (closes F-01), `keyctl`,
-`perf_event_open`, `bpf`, `userfaultfd`, `ptrace`, `process_vm_readv`/`writev`, `kexec_load`, and
-module-loading syscalls where Node and the SDK do not need them.
-
 #### F-14 · Speculation store bypass not mitigated
 - **Severity:** Medium · **Status:** Open · **First seen:** 2026-05-24 · **Prior refs:** 2026-05-24 #6
 
@@ -326,6 +293,35 @@ namespaces among themselves.
 MAC) and runs gvforwarder with `-preexisting`. The host-side DNS-sinkhole + TCP allowlist is unchanged;
 egress allow/deny was re-verified (`api.anthropic.com` reachable; other hosts `NXDOMAIN`).
 
+#### F-13 · No seccomp filter — **Fixed & verified**
+- **Severity:** Medium · **First seen:** 2026-05-22 · **Prior refs:** 2026-05-24 #5, CRIT-02 (logged Critical), backlog C5
+
+A cBPF profile is now installed for every non-privileged exec via `bwrap --seccomp <fd>`
+(`services/cmd/guestd/sandbox_linux.go`). The profile is Docker's default seccomp allowlist, vendored
+at `image/agent/seccomp/default.json` and compiled to an arch-correct blob by `compile-seccomp.py`
+**inside the target-arch agent image** (`--platform linux/{amd64,arm64}`), then packed onto the
+read-only guestd volume at `/opt/guestd/seccomp.bpf`. guestd opens the blob and hands it to the bwrap
+child on fd 3 (Go `ExtraFiles[0]`); a missing/unreadable blob **fails the exec closed** rather than
+running unfiltered. The privileged operator escape hatch is unchanged (no filter, by design). The
+profile is evaluated as a **no-capability** process (matching `--cap-drop ALL`), so the
+CAP_SYS_ADMIN-gated entries (`unshare`, `setns`, `mount`, `clone3`, `bpf`, `perf_event_open`, …) fall
+through to the default `ERRNO(EPERM)` and `clone` is restricted to non-namespace flags. *Verified:*
+the compiled blob blocks `unshare(CLONE_NEWUSER)` with `EPERM` while still allowing thread creation
+(`clone3`→`ENOSYS`→`clone` fallback) and `execve`; guestd unit tests cover the `--seccomp 3` wiring
+and the fail-closed path; the blob is confirmed packed at `/opt/guestd/seccomp.bpf` (mode 0644). A
+live VZ boot (`npm run e2e:host`) confirms a sandboxed exec runs under `Seccomp: 2` / `NoNewPrivs: 1`,
+`unshare(CLONE_NEWUSER)` returns `EPERM`, and both agent loops (one-shot + serve) complete
+unstrangled.
+
+#### F-01 · Unprivileged user-namespace creation grants full capabilities in-namespace — **Fixed & verified**
+- **Severity:** Critical · **First seen:** 2026-05-24 · **Prior refs:** 2026-05-24 #1
+
+Closed by F-13. The seccomp profile denies the namespace-creation syscalls for the no-capability
+agent: `unshare`/`setns` return `EPERM`, `clone3` returns `ENOSYS`, and `clone` is permitted only when
+no `CLONE_NEW*` flag is set (`arg0 & 0x7E020000 == 0`), so a fresh user namespace can no longer be
+created. *Verified:* `unshare --user --map-root-user id` now fails with `EPERM` (was `uid=0` with
+`CapEff 000001ffffffffff`); thread creation and normal subprocess exec are unaffected.
+
 ---
 
 ## Host-Side Issues (broker)
@@ -349,6 +345,8 @@ Issues found during verification that live on the host, not in the guest sandbox
 | No listening network ports | ✅ |
 | Root filesystem mounted read-only (`ro`) | ✅ |
 | User/PID/IPC/UTS/MNT namespace isolation via bwrap | ✅ |
+| Seccomp cBPF filter applied (Docker default profile, no-cap) | ✅ |
+| Unprivileged user-namespace creation blocked (`unshare`/`clone(CLONE_NEW*)` denied) | ✅ |
 | `sudo` not installed | ✅ |
 | No SUID binaries found | ✅ |
 | `dmesg_restrict = 1` | ✅ |
@@ -365,14 +363,16 @@ Issues found during verification that live on the host, not in the guest sandbox
 
 Ordered by leverage; references the finding IDs above (no re-description here).
 
-1. **F-13 + F-01** — seccomp profile blocking `CLONE_NEWUSER` → closes the user-namespace escalation chain.
-2. **F-02** — move the Anthropic credential to a host-side proxy → closes the highest-value data finding.
-3. **F-03** — `--tmpfs /opt` in bwrap → hides the host-comms binary and runtime source.
-4. **F-04** — `kernel.kptr_restrict = 2` → hides kernel pointers.
-5. **F-05** — restrict egress to 443 + block metadata ranges → tightens the network lock.
-6. **F-06** — cgroup v2 limits → contains runaway workloads.
-7. **F-10** — replace the broker `AllowAll` gate → gates the irreversible tail.
-8. **F-14, F-16** — `spec_store_bypass_disable` on cmdline; `modules_disabled = 1` post-boot.
+1. **F-02** — move the Anthropic credential to a host-side proxy → closes the highest-value data finding.
+2. **F-03** — `--tmpfs /opt` in bwrap → hides the host-comms binary and runtime source.
+3. **F-04** — `kernel.kptr_restrict = 2` → hides kernel pointers.
+4. **F-05** — restrict egress to 443 + block metadata ranges → tightens the network lock.
+5. **F-06** — cgroup v2 limits → contains runaway workloads.
+6. **F-10** — replace the broker `AllowAll` gate → gates the irreversible tail.
+7. **F-14, F-16** — `spec_store_bypass_disable` on cmdline; `modules_disabled = 1` post-boot.
+
+> **Done:** F-13 + F-01 — seccomp profile blocking `CLONE_NEWUSER` (the former #1) is implemented and
+> verified; see Resolved Findings.
 
 ---
 

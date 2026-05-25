@@ -16,6 +16,8 @@
 // Coverage (a real boot, so VZ + a codesigned broker + the image bundle are required):
 //   getStatus  createVM  startVM  setTime  exec  execInput  attachWorkspace  detachWorkspace
 //   readFile   writeFile setEgressPolicy  stopVM   + the guest agent loop (Topology B: one-shot + serve)
+// It also checks the in-guest sandbox seccomp filter (F-13): a non-privileged exec runs under
+// Seccomp: 2, and unshare(CLONE_NEWUSER) is EPERM-denied (F-01 closed).
 // The Files door is host-side and jailed to the legacy /workspace root, while the same folder is
 // exposed to guest exec over the fs share (virtio-fs on VZ, 9p on HCS) — so we prove the
 // host<->guest bridge in both directions. egress is
@@ -372,6 +374,30 @@ async function runBattery(work) {
     });
     assert(code === 0, `backgrounded exec did not exit cleanly (got ${code})`);
     assert(out.includes('STDIN_ECHO'), `fed stdin not echoed: ${JSON.stringify(out)}`);
+  });
+
+  section('Doors: sandbox seccomp (F-13, closing F-01)');
+
+  await test('sandboxed exec runs under a seccomp filter', () => {
+    // vmctl exec is the non-privileged (bwrap) path, so the cBPF filter is installed. /proc/self
+    // is the grep process inside that sandbox: Seccomp: 2 = SECCOMP_MODE_FILTER.
+    const r = vmctl('exec', ['-id', 'vm0', '--', 'grep', '-E', '^(Seccomp|NoNewPrivs):', '/proc/self/status']);
+    assert(r.status === 0, `exit ${r.status}: ${r.err}`);
+    assert(/Seccomp:\s*2/.test(r.out), `expected seccomp filter mode (Seccomp: 2): ${JSON.stringify(r.out)}`);
+    assert(/NoNewPrivs:\s*1/.test(r.out), `expected NoNewPrivs: 1: ${JSON.stringify(r.out)}`);
+    return r.out.trim().replace(/\s+/g, ' ');
+  });
+
+  await test('user-namespace creation is denied (F-01)', () => {
+    // The no-cap Docker profile drops unshare to the default ERRNO(EPERM); SCMP_ACT_ERRNO returns
+    // the errno without killing, so python runs and reports it. 0x10000000 = CLONE_NEWUSER. Before
+    // the filter this returned uid=0 with all caps — the user-namespace escalation primitive.
+    const py =
+      "import ctypes;l=ctypes.CDLL(None,use_errno=True);r=l.unshare(0x10000000);print('rc=%d errno=%d'%(r,ctypes.get_errno()))";
+    const r = vmctl('exec', ['-id', 'vm0', '--', 'python3', '-c', py]);
+    assert(r.status === 0, `python probe failed: exit ${r.status}: ${r.err}`);
+    assert(/rc=-1 errno=1/.test(r.out), `unshare(CLONE_NEWUSER) was not EPERM-denied: ${JSON.stringify(r.out)}${r.err}`);
+    return 'unshare(CLONE_NEWUSER) → EPERM';
   });
 
   section('Doors: legacy workspace + Files door (host<->guest bridge)');

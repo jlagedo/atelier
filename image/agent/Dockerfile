@@ -15,13 +15,14 @@ FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
 
 # gnupg + curl are what the NodeSource setup script needs to add its apt repo; ca-certificates
-# for TLS to deb.nodesource.com and (later) npm registry.
+# for TLS to deb.nodesource.com and (later) npm registry. python3 + python3-seccomp compile the
+# sandbox seccomp filter below (F-13) for this image's native arch.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates \
       gnupg \
       curl \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-    && apt-get install -y --no-install-recommends nodejs \
+    && apt-get install -y --no-install-recommends nodejs python3 python3-seccomp \
     && rm -rf /var/lib/apt/lists/*
 
 # Source only (no node_modules/dist — image/build.sh stages it that way); install the agent's
@@ -30,6 +31,14 @@ COPY packages /opt/atelier/packages
 RUN cd /opt/atelier/packages/agent \
     && npm ci --omit=dev \
     && npm cache clean --force
+
+# Compile the agent sandbox's seccomp filter (docs/security.md F-13, closing F-01) from Docker's
+# vendored default profile, evaluated as a no-capability process. Runs in this --platform
+# container so the cBPF blob carries the target arch's syscall numbers by construction.
+# image/build.sh exports /opt/seccomp/seccomp.bpf onto the guestd volume next to the binary.
+COPY seccomp /opt/seccomp-src
+RUN mkdir -p /opt/seccomp \
+    && python3 /opt/seccomp-src/compile-seccomp.py /opt/seccomp-src/default.json /opt/seccomp/seccomp.bpf
 
 # Never run as a container — image/build.sh `docker create` + `docker cp /opt/atelier` only.
 CMD ["/bin/true"]

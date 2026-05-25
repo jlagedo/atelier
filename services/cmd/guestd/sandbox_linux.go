@@ -4,6 +4,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"syscall"
@@ -11,6 +13,12 @@ import (
 
 // bwrapPath is the bubblewrap binary baked into the guest image (CRIT-01 sandbox).
 const bwrapPath = "/usr/bin/bwrap"
+
+// seccompFilterPath is the precompiled cBPF program bwrap installs for the agent (F-13,
+// closing F-01). It rides on the read-only guestd volume next to the guestd binary, built
+// in the image pipeline from Docker's default profile evaluated for a no-capability process
+// (image/agent/seccomp). A var, not a const, so tests can point it at a fixture.
+var seccompFilterPath = "/opt/guestd/seccomp.bpf"
 
 // agentUID/agentGID are the non-root identity the agent runs as (CRIT-01). The image
 // creates this user (image/rootfs/Dockerfile) and /home/atelier is a tmpfs chowned to it
@@ -40,9 +48,20 @@ const (
 // ride in via the recursive bind. p.Privileged skips all of this and runs the command
 // directly as root (operator/debug escape hatch). cwd and env are applied by the caller for
 // both paths.
-func sandboxedCommand(ctx context.Context, p execParams) *exec.Cmd {
+//
+// A seccomp filter (F-13) is installed via `--seccomp <fd>`: the precompiled cBPF program is
+// opened from the guestd volume and handed to the bwrap child on fd 3 (Go maps ExtraFiles[0]
+// there; nothing else uses ExtraFiles). bwrap creates its namespaces *before* applying the
+// filter, so the profile can deny CLONE_NEWUSER (closing F-01) without breaking bwrap's own
+// setup. This fails closed: a missing/unreadable blob is an error, never an unfiltered run.
+// The caller owns the returned ExtraFiles fd and must close it after Start.
+func sandboxedCommand(ctx context.Context, p execParams) (*exec.Cmd, error) {
 	if p.Privileged {
-		return exec.CommandContext(ctx, p.Cmd, p.Args...)
+		return exec.CommandContext(ctx, p.Cmd, p.Args...), nil
+	}
+	filter, err := os.Open(seccompFilterPath)
+	if err != nil {
+		return nil, fmt.Errorf("open seccomp filter %s: %w", seccompFilterPath, err)
 	}
 	args := []string{
 		"--unshare-user", "--unshare-pid", "--unshare-ipc", "--unshare-uts",
@@ -50,6 +69,7 @@ func sandboxedCommand(ctx context.Context, p execParams) *exec.Cmd {
 		"--new-session", "--die-with-parent",
 		"--bind", "/", "/",
 		"--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp",
+		"--seccomp", "3",
 		"--", p.Cmd,
 	}
 	args = append(args, p.Args...)
@@ -57,5 +77,6 @@ func sandboxedCommand(ctx context.Context, p execParams) *exec.Cmd {
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Credential: &syscall.Credential{Uid: agentUID, Gid: agentGID},
 	}
-	return cmd
+	cmd.ExtraFiles = []*os.File{filter}
+	return cmd, nil
 }

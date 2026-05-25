@@ -314,6 +314,14 @@ The dev machine is **macOS (Apple Silicon) or Windows 11**. Each drives its own 
 VZ on macOS, HCS on Windows. Cross-compiling the other target is possible but can't be
 fully exercised without the matching host. For Linux build steps (VM image, rootfs):
 macOS uses **Docker via OrbStack**; Windows uses **WSL2**.
+
+**Always validate substrate changes with `npm run build:all` then `npm run e2e:host`.** For any
+change touching the host broker (`services`), the in-guest daemon/agent (`guestd`,
+`packages/agent`), or the VM image (`image/`), these two are the source-of-truth build +
+integration checks and must pass before the change is considered done — run them, and when you add
+behavior, add a matching assertion to `scripts/e2e-host.mjs`. The per-package checks below are the
+fast inner loop, not a substitute. (`e2e:host` needs `ANTHROPIC_API_KEY` and a real VZ boot on
+macOS; if you can't run it, say so explicitly rather than claiming success.)
 - TS: verify with typecheck + lint + vitest + `package`; run the Electron window directly.
 - Go: verify with `go build ./...` + `go test ./...`; cross-compile `GOOS=windows` to catch
   Windows-only paths. macOS builds need CGO + codesign — use `npm run build:all -- --only=host`.

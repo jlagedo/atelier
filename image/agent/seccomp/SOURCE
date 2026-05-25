@@ -1,0 +1,9 @@
+default.json is vendored verbatim from Docker's default seccomp profile.
+
+Upstream:  https://github.com/moby/profiles  (path: seccomp/default.json)
+Commit:    3c28324314729dbade8287e868eef6338c42807a
+Retrieved: 2026-05-24
+License:    Apache-2.0 (moby/profiles)
+
+To update: re-download seccomp/default.json from a newer pinned commit and update the
+commit hash above. compile-seccomp.py translates it; do not hand-edit default.json.

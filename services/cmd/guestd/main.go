@@ -135,7 +135,15 @@ func (g *guest) exec(ctx context.Context, raw json.RawMessage) (any, error) {
 	}
 	notifier, _ := rpc.NotifierFromContext(ctx)
 
-	cmd := sandboxedCommand(ctx, p)
+	cmd, err := sandboxedCommand(ctx, p)
+	if err != nil {
+		return nil, &rpc.Error{Code: rpc.CodeInternal, Message: "sandbox: " + err.Error()}
+	}
+	// The seccomp blob fd (ExtraFiles[0]) is dup'd into the bwrap child by Start; the parent
+	// copy is ours. defer covers every return path (pipe error, start failure, wait).
+	if len(cmd.ExtraFiles) > 0 {
+		defer func() { _ = cmd.ExtraFiles[0].Close() }()
+	}
 	if p.Cwd != "" {
 		cmd.Dir = p.Cwd
 	}

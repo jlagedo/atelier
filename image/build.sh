@@ -60,6 +60,8 @@ stage_agent_ctx() {
   rm -rf "$WORK/agentctx"
   mkdir -p "$WORK/agentctx/packages"
   cp agent/Dockerfile "$WORK/agentctx/Dockerfile"
+  # seccomp profile + translator (F-13); the Dockerfile compiles it for the target arch.
+  cp -r agent/seccomp "$WORK/agentctx/seccomp"
   stage_pkg "$WORK/agentctx" agent
   stage_pkg "$WORK/agentctx" provider
   stage_pkg "$WORK/agentctx" protocol
@@ -244,9 +246,10 @@ EOF
 # cmd_guestd builds the guestd volume — one ro ext4 shipped as a separate disk so guestd AND the
 # in-guest agent iterate in seconds without rebuilding the rootfs (design.md §7/§8). It carries
 # both: guestd (/opt/guestd/guestd, the vsock RPC daemon) and the agent (/opt/atelier, Topology B
-# — code + node_modules). init.sh mounts the volume ro at /opt. Self-contained vs the rootfs (no
-# ensure_tree, no apt/kernel), but the agent's node_modules DO need a target-arch npm install, so
-# this builds image/agent/Dockerfile (npm ci) and exports /opt/atelier from it. Cross-compile
+# — code + node_modules), plus the sandbox seccomp filter (/opt/guestd/seccomp.bpf, F-13) compiled
+# for the target arch in the agent image. init.sh mounts the volume ro at /opt. Self-contained vs
+# the rootfs (no ensure_tree, no apt/kernel), but the agent's node_modules DO need a target-arch
+# npm install, so this builds image/agent/Dockerfile (npm ci) and exports /opt/atelier from it. Cross-compile
 # guestd, pack a labeled ext4 INSIDE the imager (perms preserved, sized from the staged tree),
 # then emit raw (VZ attaches as-is) or convert to VHD (HCS SCSI disk), mirroring cmd_rootfs.
 cmd_guestd() {
@@ -266,6 +269,7 @@ cmd_guestd() {
   local acid; acid="$(docker create "$agent_tag")"
   rm -rf "$WORK/agent"; mkdir -p "$WORK/agent"
   docker cp "$acid:/opt/atelier" "$WORK/agent/atelier"   # -> $WORK/agent/atelier/packages/...
+  docker cp "$acid:/opt/seccomp/seccomp.bpf" "$WORK/agent/seccomp.bpf"  # sandbox filter (F-13)
   docker rm -f "$acid" >/dev/null 2>&1 || true
 
   log "building imager image (e2fsprogs) for in-Linux ext4 population"
@@ -280,14 +284,16 @@ cmd_guestd() {
   local build='set -eu
 mkdir -p /stage/guestd
 install -D -m 0755 /guestd /stage/guestd/guestd
+install -D -m 0644 /seccomp.bpf /stage/guestd/seccomp.bpf
 cp -a /atelier /stage/atelier
 chown -R 0:0 /stage
 sz=$(($(du -sm /stage | cut -f1) + 128))
 ninodes=$(($(find /stage | wc -l) + 4096))
 mke2fs -q -t ext4 -L guestd -d /stage -r 1 -N "$ninodes" -m 0 /guestd.ext4 "${sz}M"'
   local icid; icid="$(docker create atelier-imager bash -c "$build")"
-  docker cp "$WORK/bin/guestd"    "$icid:/guestd"
-  docker cp "$WORK/agent/atelier" "$icid:/atelier"
+  docker cp "$WORK/bin/guestd"      "$icid:/guestd"
+  docker cp "$WORK/agent/seccomp.bpf" "$icid:/seccomp.bpf"
+  docker cp "$WORK/agent/atelier"   "$icid:/atelier"
   if ! docker start -a "$icid"; then
     docker rm -f "$icid" >/dev/null 2>&1 || true
     die "imager failed to build the guestd volume"
