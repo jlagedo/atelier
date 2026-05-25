@@ -11,11 +11,14 @@
 ## TL;DR
 
 The **isolation spine is solid**: read-only rootfs, dropped capabilities, `NoNewPrivs`, seccomp filter,
-user/PID/IPC/UTS/MNT namespacing via bwrap, and no SUID/SGID binaries. The **most dangerous open issue
-is F-02** — the Anthropic API key is live in the process environment right now, readable by any process
-running as uid 1001.
+user/PID/IPC/UTS/MNT namespacing via bwrap, and no SUID/SGID binaries — and, as of 2026-05-25, a
+**curated read-only mount allow-list** (no whole-rootfs bind), **per-exec cgroup limits**, **kernel
+sysctl hardening + module-load latch**, and a **self-applied Landlock LSM domain** (FS allow-list +
+outbound TCP 443 only). The **most dangerous open issue is F-02** — the Anthropic API key is live in the
+process environment right now, readable by any process running as uid 1001.
 
-**Open finding counts:** 1 critical · 10 high · 5 medium.
+**Open finding counts:** 1 critical · 6 high · 4 medium. (5 fixed 2026-05-25: F-03, F-04, F-06, F-09,
+F-16 — commit `7193d79`, validated on a real VZ boot, 43/43 e2e.)
 
 ---
 
@@ -73,6 +76,10 @@ running as uid 1001.
 | Minimal `/dev` (null, zero, full, random, urandom, tty, pts only) | `ls /dev` |
 | WebFetch / WebSearch denied by guest policy engine | `~/.claude/policy-limits.json` |
 | Mounts carry `nosuid,nodev` | `/proc/self/mountinfo` |
+| **Curated read-only mount allow-list** (no whole-rootfs bind) — *2026-05-25* | bwrap `--ro-bind /usr,/opt/atelier,/etc`-subset; `/opt/runner` + sibling sessions + raw disk/vsock absent (F-03/F-09) |
+| **Per-exec cgroup v2 limits** — *2026-05-25* | `pids.max=512`, `memory.max=2G`, `swap=0`, `cpu.max=2c` via `CgroupFD` (F-06) |
+| **Kernel sysctl hardening + module latch** — *2026-05-25* | `kptr_restrict=2`, `io_uring_disabled=2`, `ptrace_scope=2`, `modules_disabled=1` (F-04/F-16) |
+| **Landlock LSM domain** (self-applied) — *2026-05-25* | FS allow-list + outbound TCP 443 only; denies out-of-policy reads and non-443 connects |
 
 ---
 
@@ -113,8 +120,13 @@ F-03 (policy source readable) to give an attacker both the key and the full poli
 ### F-03 · `/opt` runner volume fully readable inside the sandbox
 
 - **Severity:** High
-- **Status:** Open
+- **Status:** **Fixed** — 2026-05-25 (commit `7193d79`)
 - **First seen:** 2026-05-24
+- **Resolution.** bwrap no longer does `--bind / /`. It mounts a curated read-only toolbox
+  (`/usr`, `/opt/atelier`, a small `/etc` allow-list) plus the agent's own workspace, so the
+  runner volume at `/opt/runner` (ELF + seccomp blob) is never mounted in the first place. A
+  self-applied Landlock domain denies it a second time. Verified by e2e: `cat
+  /opt/runner/atelier-runner` fails inside the sandbox while `/opt/atelier` stays usable.
 
 **Description.**
 `--bind / /` in the bwrap invocation exposes all host mounts, including the read-only runner volume
@@ -138,8 +150,10 @@ bind args in order; a later entry shadows the earlier path for that mountpoint).
 ### F-04 · `kptr_restrict = 0` — kernel pointer restriction disabled
 
 - **Severity:** High
-- **Status:** Open
+- **Status:** **Fixed** — 2026-05-25 (commit `7193d79`)
 - **First seen:** 2026-05-24
+- **Resolution.** `image/guest/init.sh` now sets `kernel.kptr_restrict = 2` at boot (along
+  with `yama.ptrace_scope = 2`). Verified by e2e (sysctl read-back shows `kptr=2`).
 
 **Description.**
 `/proc/sys/kernel/kptr_restrict` = **0**. Kernel pointers in `/proc/kallsyms` and related interfaces
@@ -173,8 +187,13 @@ address ranges. After F-02 is addressed, route all model traffic through a narro
 ### F-06 · No cgroup resource limits
 
 - **Severity:** High
-- **Status:** Open
+- **Status:** **Fixed** — 2026-05-25 (commit `7193d79`)
 - **First seen:** 2026-05-22
+- **Resolution.** init.sh mounts cgroup v2 and delegates controllers; runner places each
+  sandboxed exec in its own cgroup via `SysProcAttr.CgroupFD` with `pids.max=512`,
+  `memory.max=2G`, `memory.swap.max=0`, `cpu.max="200000 100000"` (2 cores). Soft-fails to
+  unlimited if cgroup2 is unavailable (the bwrap+seccomp boundary still holds). Verified by
+  e2e: a fork probe is capped (~509 of 700 spawned).
 
 **Description.**
 No `memory.max`, `cpu.max`, or `pids.max` limits are applied to agent children. A runaway workload
@@ -205,8 +224,14 @@ VM has a chance to tamper with them.
 ### F-09 · Cross-session filesystem mount exposure
 
 - **Severity:** High
-- **Status:** Open
+- **Status:** **Fixed** — 2026-05-25 (commit `7193d79`)
 - **First seen:** 2026-05-22
+- **Resolution.** The narrowed bind mounts only the exec's own workspace (derived from the
+  agent's `--workspace` arg), never the `/sessions` parent, so sibling sessions are absent
+  from the namespace entirely. Verified by e2e (an s1-scoped exec cannot see or read s2).
+- **Note.** This is namespace-level isolation on one shared kernel — appropriate for the
+  single-user desktop model (all sessions belong to the same user). True multi-tenant
+  isolation would still require one VM per session; explicitly out of scope here.
 
 **Description.**
 The product uses one shared VM with per-session shares under `/sessions/<id>`. Session separation
@@ -308,8 +333,12 @@ fields. If the agent genuinely needs these values, scope the exposure to the min
 ### F-16 · Kernel module loading enabled at runtime
 
 - **Severity:** Medium
-- **Status:** Open
+- **Status:** **Fixed** — 2026-05-25 (commit `7193d79`)
 - **First seen:** 2026-05-22
+- **Resolution.** init.sh sets `kernel.modules_disabled = 1` (one-way latch) just before
+  exec'ing runner — after preloading every module the guest needs (vsock, virtiofs, the 9p
+  stack, `tun`, `loop`; ext4 via initramfs). Verified by e2e (sysctl read-back shows
+  `modules=1`).
 
 **Live evidence.** `/proc/sys/kernel/modules_disabled` = **0**.
 
@@ -366,6 +395,11 @@ content-integrity layer for high-risk operations.
 | R-05 | DHCP client present | **Applied** — static network config, isc-dhcp-client dropped |
 | F-13 | No seccomp filter | **Fixed** — cBPF Docker-default profile via `bwrap --seccomp`; `unshare(CLONE_NEWUSER)` returns `EPERM` |
 | F-01 | Unprivileged user-namespace creation grants full caps | **Fixed** — closed by F-13 seccomp profile |
+| F-03 | `/opt` runner volume readable in sandbox | **Fixed** — narrowed bwrap bind (curated ro toolbox); `/opt/runner` not mounted; Landlock denies it |
+| F-04 | `kptr_restrict = 0` | **Fixed** — `kernel.kptr_restrict = 2` set in init.sh at boot |
+| F-06 | No cgroup resource limits | **Fixed** — per-exec cgroup v2 (`pids.max`/`memory.max`/`swap`/`cpu.max`) via `CgroupFD` |
+| F-09 | Cross-session filesystem mount exposure | **Fixed** — narrowed bind exposes only the exec's own workspace, never `/sessions` parent |
+| F-16 | Kernel module loading enabled at runtime | **Fixed** — `kernel.modules_disabled = 1` latch after module preload |
 
 ---
 
@@ -409,12 +443,13 @@ Ordered by leverage:
 
 1. **Rotate the API key** — it was observed and recorded during this session. Do this now.
 2. **F-02** — host-side credential proxy; per-session ephemeral keys. Closes the highest-value data finding.
-3. **F-03** — `--tmpfs /opt` in bwrap. Hides the host-comms binary and complete framework source.
-4. **F-04** — `kernel.kptr_restrict = 2`. Hides kernel pointers.
+3. ✅ **F-03 — done (2026-05-25).** Narrowed the bwrap bind to a curated read-only toolbox (stronger than the original `--tmpfs /opt` idea, which would have hidden the agent's own code too); `/opt/runner` is no longer mounted, and Landlock denies it as well.
+4. ✅ **F-04 — done (2026-05-25).** `kernel.kptr_restrict = 2` set at boot.
 5. **F-05** — restrict egress TCP to port 443 on all allowlisted hosts (including pypi.org); block metadata address ranges.
-6. **F-06** — cgroup v2 `memory.max`, `cpu.max`, `pids.max`. Contains runaway workloads.
+6. ✅ **F-06 — done (2026-05-25).** Per-exec cgroup v2 `memory.max`, `cpu.max`, `pids.max`, `memory.swap.max=0`.
 7. **F-10** — replace broker `AllowAll` gate with real per-method policy.
-8. **F-14 / F-16** — `spec_store_bypass_disable=seccomp` on kernel cmdline; `modules_disabled=1` post-boot.
+8. **F-14** — `spec_store_bypass_disable=seccomp` on kernel cmdline (still open). ✅ **F-16 done (2026-05-25)** — `modules_disabled=1` latched after module preload.
+   **New layer added:** a self-applied **Landlock LSM** domain now confines the agent's filesystem + outbound TCP (443 only), independent of bwrap.
 9. **F-07** — auditd with off-guest vsock forwarding.
 10. **F-11 / F-12** — workspace snapshots; host-side anomaly backstops.
 
