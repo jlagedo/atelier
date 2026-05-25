@@ -46,7 +46,7 @@ running as uid 1001.
   --bind / /
   --dev /dev --proc /proc --tmpfs /tmp
   --seccomp 3
-  -- /opt/atelier/packages/agent/node_modules/.bin/tsx src/cli-guest.ts
+  -- /opt/atelier/packages/artisan/node_modules/.bin/tsx src/cli-guest.ts
      --serve --workspace /sessions/s6f5e4f8d8d
 ```
 
@@ -110,21 +110,21 @@ F-03 (policy source readable) to give an attacker both the key and the full poli
 
 ## High Findings
 
-### F-03 · `/opt` guestd volume fully readable inside the sandbox
+### F-03 · `/opt` runner volume fully readable inside the sandbox
 
 - **Severity:** High
 - **Status:** Open
 - **First seen:** 2026-05-24
 
 **Description.**
-`--bind / /` in the bwrap invocation exposes all host mounts, including the read-only guestd volume
+`--bind / /` in the bwrap invocation exposes all host mounts, including the read-only runner volume
 at `/opt`. Both the host-comms binary and the complete in-guest agent source tree are readable:
 
 ```
-/opt/guestd/guestd                                    ← host-comms Go ELF
-/opt/atelier/packages/agent/src/seams/policy.ts       ← full allow/deny policy engine
-/opt/atelier/packages/agent/src/broker/client.ts      ← broker client + RPC schema
-/opt/atelier/packages/agent/src/cli-guest.ts          ← guest entrypoint
+/opt/runner/atelier-runner                                    ← host-comms Go ELF
+/opt/atelier/packages/artisan/src/seams/policy.ts       ← full allow/deny policy engine
+/opt/atelier/packages/artisan/src/broker/client.ts      ← broker client + RPC schema
+/opt/atelier/packages/artisan/src/cli-guest.ts          ← guest entrypoint
 ```
 
 An in-sandbox attacker can enumerate the host-comms layer and read the full policy engine and
@@ -315,7 +315,7 @@ fields. If the agent genuinely needs these values, scope the exposure to the min
 
 **Description.**
 New kernel modules can be loaded at runtime. With `CAP_SYS_MODULE` dropped for the agent the direct
-risk is reduced, but control-plane processes (guestd) retain this surface.
+risk is reduced, but control-plane processes (runner) retain this surface.
 
 **Recommendation.** Set `kernel.modules_disabled = 1` post-boot (one-way latch) once no later
 dynamic module load is required; enable kernel lockdown where compatible.
@@ -422,7 +422,7 @@ Ordered by leverage:
 
 ## Architecture Notes
 
-The vsock transport (`vmw_vsock_virtio_transport`) is the guestd ↔ host channel. The broker RPC
+The vsock transport (`vmw_vsock_virtio_transport`) is the runner ↔ host channel. The broker RPC
 protocol exposes powerful operations including `setEgressPolicy` and `attachWorkspace`; keeping the
 vsock channel unreachable from inside the bwrap sandbox (no `/dev/vsock` exposed — ✅) is a critical
 invariant to maintain.

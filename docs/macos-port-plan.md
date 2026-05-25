@@ -6,7 +6,7 @@
 > **Goal:** keep Atelier's containment model and product shape while replacing the
 > Windows HCS substrate with a macOS Virtualization.framework substrate.  
 > **Priority right now:** make the *current* code run on Apple Silicon as-is. Get a
-> guest booting, `guestd` reachable, one workspace mounted, and the agent loop driven
+> guest booting, `runner` reachable, one workspace mounted, and the agent loop driven
 > from the existing Session Manager. Anything larger (host MITM proxy, dynamic
 > multi-session shares, Rosetta amd64 compatibility, credential-residency fixes) is
 > explicitly deferred until after the port boots.
@@ -29,7 +29,7 @@ direct validation of the Apple framework APIs (see
 
 - Run the same Electron UI and Session Manager on Windows and macOS.
 - Keep the Go broker as the containment chokepoint for policy and audit.
-- Keep the in-guest `guestd` protocol and the in-guest TypeScript agent loop.
+- Keep the in-guest `runner` protocol and the in-guest TypeScript agent loop.
 - Preserve the "one shared VM, many session workspaces" product model if the macOS
   file-sharing primitives support it cleanly.
 - Produce pinned OS/architecture-specific VM bundles instead of mixing guest images
@@ -53,9 +53,9 @@ The product-level contract is already mostly portable:
 - Broker methods: `createVM`, `startVM`, `stopVM`, `exec`, `execInput`,
   `attachWorkspace`, `detachWorkspace`, `readFile`, `writeFile`,
   `setEgressPolicy`.
-- Guest control plane: `guestd` JSON-RPC over a socket, with `exec/output`
+- Guest control plane: `runner` JSON-RPC over a socket, with `exec/output`
   notifications.
-- Agent loop: `packages/agent/src/cli-guest.ts` in `--serve` mode.
+- Agent loop: `packages/artisan/src/cli-guest.ts` in `--serve` mode.
 
 The non-portable pieces are concentrated below the broker's VMM seam:
 
@@ -66,7 +66,7 @@ The non-portable pieces are concentrated below the broker's VMM seam:
   `go-winio`.
 - `services/internal/netjail/network.go` starts a gvisor-tap-vsock link over the
   Windows hvsocket transport.
-- `services/cmd/guestd/mount_linux.go` mounts HCS-served Plan9/9p shares.
+- `services/cmd/runner/mount_linux.go` mounts HCS-served Plan9/9p shares.
 - `image/build.sh` currently produces an x86_64 Hyper-V bundle and converts the
   rootfs to VHD.
 - `apps/desktop/src/main/sessions/manager.ts` still defaults to a Windows bundle
@@ -217,7 +217,7 @@ later compatibility nicety. Rosetta (amd64 user binaries inside the arm64 guest)
 - `ARCH="x86_64"` → parameterize (`ARCH=${ARCH:-aarch64}` for the macOS bundle).
 - The rootfs `docker build` must run `--platform linux/arm64` so the baked
   `node_modules` and apt-installed kernel are arm64.
-- The two `go build`/`go install` lines that produce `guestd` and `gvforwarder`
+- The two `go build`/`go install` lines that produce `runner` and `gvforwarder`
   currently pass `GOARCH=amd64` → make them `GOARCH=arm64` for this bundle.
 - The matched kernel package (`linux-image-generic-hwe-22.04`) resolves to the arm64
   kernel under the arm64 build; `vmlinuz`/`initrd` extraction is unchanged. The boot
@@ -228,7 +228,7 @@ later compatibility nicety. Rosetta (amd64 user binaries inside the arm64 guest)
   output `rootfs.raw`. `VZDiskImageStorageDeviceAttachment` takes the raw image as-is
   (validation #6); ASIF conversion is optional and macOS 26+ only.
 - Keep the read-only-rootfs invariant (attach `readOnly: true`).
-- Keep kernel, initrd, modules, rootfs, `guestd`, and agent `node_modules` pinned as
+- Keep kernel, initrd, modules, rootfs, `runner`, and agent `node_modules` pinned as
   one bundle, with separate per-platform manifests.
 - The guest's static `resolv.conf` (`nameserver 192.168.127.1`, baked in `cmd_rootfs`)
   matches `netjail`'s gateway and is platform-neutral — no change.
@@ -258,13 +258,13 @@ Use virtio-fs, not Plan9/9p, on macOS.
 device, keyed by `WorkspaceShare.Tag` (validation #1). The `Port` field is unused on
 this path.
 
-**Guest side:** the in-guest mount must become share-type aware. `guestd`'s
+**Guest side:** the in-guest mount must become share-type aware. `runner`'s
 `mount_linux.go` currently does the Windows 9p-over-vsock mount; on macOS the same
 guest must instead run `mount -t virtiofs <tag> <target>` (validation #2). The guest
 cannot see the host OS, so branch on what's actually present: if a virtio-fs device
 matching the tag exists (e.g. under `/sys/bus/virtio`), mount virtiofs; otherwise fall
 back to 9p. (Alternatively, have the broker pass the share type in the `attachWorkspace`
-guestd RPC — cleaner, but a protocol change.)
+runner RPC — cleaner, but a protocol change.)
 
 **Open spike — RESOLVED (2026-05-23, S7).** The one undocumented behavior — does the
 guest see a share added after `start()` **without a remount nudge** — is now verified
@@ -298,7 +298,7 @@ Two facts the probe pinned down that the implementation must honor:
 
 **Implemented (2026-05-23, S7).** Both facts above are now honored in code and verified on
 Apple Silicon: `driver_darwin.go` `buildShare` pins `VZMultipleDirectoryShare` for sessions
-(the lone legacy `"workspace"` tag stays `VZSingleDirectoryShare`), and `guestd`
+(the lone legacy `"workspace"` tag stays `VZSingleDirectoryShare`), and `runner`
 `mount_linux.go` mounts the single device — by its fixed tag, not the per-session tag — **once
 at the base** (`/sessions`), so each session is a stable `/sessions/<tag>` subdir. The
 `scripts/s7-smoke-darwin.sh` black-box layer that used to reproduce the rollback now passes the
@@ -351,7 +351,7 @@ So the macOS network work is narrow and concrete:
 3. **Guest side is likely unchanged.** Inside the Linux guest, the Hyper-V link already
    appears as `AF_VSOCK` to host CID 2; under VZ the guest also sees `AF_VSOCK` to
    CID 2. `gvforwarder` dials `CID2:1024` and POSTs `/connect` either way, so
-   `guestd`'s egress bring-up should port without changes — verify in the boot spike.
+   `runner`'s egress bring-up should port without changes — verify in the boot spike.
 
 This makes the first macOS slice reuse the entire egress jail with one transport seam.
 
@@ -404,8 +404,8 @@ Make the Electron main process platform-aware without teaching it hypervisor det
   On macOS this must be `rootfs.raw` (the disk format the VZ driver attaches). Select by
   platform; `vmlinuz`/`initrd` names are unchanged.
 - Rename TypeScript "pipe" wording to "host address" where practical; default the host
-  address by platform — Windows `\\.\pipe\atelier-host`, macOS/Linux dev a unix socket
-  (`/tmp/atelier-host.sock` or an app-owned socket under user data).
+  address by platform — Windows `\\.\pipe\atelierd`, macOS/Linux dev a unix socket
+  (`/tmp/atelierd.sock` or an app-owned socket under user data).
 - Keep `SessionManager`'s lifecycle model unchanged unless the virtio-fs runtime-share
   smoke test forces a macOS-specific session policy.
 
@@ -419,9 +419,9 @@ This is the priority deliverable: the minimal, file-by-file change set to boot t
 | `services/internal/vmm/driver_other.go` | Narrow build tag `//go:build !windows` → `//go:build !windows && !darwin` | Free up `darwin` for the real driver; other Unixes keep the stub |
 | `services/internal/vmm/driver_darwin.go` *(new)* | Implement `Driver` (Option A: cgo via `Code-Hex/vz`). Map per the [Driver Contract](#driver-contract) table | The whole macOS substrate |
 | `services/internal/netjail/network.go` | Make `Start` take a host-supplied `net.Listener`; stop calling `egressListenURL()` internally | Reuse the egress jail under VZ vsock instead of Hyper-V hvsock |
-| `services/cmd/guestd/mount_linux.go` | Branch share type: `mount -t virtiofs <tag> <target>` when a virtio-fs device is present, else current 9p | Guest mounts macOS shares |
+| `services/cmd/runner/mount_linux.go` | Branch share type: `mount -t virtiofs <tag> <target>` when a virtio-fs device is present, else current 9p | Guest mounts macOS shares |
 | `services/internal/vsock/*` | Note Plan9 ports (`WorkspacePlan9Port`, `SessionPlan9PortBase`) are unused on macOS; `WorkspaceShare.Port` ignored by the VZ driver | virtio-fs is tag-addressed, not vsock-port-addressed |
-| `image/build.sh` | `ARCH=aarch64`, `docker build --platform linux/arm64`, `GOARCH=arm64` for guestd+gvforwarder, emit `rootfs.raw` (skip `qemu-img -O vpc`) | arm64 guest is mandatory under VZ (validation #7) |
+| `image/build.sh` | `ARCH=aarch64`, `docker build --platform linux/arm64`, `GOARCH=arm64` for runner+gvforwarder, emit `rootfs.raw` (skip `qemu-img -O vpc`) | arm64 guest is mandatory under VZ (validation #7) |
 | `apps/desktop/src/main/sessions/manager.ts` | Platform default for `bundleDir`; `rootfsPath` → `rootfs.raw` on macOS; host address → unix socket | Drop hardcoded `E:\…` and `.vhd` |
 | Signing | Codesign the broker (Option A) or helper (Option B) with `com.apple.security.virtualization`, hardened runtime; run VM ops on one serial dispatch queue | Framework refuses to start otherwise (validation #3) |
 
@@ -436,14 +436,14 @@ agent loop, the Windows driver, and the netjail jail logic (only its transport s
    Keep the cross-platform orchestration in `internal/vmm` and the HCS implementation
    behind the Windows driver. All existing Windows commands still pass.
 2. **arm64 bundle + resolver.** Make `image/build.sh` emit `darwin-arm64-vz` (raw ext4,
-   arm64 guestd/gvforwarder); add platform/arch bundle resolution and remove the
+   arm64 runner/gvforwarder); add platform/arch bundle resolution and remove the
    Windows default path from `manager.ts`.
 3. **macOS boot spike.** In `driver_darwin.go` (Option A, `Code-Hex/vz`), boot the
    kernel + initrd + raw rootfs read-only via `VZLinuxBootLoader` +
    `VZDiskImageStorageDeviceAttachment`, capture serial output, shut down cleanly.
    Use NAT only to confirm the guest is alive; remove it after.
 4. **Guest control.** `DialGuest` via `VZVirtioSocketDevice.connect(toPort:)` to
-   `vsock.GuestRPCPort` (5000); make `vmctl exec -- python3 --version` work.
+   `vsock.GuestRPCPort` (5000); make `atelierctl exec -- python3 --version` work.
 5. **Virtio-fs files.** One `VZVirtioFileSystemDevice` + `VZMultipleDirectoryShare`;
    mount one workspace; then **smoke-test the runtime add/remove** (the only unverified
    bit of validation #1) and the multi-session attach/detach path.
@@ -482,7 +482,7 @@ Tackle them only once milestones 0–8 pass:
   `net.Listener` `netjail.Start` expects, plus decoupling the hardcoded Hyper-V hvsock
   URL. This is not a file-handle-NIC rebuild.
 - **Architecture split:** Apple Silicon needs arm64 guest artifacts. The agent, Node
-  modules, `guestd`, and `gvforwarder` must all be built for arm64 — a hard boot blocker,
+  modules, `runner`, and `gvforwarder` must all be built for arm64 — a hard boot blocker,
   not a nicety.
 - **Signing + threading:** the framework refuses to run without
   `com.apple.security.virtualization` under the hardened runtime, so dev/CI/packaging

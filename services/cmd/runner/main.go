@@ -1,9 +1,9 @@
-// Command guestd is the in-VM daemon: the AF_VSOCK JSON-RPC server side of the
+// Command runner is the in-VM daemon: the AF_VSOCK JSON-RPC server side of the
 // host's control plane (design.md §8 Hop 3, the model being Cowork's coworkd).
 // init.sh execs it as PID 1. It serves one method, exec, which runs a command
 // and streams stdout/stderr back as JSON-RPC notifications ("Streaming =
 // JSON-RPC notifications" — §8). The host client + the full round-trip land in
-// S2.2; for S2.1 the observable is: guestd comes up and listens on the vsock port.
+// S2.2; for S2.1 the observable is: runner comes up and listens on the vsock port.
 package main
 
 import (
@@ -34,7 +34,7 @@ func main() {
 			"port", vsock.GuestRPCPort, "err", err)
 		block()
 	}
-	log.Info("atelier-guestd listening", "transport", "vsock", "port", vsock.GuestRPCPort)
+	log.Info("atelier-runner listening", "transport", "vsock", "port", vsock.GuestRPCPort)
 
 	// Bring up the guest's network link (Network door, S4.1): gvforwarder bridges
 	// a tap device to the host's user-mode network over vsock. Supervised in the
@@ -52,11 +52,11 @@ func main() {
 	if err := srv.Serve(context.Background(), ln); err != nil {
 		log.Error("rpc serve stopped", "err", err)
 	}
-	log.Warn("guestd serve returned — staying up (PID 1)")
+	log.Warn("runner serve returned — staying up (PID 1)")
 	block()
 }
 
-// block parks the (PID 1) goroutine forever. guestd must never return to init.
+// block parks the (PID 1) goroutine forever. runner must never return to init.
 func block() { select {} }
 
 type guest struct {
@@ -113,7 +113,7 @@ type execInputParams struct {
 // child's stdout or stderr as it is produced. Data is base64 (std encoding) so
 // the stream is binary-safe — raw bytes can't survive a JSON string field
 // otherwise (invalid UTF-8 becomes U+FFFD), and a multibyte rune split across a
-// read boundary would corrupt too. The host (vmctl) decodes before writing out.
+// read boundary would corrupt too. The host (atelierctl) decodes before writing out.
 type outputParams struct {
 	Stream string `json:"stream"` // "stdout" | "stderr"
 	Data   string `json:"data"`   // base64-encoded chunk
@@ -223,7 +223,7 @@ func (g *guest) execInput(_ context.Context, raw json.RawMessage) (any, error) {
 	return nil, nil
 }
 
-// mountParams asks guestd to mount a host 9p share (Files door, S3.1): dial the
+// mountParams asks runner to mount a host 9p share (Files door, S3.1): dial the
 // host on Port and mount it (aname=Tag) at Target.
 type mountParams struct {
 	Port   uint32 `json:"port"`

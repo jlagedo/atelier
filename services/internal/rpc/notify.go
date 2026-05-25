@@ -5,7 +5,7 @@ import "context"
 // Notifier lets a handler push JSON-RPC notifications (server→client messages
 // with no id) back over the same connection while it is still running. This is
 // how streamed output is carried (design.md §8: "Streaming = JSON-RPC
-// notifications … one channel, no second socket") — e.g. guestd's exec method
+// notifications … one channel, no second socket") — e.g. runner's exec method
 // emits stdout/stderr as notifications, then returns the final result.
 type Notifier interface {
 	Notify(method string, params any) error

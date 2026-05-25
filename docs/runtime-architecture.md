@@ -4,7 +4,7 @@ This document maps every component from the desktop UI down to the agent running
 inside the sandbox VM, with the communication protocols and concrete names/ports
 used in the codebase.
 
-Four processes, three hops (plus the guestd↔agent stdio channel).
+Four processes, three hops (plus the runner↔agent stdio channel).
 
 ## Component & protocol map
 
@@ -31,11 +31,11 @@ Four processes, three hops (plus the guestd↔agent stdio channel).
 │   sessions/store.ts  SessionStore (durable transcripts/hibernate)             │
 │   host-client/client.ts  PipeClient  ── JSON-RPC 2.0 client                   │
 │                                                                                │
-│   (a second Hop-2 client exists: the Go CLI  cmd/vmctl  for dev/testing)      │
+│   (a second Hop-2 client exists: the Go CLI  cmd/atelierctl  for dev/testing)      │
 └───────────────────────────────────┬───────────────────────────────────────--─┘
                                      │
         ╔════════════════════════════════════════════════════════════╗
-        ║ HOP 2 — Named pipe  \\.\pipe\atelier-host  (go-winio)       ║
+        ║ HOP 2 — Named pipe  \\.\pipe\atelierd  (go-winio)       ║
         ║   JSON-RPC 2.0, LSP-style Content-Length framing            ║
         ║   methods (pkg/protocol): getStatus createVM startVM stopVM ║
         ║     exec execInput attachWorkspace detachWorkspace          ║
@@ -44,7 +44,7 @@ Four processes, three hops (plus the guestd↔agent stdio channel).
         ╚════════════════════════════════════════════════════════════╝
                                      │
 ┌───────────────────────────────────┴───────────────────────────────────────--─┐
-│ PROCESS 3 — HOST BROKER  cmd/host  (Go, planned LocalSystem service)           │
+│ PROCESS 3 — HOST BROKER  cmd/atelierd  (Go, planned LocalSystem service)           │
 │   rpc.Server  →  broker.Register(...)                                          │
 │   authorize(method, door) ── Gate (policy.go) + audit log (audit.go)          │
 │        doors: compute | files | network                                       │
@@ -68,7 +68,7 @@ Four processes, three hops (plus the guestd↔agent stdio channel).
 ┌───────┴───────────────────────────┴───────────────────────────────┴──────────┐
 │ PROCESS 4 — GUEST VM  (Hyper-V, Linux; ONE shared VM "vm0")                    │
 │                                                                                │
-│   guestd  (cmd/guestd, PID 1 / init)  ── AF_VSOCK JSON-RPC server :5000       │
+│   runner  (cmd/runner, PID 1 / init)  ── AF_VSOCK JSON-RPC server :5000       │
 │       methods: exec · execInput · mount · unmount                             │
 │       streams child stdout/stderr as  "exec/output"  notifications (base64)   │
 │                                                                                │
@@ -77,7 +77,7 @@ Four processes, three hops (plus the guestd↔agent stdio channel).
 │   └─ spawns, per session, the IN-GUEST AGENT as a child (stdin/stdout pipe):  │
 │                                                                                │
 │      ┌──────────────────────────────────────────────────────────────────┐    │
-│      │ IN-GUEST AGENT  packages/agent  src/cli-guest.ts (tsx)            │    │
+│      │ IN-GUEST AGENT  packages/artisan  src/cli-guest.ts (tsx)            │    │
 │      │   launched: tsx cli-guest.ts --serve --workspace /sessions/<id>   │    │
 │      │             [--resume <sdkSessionId>]                             │    │
 │      │   persistent loop on the Claude Agent SDK                         │    │
@@ -96,13 +96,13 @@ Renderer  window.atelier.work.sendMessage(appId, "do X")
    │  Hop1: ipcRenderer.invoke(WorkSendMessage)
 Main     manager.sendMessage → host.execInput({id:"vm0", sessionId:appId,
    │                              data: base64( {type:"user",text:"do X"}\n )})
-   │  Hop2: JSON-RPC "execInput" over \\.\pipe\atelier-host
+   │  Hop2: JSON-RPC "execInput" over \\.\pipe\atelierd
 Broker   authorize("execInput","compute") → DialGuest("vm0")
    │  Hop3: JSON-RPC "execInput" over AF_HYPERV :5000
-guestd   writes the NDJSON line into that session's child STDIN (matched by sessionId)
+runner   writes the NDJSON line into that session's child STDIN (matched by sessionId)
 Agent    loop reads turn → calls Claude (api.anthropic.com via egress jail)
    │     emits NDJSON LoopEvents on STDOUT
-guestd   each stdout chunk → "exec/output" notification (base64)
+runner   each stdout chunk → "exec/output" notification (base64)
    │  Hop3 → Broker relays verbatim → Hop2 notification
 Main     execStream.onOutput → split NDJSON lines → emit.event(appId, ev)
    │  Hop1: webContents.send(WorkEvent)
@@ -114,17 +114,17 @@ Renderer onEvent(...) renders text/tool_use/turn_done
 | Hop | Boundary | Transport | Wire format | Who designed it |
 |-----|----------|-----------|-------------|-----------------|
 | 1 | Renderer ⇄ Main | Electron IPC (`ipcRenderer`/`ipcMain` + `contextBridge`) | structured-clone msgs on `IpcChannel.*` | built into Electron |
-| 2 | Main ⇄ Broker | Named pipe `\\.\pipe\atelier-host` (go-winio) | JSON-RPC 2.0, Content-Length framing | you |
-| 3-ctrl | Broker ⇄ guestd | AF_HYPERV⇄AF_VSOCK, port **5000** | JSON-RPC 2.0 (+ `exec/output` notifications) | you |
+| 2 | Main ⇄ Broker | Named pipe `\\.\pipe\atelierd` (go-winio) | JSON-RPC 2.0, Content-Length framing | you |
+| 3-ctrl | Broker ⇄ runner | AF_HYPERV⇄AF_VSOCK, port **5000** | JSON-RPC 2.0 (+ `exec/output` notifications) | you |
 | 3-files | Broker ⇄ guest | Plan9/9p, port **564** / per-session **600+N** | 9p over vsock (`trans=fd`) | HCS + you |
 | 3-net | guest ⇄ Broker | user-mode net over vsock, port **1024** | gvisor-tap-vsock (DHCP/DNS/forward) + allowlist | you |
-| stdio | guestd ⇄ Agent | OS pipe (child stdin/stdout) | NDJSON `LoopControl`/`LoopEvent` | you |
+| stdio | runner ⇄ Agent | OS pipe (child stdin/stdout) | NDJSON `LoopControl`/`LoopEvent` | you |
 
 ## Security notes
 
 - The agent's **only** way out is the Network door (gvforwarder → host allowlist,
   default-deny → `api.anthropic.com:443`).
-- The agent's instructions/turns arrive **only** as NDJSON on stdin from guestd;
+- The agent's instructions/turns arrive **only** as NDJSON on stdin from runner;
   the agent itself never gets an ambient connection to the broker.
 - Today the broker is reachable only via Hop 2 (the named pipe); there is **no**
   guest→broker control channel. Adding one (Topology B) is the surface that needs
@@ -139,5 +139,5 @@ Renderer onEvent(...) renders text/tool_use/turn_done
 - Broker + gate: `services/internal/broker/broker.go`, `policy.go`, `audit.go`
 - Method/protocol surface: `services/pkg/protocol/protocol.go`
 - Hop 3 control plane: `services/internal/vmm/driver_windows.go` (`DialGuest`),
-  `services/cmd/guestd/main.go`, `services/internal/vsock/vsock.go` (ports)
-- In-guest agent: `packages/agent/src/cli-guest.ts`
+  `services/cmd/runner/main.go`, `services/internal/vsock/vsock.go` (ports)
+- In-guest agent: `packages/artisan/src/cli-guest.ts`

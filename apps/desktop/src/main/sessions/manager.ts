@@ -15,7 +15,7 @@ import path from "node:path";
 import { HostClient, type ExecRun, type OutputStream } from "../host-client";
 import type { LoopControl, LoopEvent } from "../host-client/types";
 import { WorkspaceWatcher, type WorkspaceUpdate } from "../workspace/watcher";
-import { guestdImageFileName, resolveBundleDir, rootfsFileName } from "./bundle";
+import { runnerImageFileName, resolveBundleDir, rootfsFileName } from "./bundle";
 import { SessionStore } from "./store";
 
 export type SessionLifecycle = "starting" | "active" | "hibernating" | "inactive" | "resuming" | "error";
@@ -48,8 +48,8 @@ export interface ManagerOptions {
   maxActive?: number;
 }
 
-const GUEST_TSX = "/opt/atelier/packages/agent/node_modules/.bin/tsx";
-const GUEST_CWD = "/opt/atelier/packages/agent";
+const GUEST_TSX = "/opt/atelier/packages/artisan/node_modules/.bin/tsx";
+const GUEST_CWD = "/opt/atelier/packages/artisan";
 const GUEST_AGENT = "src/cli-guest.ts";
 
 // Events worth persisting as the rebuildable chat transcript.
@@ -81,7 +81,7 @@ export class SessionManager {
   private readonly vmId: string;
   private readonly bundleDir: string;
   private readonly rootfsName: string;
-  private readonly guestdImageName: string;
+  private readonly runnerImageName: string;
   private readonly egressAllow: string[];
   private readonly bootTimeoutMs: number;
   private readonly idleMs: number;
@@ -103,7 +103,7 @@ export class SessionManager {
       arch: opts.arch,
     });
     this.rootfsName = rootfsFileName(platform);
-    this.guestdImageName = guestdImageFileName(platform);
+    this.runnerImageName = runnerImageFileName(platform);
     this.egressAllow = opts.egressAllow ?? [
       "api.anthropic.com",
       "pypi.org",
@@ -364,7 +364,7 @@ export class SessionManager {
         kernelPath: path.join(this.bundleDir, "vmlinuz"),
         initrdPath: path.join(this.bundleDir, "initrd"),
         rootfsPath: path.join(this.bundleDir, this.rootfsName),
-        guestdImagePath: path.join(this.bundleDir, this.guestdImageName),
+        runnerImagePath: path.join(this.bundleDir, this.runnerImageName),
         memoryMB: 0,
         cpuCount: 0,
       });
@@ -403,8 +403,8 @@ export class SessionManager {
       DISABLE_ERROR_REPORTING: "1",
       // Non-root agent (CRIT-01): the loop runs as uid 1001 with /opt read-only, so
       // HOME/TMPDIR/cache must be writable tmpfs paths or the SDK's native `claude`
-      // binary can't launch ("exists but failed to launch"). Mirror vmctl agent's
-      // genv (services/cmd/vmctl/main.go) — /home/atelier + /tmp are tmpfs (init.sh).
+      // binary can't launch ("exists but failed to launch"). Mirror atelierctl agent's
+      // genv (services/cmd/atelierctl/main.go) — /home/atelier + /tmp are tmpfs (init.sh).
       HOME: "/home/atelier",
       TMPDIR: "/tmp",
       XDG_CACHE_HOME: "/home/atelier/.cache",

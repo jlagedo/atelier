@@ -1,5 +1,5 @@
 // Hop 2 (design.md §8): the low-level JSON-RPC client over the Go host's named
-// pipe, with LSP-style Content-Length framing — the exact wire the Go `vmctl`
+// pipe, with LSP-style Content-Length framing — the exact wire the Go `atelierctl`
 // client and the agent's BrokerClient use. One PipeClient owns one connection;
 // the HostClient facade (./index.ts) opens a connection per call/run so that
 // concurrent sessions' streamed exec/output notifications never mix.

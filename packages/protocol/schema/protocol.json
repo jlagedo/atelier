@@ -24,7 +24,7 @@
       "uptimeMs": "int",
       "vmCount": "int"
     },
-    "CreateVMParams": { "id": "string", "kernelPath": "string", "initrdPath": "string", "rootfsPath": "string", "guestdImagePath": "string?", "memoryMB": "int", "cpuCount": "int" },
+    "CreateVMParams": { "id": "string", "kernelPath": "string", "initrdPath": "string", "rootfsPath": "string", "runnerImagePath": "string?", "memoryMB": "int", "cpuCount": "int" },
     "VMRef": { "id": "string" },
     "ExecParams": { "id": "string", "cmd": "string", "sessionId": "string?", "args": "string[]?", "cwd": "string?", "env": "map<string,string>?" },
     "ExecInputParams": { "id": "string", "sessionId": "string", "data": "string" },

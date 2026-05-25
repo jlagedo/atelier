@@ -66,7 +66,7 @@ S4 NAT crutch for egress until S9 replaces it.
   - Narrow `driver_other.go` from `//go:build !windows` to `//go:build !windows && !darwin`.
   - Add `driver_darwin.go` (`//go:build darwin`) implementing the `Driver` interface as a
     stub returning `ErrUnsupported` (mirror `unsupportedDriver`), with `NewDriver` wired.
-  - Confirm `vsock_other.go` / guestd `*_other.go` already cover darwin (host-side only;
+  - Confirm `vsock_other.go` / runner `*_other.go` already cover darwin (host-side only;
     guest code is Linux-only and not built for darwin).
 - **Touches:** `services/internal/vmm/driver_other.go`,
   `services/internal/vmm/driver_darwin.go` *(new)*.
@@ -87,7 +87,7 @@ S4 NAT crutch for egress until S9 replaces it.
 - **Work:**
   - Parameterize `ARCH` (`ARCH=${ARCH:-aarch64}` for this bundle).
   - rootfs `docker build --platform linux/arm64` so `node_modules` + apt kernel are arm64.
-  - `GOARCH=arm64` for the `guestd` and `gvforwarder` build/install lines.
+  - `GOARCH=arm64` for the `runner` and `gvforwarder` build/install lines.
   - Emit `rootfs.raw` — skip the `qemu-img convert -O vpc` step; `cmd_rootfs` already leaves
     `$WORK/rootfs.ext4`, `cmd_bundle` already prefers it.
   - Write the bundle to `image/bundle/darwin-arm64-vz/` with `manifest.txt`; keep the
@@ -95,7 +95,7 @@ S4 NAT crutch for egress until S9 replaces it.
 - **Touches:** `image/build.sh`, `image/Makefile` (if it hardcodes arch), `image/bundle/`.
 - **Verify:** after a build, `image/bundle/darwin-arm64-vz/` contains
   `vmlinuz initrd rootfs.raw manifest.txt`; `file rootfs.raw` reports ext4;
-  `file guestd`/`file gvforwarder` (or `go version -m`) report `arm64`.
+  `file runner`/`file gvforwarder` (or `go version -m`) report `arm64`.
 - **Exit:** a reproducible arm64 raw-ext4 bundle exists; Windows bundle build unaffected.
 - **Review:** no x86_64 leakage (check the kernel package + Go binaries are arm64); read-only
   rootfs invariant preserved; Windows path still produces a VHD.
@@ -114,7 +114,7 @@ S4 NAT crutch for egress until S9 replaces it.
     `darwin-arm64-vz` (dev: repo-relative `image/bundle/darwin-arm64-vz`).
   - `rootfsPath` (`manager.ts:309`) → `rootfs.raw` on macOS, `rootfs.vhd` on Windows;
     `vmlinuz`/`initrd` names unchanged (`:307`/`:308`).
-  - Default the host address by platform (Windows `\\.\pipe\atelier-host`; macOS/Linux dev a
+  - Default the host address by platform (Windows `\\.\pipe\atelierd`; macOS/Linux dev a
     unix socket). Rename "pipe" wording → "host address" where low-risk.
 - **Touches:** `apps/desktop/src/main/sessions/bundle.ts` *(new — pure resolver)*,
   `…/sessions/manager.ts`, `…/ipc/handlers.ts` (injects the platform base dir),
@@ -129,7 +129,7 @@ S4 NAT crutch for egress until S9 replaces it.
 - **Risk:** Low.
 - **Landed:** pure `bundle.ts` (`bundleTarget`/`rootfsFileName`/`resolveBundleDir`) +
   `defaultHostAddress`; `handlers.ts` injects packaged-vs-dev base dir (`process.resourcesPath/bundle`
-  is a placeholder until S10 packaging). `ATELIER_HOST_ADDR` added; `ATELIER_HOST_PIPE` kept for
+  is a placeholder until S10 packaging). `ATELIER_ADDR` added; `ATELIER_PIPE` kept for
   back-compat. Verified: `npm run typecheck && lint && test` green (16 tests).
 
 ---
@@ -155,8 +155,8 @@ S4 NAT crutch for egress until S9 replaces it.
     purely to confirm liveness. Mark it clearly as removed in S9.
 - **Touches:** `services/internal/vmm/driver_darwin.go`, `services/go.mod`/`go.sum`,
   a dev `entitlements.plist`, build/sign notes (root `README`/`AGENTS.md`).
-- **Verify:** `vmctl createVM -id vm0 …` then `vmctl startVM -id vm0` boots the guest; serial
-  log shows the kernel boot + login prompt; `vmctl stopVM -id vm0` exits cleanly. Re-run is
+- **Verify:** `atelierctl createVM -id vm0 …` then `atelierctl startVM -id vm0` boots the guest; serial
+  log shows the kernel boot + login prompt; `atelierctl stopVM -id vm0` exits cleanly. Re-run is
   idempotent.
 - **Exit:** an arm64 guest boots and halts under VZ, driven through the unchanged Manager.
 - **Review:** all VM calls confined to the single serial queue; rootfs attached
@@ -185,7 +185,7 @@ S4 NAT crutch for egress until S9 replaces it.
     `atelier guest init: kernel 6.8.0-117-generic`; `stopVM` returns cleanly (`err=null`),
     `vmCount` → 0; create/start/stop is idempotent on a reused id. `go test/vet`, `gofmt`,
     and `GOOS=windows go build ./...` all green (vz excluded from non-darwin builds).
-  - **S5 boundary surfaced:** `guestd` then fails `open /dev/vsock` and the guest panics —
+  - **S5 boundary surfaced:** `runner` then fails `open /dev/vsock` and the guest panics —
     the guest loads the Hyper-V `hv_sock` transport (`image/guest/init.sh`), not VZ's
     virtio-vsock. That is exactly S5's "guest control plane" work, out of S4 scope.
 
@@ -193,7 +193,7 @@ S4 NAT crutch for egress until S9 replaces it.
 
 ### S5 — guest control plane — `DialGuest` + `exec`  ☑
 
-- **Goal:** reach `guestd` over vsock and run a command in the guest.
+- **Goal:** reach `runner` over vsock and run a command in the guest.
 - **Work:**
   - Implement `DialGuest` via `VZVirtioSocketDevice.connect(toPort:)` to
     `vsock.GuestRPCPort` (5000); adapt `VZVirtioSocketConnection` → `net.Conn` (validation #8,
@@ -201,7 +201,7 @@ S4 NAT crutch for egress until S9 replaces it.
   - Confirm the broker's exec path is transport-agnostic over the returned `net.Conn`.
 - **Touches:** `services/internal/vmm/driver_darwin.go`,
   `services/internal/vsock/vsock_other.go` (note: Plan9 ports unused on macOS).
-- **Verify:** `vmctl exec -id vm0 -- python3 --version` prints the version from inside the
+- **Verify:** `atelierctl exec -id vm0 -- python3 --version` prints the version from inside the
   guest; a streamed command relays `exec/output` and the exit code.
 - **Exit:** arbitrary guest exec works over the VZ vsock from the existing broker RPC.
 - **Review:** the `net.Conn` adapter handles half-close/EOF and concurrent dials; no leaked
@@ -209,18 +209,18 @@ S4 NAT crutch for egress until S9 replaces it.
 - **Depends:** S4.
 - **Risk:** Medium. vsock connection lifecycle + framing over the adapter.
 - **Landed:** two small changes; the whole exec path downstream was already
-  transport-agnostic over the `net.Conn` from `DialGuest`, so no broker/RPC/vmctl/guestd
+  transport-agnostic over the `net.Conn` from `DialGuest`, so no broker/RPC/atelierctl/runner
   code changed.
   - **Host** (`driver_darwin.go`): `DialGuest` uses the `*vz.VirtioSocketDevice` cached on
     `Start` and calls `Connect(port)` — `*vz.VirtioSocketConnection` already satisfies
     `net.Conn`, so it's returned directly (no adapter). A bounded retry
     (`dialGuestRetries=40` × `dialGuestRetryWait=250ms`, ~10s) loops on the
-    `*vz.NSError` `ECONNRESET` that `Connect` returns until `guestd` binds its listener;
+    `*vz.NSError` `ECONNRESET` that `Connect` returns until `runner` binds its listener;
     any other error is terminal, and `ctx` is honored between attempts. No hand-rolled
     queue — the binding marshals `Connect` onto the device's own dispatch queue
     (validation #3).
   - **Guest** (`image/guest/init.sh`): the S4 boundary was the guest loading only the
-    Hyper-V `hv_sock` transport, so `guestd` panicked on `open /dev/vsock`. Fixed by also
+    Hyper-V `hv_sock` transport, so `runner` panicked on `open /dev/vsock`. Fixed by also
     `modprobe vmw_vsock_virtio_transport` (additive + tolerant `|| true`, so the Hyper-V
     bundle is unaffected — its virtio modprobe just no-ops). That module pulls in the
     `vsock` core, registering `/dev/vsock`. Doc-only: `vsock_linux.go`'s comment is now
@@ -228,7 +228,7 @@ S4 NAT crutch for egress until S9 replaces it.
   - **Verified end-to-end** on Apple Silicon: rebuilt the `darwin-arm64-vz` bundle (the
     kernel ships `vmw_vsock_virtio_transport.ko`), re-signed the broker, then
     `createVM`/`startVM`/`exec`/`stopVM`. Serial shows `NET: Registered PF_VSOCK protocol
-    family` then `atelier-guestd listening transport=vsock port=5000` (no more
+    family` then `atelier-runner listening transport=vsock port=5000` (no more
     `/dev/vsock` panic). `exec` ran `uname -a` (aarch64), `id` (non-root `atelier`
     uid 1001), `python3 --version`, and a `sh -c "exit 7"` whose exit code propagated
     correctly. `stopVM` clean, `vmCount → 0`. `go test/vet`, `gofmt`, and
@@ -252,9 +252,9 @@ S4 NAT crutch for egress until S9 replaces it.
     when a virtio-fs device for the tag is present (e.g. under `/sys/bus/virtio`), else fall
     back to the existing 9p path (validation #2). Validate the tag (`validateTag`) before use.
 - **Touches:** `services/internal/vmm/driver_darwin.go`,
-  `services/cmd/guestd/mount_linux.go`.
-- **Verify:** `vmctl attachWorkspace -id vm0 -tag ws0 -host <dir>` then
-  `vmctl exec -id vm0 -- ls <mountpoint>` lists the host directory's contents;
+  `services/cmd/runner/mount_linux.go`.
+- **Verify:** `atelierctl attachWorkspace -id vm0 -tag ws0 -host <dir>` then
+  `atelierctl exec -id vm0 -- ls <mountpoint>` lists the host directory's contents;
   `detachWorkspace` removes it.
 - **Exit:** one workspace mounts read/write per policy and unmounts cleanly under VZ.
 - **Review:** tag validated; 9p fallback intact for Windows guests; `Port` confirmed unused;
@@ -284,7 +284,7 @@ S4 NAT crutch for egress until S9 replaces it.
     broker; `attachWorkspace` mounts the host dir as `workspace on /workspace type virtiofs (rw)`;
     host contents readable; a **live** host write after mount is visible in the guest; guest write
     visible on host; `detachWorkspace` unmounts; **re-attach is idempotent**; clean `stopVM`.
-    Serial: `virtiofs virtio3` probe → `guestd listening` → `mounted share … tag=workspace` →
+    Serial: `virtiofs virtio3` probe → `runner listening` → `mounted share … tag=workspace` →
     `unmounted share`. `GOOS=windows` still builds (replace is darwin-cgo-only).
   - **Deferred to S7:** the single-vs-multiple-share topology verdict and the "share added after
     `start()` visible without a remount" smoke test (S6 sidesteps it — the guest mounts *after* the
@@ -305,7 +305,7 @@ S4 NAT crutch for egress until S9 replaces it.
     needs a remount, the host-adds-then-guest-mounts shape is the documented primary; the
     fallbacks (staging symlinks → controlled restart → one-VM-per-session) are the ladder.
 - **Touches:** `services/internal/vmm/driver_darwin.go` (only if a nudge RPC is needed),
-  `services/cmd/guestd/mount_linux.go`, `docs/macos-port-plan.md` (verdict).
+  `services/cmd/runner/mount_linux.go`, `docs/macos-port-plan.md` (verdict).
 - **Verify:** a scripted run attaches/detaches ≥3 workspaces on a live VM; each becomes
   visible/invisible in the guest as expected; result documented.
 - **Exit:** runtime-share behavior is **known and documented**, and the chosen shape is
@@ -317,7 +317,7 @@ S4 NAT crutch for egress until S9 replaces it.
 - **Spike resolved (2026-05-23), implementation pending.** The verification half is done; the
   shape change is not — so S7 is in progress.
   - **Test rig landed:** `scripts/s7-smoke-darwin.sh` (builds the bundle if missing, signs the
-    broker/vmctl, then runs two layers) + `services/internal/vmm/s7_probe_darwin_test.go` (gated
+    broker/atelierctl, then runs two layers) + `services/internal/vmm/s7_probe_darwin_test.go` (gated
     by `ATELIER_VZ_SMOKE`; the script compiles, codesigns with the virtualization entitlement,
     and runs it). The probe drives the driver's host-only `SetShare` directly (no broker rollback)
     and inspects the guest over `DialGuest`. Mountpoints live under `/sessions` (the boot tmpfs) —
@@ -334,7 +334,7 @@ S4 NAT crutch for egress until S9 replaces it.
   - **Landed (2026-05-23, base/<tag> shape implemented + verified on Apple Silicon):**
     `driver_darwin.go` `buildShare` now pins `MultipleDirectoryShare` for sessions (the lone
     legacy `"workspace"` tag stays `SingleDirectoryShare`), so a session's files sit at a stable
-    `/sessions/<tag>` for any count (no 1↔2 flip). `guestd` `mount_linux.go` mounts the single
+    `/sessions/<tag>` for any count (no 1↔2 flip). `runner` `mount_linux.go` mounts the single
     device — by its fixed tag `vsock.WorkspaceShareTag`, not the per-session tag — **once at the
     base** (`/sessions`, idempotent via a `/proc/mounts` check); each session appears as the
     `<tag>` subdir from the host `SetShare` (the broker runs `SetShare` before `guestMount`), and
@@ -357,7 +357,7 @@ S4 NAT crutch for egress until S9 replaces it.
   - Egress may still ride the **NAT crutch** from S4 at this stage so the agent can reach the
     model; containment lands in S9.
 - **Touches:** `apps/desktop/src/main/sessions/manager.ts` (runtime path),
-  `packages/agent/src/cli-guest.ts` (only if a platform assumption surfaces).
+  `packages/artisan/src/cli-guest.ts` (only if a platform assumption surfaces).
 - **Verify:** from the desktop in WORK mode, a session boots the macOS VM, mounts a workspace,
   and completes one agent turn with streamed output.
 - **Exit:** the full product loop runs on Apple Silicon (with NAT egress still permitted).
@@ -411,7 +411,7 @@ S4 NAT crutch for egress until S9 replaces it.
 - **Touches:** `services/internal/netjail/network.go`,
   `services/internal/vmm/driver_windows.go` (pass its listener in),
   `services/internal/vmm/driver_darwin.go`.
-- **Verify:** with NAT removed, `vmctl setEgressPolicy` allows an allowlisted host from inside
+- **Verify:** with NAT removed, `atelierctl setEgressPolicy` allows an allowlisted host from inside
   the guest and a non-allowlisted host is denied; DNS resolves only allowlisted names.
 - **Exit:** the guest has **no real NIC**; all egress flows through the jail over VZ vsock;
   Windows egress unchanged.
@@ -448,7 +448,7 @@ S4 NAT crutch for egress until S9 replaces it.
     `done` channel so `Close()` unblocks `Accept()` with `net.ErrClosed` — standard `net.Listener`
     semantics, race-free (`done` is closed, `acceptch` never is, so the connection handler's send
     can't panic). Consistent with the S6 fork precedent; upstream PR deferred.
-  - **Verified end-to-end** (`scripts/build-sign-darwin.sh`, then broker + `vmctl`): serial shows
+  - **Verified end-to-end** (`scripts/build-sign-darwin.sh`, then broker + `atelierctl`): serial shows
     `egress network up … vsockPort 1024` and `gvforwarder` dialing `vsock://2:1024/connect` **once**
     (no S5/S8 restart-loop, no `ConnectionRefused`). `ip -o link` in the guest shows **only `lo` +
     `tap0`** — `enp0s1` is gone. With policy `allow=example.com`: `curl https://example.com` → HTTP
@@ -487,7 +487,7 @@ S4 NAT crutch for egress until S9 replaces it.
 ## Definition of Done (the port)
 
 The port is "booted" (the plan's stated priority) when **S1–S6** pass: an arm64 guest boots
-under VZ, `guestd` is reachable, one workspace mounts, and the agent loop is drivable. It is
+under VZ, `runner` is reachable, one workspace mounts, and the agent loop is drivable. It is
 "shipped" when **S1–S10** pass: containment is back on the vsock jail (NAT removed) and a
 notarized build runs the full loop on a clean machine.
 

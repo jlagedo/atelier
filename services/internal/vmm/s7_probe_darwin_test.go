@@ -5,8 +5,8 @@
 // single host virtio-fs device is mounted once at a base, and each session is a named subdir
 // <base>/<tag> that appears/disappears live as the host swaps the device's share (SetShare).
 //
-// Why a driver-level test and not vmctl: it drives the driver's AttachWorkspace/DetachWorkspace
-// (pure host-side SetShare on the live device) and guestd's mount RPC directly, so it can put
+// Why a driver-level test and not atelierctl: it drives the driver's AttachWorkspace/DetachWorkspace
+// (pure host-side SetShare on the live device) and runner's mount RPC directly, so it can put
 // the device through the single→multi→single transitions and probe the guest at each step
 // without the broker's mounts map. The two invariants it pins:
 //   - the lone "workspace" tag is a SingleDirectoryShare → files at the device root (S6); and
@@ -43,8 +43,8 @@ import (
 
 const probeVMID = "s7probe"
 
-// dummyMountPort is a non-zero placeholder: guestd's mount RPC rejects port 0, but the
-// virtio-fs path ignores the port entirely (it is tag-addressed). See guestd mountShare.
+// dummyMountPort is a non-zero placeholder: runner's mount RPC rejects port 0, but the
+// virtio-fs path ignores the port entirely (it is tag-addressed). See runner mountShare.
 const dummyMountPort uint32 = 564
 
 func TestS7RuntimeShareProbe(t *testing.T) {
@@ -60,7 +60,7 @@ func TestS7RuntimeShareProbe(t *testing.T) {
 		KernelPath:      filepath.Join(bundle, "vmlinuz"),
 		InitrdPath:      filepath.Join(bundle, "initrd"),
 		RootFSPath:      filepath.Join(bundle, "rootfs.raw"),
-		GuestdImagePath: filepath.Join(bundle, "guestd.raw"),
+		RunnerImagePath: filepath.Join(bundle, "runner.raw"),
 	}
 
 	// Three host dirs, each with a unique sentinel file so we can tell which share
@@ -82,7 +82,7 @@ func TestS7RuntimeShareProbe(t *testing.T) {
 	})
 	mustOK(t, d.Start(ctx, probeVMID), "start")
 
-	// DialGuest already retries ~10s for guestd to bind its vsock listener after boot.
+	// DialGuest already retries ~10s for runner to bind its vsock listener after boot.
 	conn, err := d.DialGuest(ctx, probeVMID, vsock.GuestRPCPort)
 	if err != nil {
 		t.Fatalf("DialGuest: %v", err)
@@ -192,8 +192,8 @@ func guestSh(t *testing.T, c *rpc.Client, script string) (string, int) {
 	return buf.String(), res.ExitCode
 }
 
-// guestMount asks guestd to mount the host virtio-fs device for the given target. For a
-// root-level target (/workspace) guestd mounts the device there directly; for a per-session
+// guestMount asks runner to mount the host virtio-fs device for the given target. For a
+// root-level target (/workspace) runner mounts the device there directly; for a per-session
 // target (/sessions/<tag>) it mounts the single device once at the base (/sessions) and the
 // subdir appears on its own. On virtio-fs the mount source is the device's fixed tag, so we
 // pass vsock.WorkspaceShareTag (the tag arg is validated but not used as the source).
@@ -205,7 +205,7 @@ func guestMount(t *testing.T, c *rpc.Client, tag, target string) {
 	}
 }
 
-// guestUnmount asks guestd to unmount the share at target (a real unmount for a legacy
+// guestUnmount asks runner to unmount the share at target (a real unmount for a legacy
 // /workspace mount; a no-op for a per-session subdir under the shared base).
 func guestUnmount(t *testing.T, c *rpc.Client, target string) {
 	t.Helper()

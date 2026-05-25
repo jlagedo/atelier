@@ -46,7 +46,7 @@ type Broker struct {
 
 	// opLocks serializes the multi-step attach/detach sequence per VM (files.go):
 	// each call drives HCS (async ModifyComputeSystem, which rejects duplicate
-	// Plan9 share names) + guestd + the mounts map across several awaits, so two
+	// Plan9 share names) + runner + the mounts map across several awaits, so two
 	// concurrent calls for the same VM must not interleave — otherwise a failing
 	// add rolls back and orphans a share, or a swap unmounts one mid-use. This is
 	// separate from mu (which only guards the mounts map for the fast readFile/
@@ -198,10 +198,10 @@ type CreateVMParams struct {
 	KernelPath string `json:"kernelPath"`
 	InitrdPath string `json:"initrdPath"`
 	RootFSPath string `json:"rootfsPath"`
-	// GuestdImagePath is the host path to the guestd volume (its own ro image, attached
-	// as a second disk and mounted by init.sh). guestd is not baked into the rootfs, so
-	// this is its sole delivery path; the desktop/vmctl always set it.
-	GuestdImagePath string `json:"guestdImagePath"`
+	// RunnerImagePath is the host path to the runner volume (its own ro image, attached
+	// as a second disk and mounted by init.sh). runner is not baked into the rootfs, so
+	// this is its sole delivery path; the desktop/atelierctl always set it.
+	RunnerImagePath string `json:"runnerImagePath"`
 	MemoryMB        uint64 `json:"memoryMB"`
 	CPUCount        int32  `json:"cpuCount"`
 }
@@ -224,7 +224,7 @@ func (b *Broker) createVM(ctx context.Context, params json.RawMessage) (any, err
 		KernelPath:      p.KernelPath,
 		InitrdPath:      p.InitrdPath,
 		RootFSPath:      p.RootFSPath,
-		GuestdImagePath: p.GuestdImagePath,
+		RunnerImagePath: p.RunnerImagePath,
 		MemoryMB:        p.MemoryMB,
 		CPUCount:        p.CPUCount,
 	}); err != nil {
@@ -290,7 +290,7 @@ type ExecResult struct {
 
 // exec is the host half of Hop 3 (design.md §8): gate the request, dial the
 // guest daemon over hvsock, call its exec, and relay each exec/output
-// notification straight back to the Hop-2 caller (vmctl) before returning the
+// notification straight back to the Hop-2 caller (atelierctl) before returning the
 // exit code. The connection is per-call (opened and closed around exec).
 func (b *Broker) exec(ctx context.Context, params json.RawMessage) (any, error) {
 	if err := b.authorize(ctx, "exec", "compute"); err != nil {
@@ -368,7 +368,7 @@ type Status struct {
 
 func (b *Broker) getStatus(_ context.Context, _ json.RawMessage) (any, error) {
 	return Status{
-		Service:  "atelier-host",
+		Service:  "atelierd",
 		Version:  Version,
 		Platform: runtime.GOOS + "/" + runtime.GOARCH,
 		PID:      os.Getpid(),

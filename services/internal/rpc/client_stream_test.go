@@ -14,7 +14,7 @@ import (
 // TestCallStreamDeliversNotificationsThenResult proves the client half of the
 // streaming path: CallStream hands each interleaved notification to onNotify, in
 // order, and then returns the final result — the plumbing the host exec bridge
-// (broker→guest and vmctl→broker) relies on.
+// (broker→guest and atelierctl→broker) relies on.
 func TestCallStreamDeliversNotificationsThenResult(t *testing.T) {
 	srv := NewServer(slog.New(slog.NewTextHandler(io.Discard, nil)))
 	srv.Register("exec", func(ctx context.Context, _ json.RawMessage) (any, error) {

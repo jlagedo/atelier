@@ -28,10 +28,10 @@ const (
 	startTimeout           = 30 * time.Second
 	stopTimeout            = 15 * time.Second
 	// DialGuest retry budget. Start only waits for the hypervisor "running" state,
-	// not guest userspace, so the first dial after startVM can outrun guestd binding
+	// not guest userspace, so the first dial after startVM can outrun runner binding
 	// its vsock listener. We retry on ECONNRESET ("guest not listening yet") across
 	// ~10s — wider than the Windows hvsock dialer's 8×250ms because a darwin cold
-	// boot (kernel + init + guestd) can take longer to reach a bound port.
+	// boot (kernel + init + runner) can take longer to reach a bound port.
 	dialGuestRetries   = 40
 	dialGuestRetryWait = 250 * time.Millisecond
 	// darwinKernelCmdLine boots our bundle under Virtualization.framework. It
@@ -131,21 +131,21 @@ func (d *darwinDriver) Create(_ context.Context, cfg VMConfig) error {
 	}
 	storage := []vz.StorageDeviceConfiguration{blk}
 
-	// guestd volume: its own ro ext4 image attached as a second disk (-> /dev/vdb).
-	// init.sh mounts it by label (LABEL=guestd) and execs guestd from it, so guestd
+	// runner volume: its own ro ext4 image attached as a second disk (-> /dev/vdb).
+	// init.sh mounts it by label (LABEL=runner) and execs runner from it, so runner
 	// iterates without rebuilding the rootfs. Same trust model as the rootfs above
-	// (ro, opaque image; no host-fs mapping). Empty path = baked guestd (no second disk).
-	if cfg.GuestdImagePath != "" {
-		guestdDisk, err := vz.NewDiskImageStorageDeviceAttachment(cfg.GuestdImagePath, true)
+	// (ro, opaque image; no host-fs mapping). Empty path = baked runner (no second disk).
+	if cfg.RunnerImagePath != "" {
+		runnerDisk, err := vz.NewDiskImageStorageDeviceAttachment(cfg.RunnerImagePath, true)
 		if err != nil {
-			return fmt.Errorf("vm: guestd volume attachment: %w", err)
+			return fmt.Errorf("vm: runner volume attachment: %w", err)
 		}
-		guestdBlk, err := vz.NewVirtioBlockDeviceConfiguration(guestdDisk)
+		runnerBlk, err := vz.NewVirtioBlockDeviceConfiguration(runnerDisk)
 		if err != nil {
-			return fmt.Errorf("vm: guestd volume block device: %w", err)
+			return fmt.Errorf("vm: runner volume block device: %w", err)
 		}
-		storage = append(storage, guestdBlk)
-		d.log.Info("attaching guestd volume", "vm", cfg.ID, "path", cfg.GuestdImagePath)
+		storage = append(storage, runnerBlk)
+		d.log.Info("attaching runner volume", "vm", cfg.ID, "path", cfg.RunnerImagePath)
 	}
 	config.SetStorageDevicesVirtualMachineConfiguration(storage)
 
@@ -157,7 +157,7 @@ func (d *darwinDriver) Create(_ context.Context, cfg VMConfig) error {
 	}
 	config.SetEntropyDevicesVirtualMachineConfiguration([]*vz.VirtioEntropyDeviceConfiguration{entropy})
 
-	// Virtio-socket: the control-plane transport S5 dials guestd over (port 5000).
+	// Virtio-socket: the control-plane transport S5 dials runner over (port 5000).
 	sock, err := vz.NewVirtioSocketDeviceConfiguration()
 	if err != nil {
 		return fmt.Errorf("vm: socket device: %w", err)
@@ -283,13 +283,13 @@ func (d *darwinDriver) shutdown(ctx context.Context, vm *vz.VirtualMachine) erro
 	return fmt.Errorf("vm: cannot stop (state %v)", vm.State())
 }
 
-// DialGuest opens a control-plane connection to guestd over the VM's virtio-socket
+// DialGuest opens a control-plane connection to runner over the VM's virtio-socket
 // device (validation #8, host CID 2 / guest CID 3). VZVirtioSocketConnection already
 // satisfies net.Conn, so it is returned directly — no adapter. The vz binding marshals
 // Connect onto the device's own dispatch queue, so no hand-rolled queue is needed here
 // (validation #3). A bounded retry absorbs the race between Start returning (VM at the
-// hypervisor "running" state) and guestd binding its vsock listener inside the still-
-// booting guest: until guestd listens, Connect fails with ECONNRESET, which we retry.
+// hypervisor "running" state) and runner binding its vsock listener inside the still-
+// booting guest: until runner listens, Connect fails with ECONNRESET, which we retry.
 func (d *darwinDriver) DialGuest(ctx context.Context, id string, port uint32) (net.Conn, error) {
 	inst := d.instance(id)
 	if inst == nil {
@@ -312,7 +312,7 @@ func (d *darwinDriver) DialGuest(ctx context.Context, id string, port uint32) (n
 			return conn, nil
 		}
 		lastErr = err
-		// ECONNRESET means guestd hasn't bound the port yet — retry. Any other
+		// ECONNRESET means runner hasn't bound the port yet — retry. Any other
 		// error is terminal (no device, framework failure, etc.).
 		var nserr *vz.NSError
 		if !errors.As(err, &nserr) || nserr.Code != int(syscall.ECONNRESET) {
@@ -332,7 +332,7 @@ func (d *darwinDriver) DialGuest(ctx context.Context, id string, port uint32) (n
 // driver keeps the authoritative tag->dir set in inst.shares, folds in the new entry,
 // rebuilds the VZDirectoryShare, and SetShares it on the live device. share.Port is
 // ignored — virtio-fs is tag-addressed, not vsock-port-addressed (that field is the
-// Windows 9p path). The guest mounts the result with `mount -t virtiofs` (guestd).
+// Windows 9p path). The guest mounts the result with `mount -t virtiofs` (runner).
 func (d *darwinDriver) AttachWorkspace(_ context.Context, id string, share WorkspaceShare) error {
 	if err := validateShareTag(share.Tag); err != nil {
 		return err

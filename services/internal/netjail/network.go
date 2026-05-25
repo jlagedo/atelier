@@ -51,7 +51,7 @@ type Network struct {
 // routes/resolves via the gateway .1. We deliberately omit NAT/host-virtual-IPs
 // so the guest cannot reach host loopback services — egress only, jailed.
 // Network parameters live in internal/vsock now (shared with the guest's static
-// bring-up in cmd/guestd, so the two halves can never drift). Aliased here as consts so
+// bring-up in cmd/runner, so the two halves can never drift). Aliased here as consts so
 // the rest of this file reads unchanged.
 const (
 	netSubnet     = vsock.NetworkCIDR

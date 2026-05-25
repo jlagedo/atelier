@@ -10,7 +10,7 @@ import (
 // SetTimeParams names the VM whose clock to seed. There is no timestamp on the
 // wire: the broker is the time source (it and the caller share the host clock),
 // so callers ask only "sync this VM" and the broker stamps the actual time on the
-// Go-only Hop-3 call to guestd.
+// Go-only Hop-3 call to runner.
 type SetTimeParams struct {
 	ID string `json:"id"`
 }

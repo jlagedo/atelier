@@ -4,7 +4,7 @@
 # and the host /workspace share, then hands off to the guest daemon.
 set -eu
 
-# Guarantee a usable PATH for PID 1 and everything it spawns (guestd's exec, plus
+# Guarantee a usable PATH for PID 1 and everything it spawns (runner's exec, plus
 # the Network-door helpers it runs: modprobe, dhclient — S4.1).
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin
 
@@ -19,7 +19,7 @@ mount -t tmpfs    tmpfs    /tmp   2>/dev/null || true
 # Read-only root (CRIT-05): the rootfs is mounted read-only, so the few paths that need
 # runtime writes are tmpfs (ephemeral, per-boot; sized to bound RAM). /run and /var/tmp are
 # general runtime scratch; /sessions is the parent for per-session mount points (under
-# Hyper-V guestd mkdirs a 9p mount per session here; under VZ guestd mounts the single
+# Hyper-V runner mkdirs a 9p mount per session here; under VZ runner mounts the single
 # virtio-fs device once at /sessions and each session is a <tag> subdir, S7 — either way it
 # MUST be writable on a ro root); /home/atelier is the non-root
 # agent's writable HOME (CRIT-01), chowned to that uid after the tmpfs is mounted. Tolerate
@@ -38,7 +38,7 @@ chown 1001:1001 /home/atelier 2>/dev/null || true
 # /workspace: the only persistent mount, shared from the host over 9p
 # (design.md §8, §10 — Plan9/9p, not virtiofs). HCS serves the share over hvsock,
 # so the mount needs a connected AF_VSOCK fd (trans=fd) — which a shell can't pass
-# to mount(2). guestd does the mount itself (cmd/guestd/mount_linux.go, S3.1); we
+# to mount(2). runner does the mount itself (cmd/runner/mount_linux.go, S3.1); we
 # just ensure the mount point exists.
 mkdir -p /workspace
 
@@ -58,27 +58,27 @@ fi
 # Virtualization.framework (macOS). Load both tolerantly: the one matching this
 # host registers /dev/vsock, the other no-ops (it may also be built in or already
 # auto-loaded). vmw_vsock_virtio_transport pulls in the vsock core + _common, which
-# is what creates /dev/vsock for guestd to bind (S5).
+# is what creates /dev/vsock for runner to bind (S5).
 modprobe hv_sock 2>/dev/null || true
 modprobe vmw_vsock_virtio_transport 2>/dev/null || true
 
-# Files door: load the virtio-fs client so guestd can `mount -t virtiofs <tag> <target>`
+# Files door: load the virtio-fs client so runner can `mount -t virtiofs <tag> <target>`
 # the host shares (S6, macOS/Virtualization.framework). Tolerant like the vsock loads:
 # it no-ops where virtiofs is built-in or absent (e.g. the Hyper-V bundle, which mounts 9p).
 modprobe virtiofs 2>/dev/null || true
 
-# guestd becomes the long-running PID 1 (the vsock RPC server). Neither guestd NOR the
+# runner becomes the long-running PID 1 (the vsock RPC server). Neither runner NOR the
 # in-guest agent is baked into the rootfs — they ship together on ONE read-only ext4 volume
-# (image/build.sh guestd; LABEL=guestd) attached as a second disk, so both rebuild in seconds
+# (image/build.sh runner; LABEL=runner) attached as a second disk, so both rebuild in seconds
 # without rebuilding the whole rootfs. Mount it by label so it's device-order-independent and
-# needs no udev (libblkid scans /dev directly), at /opt: guestd lives at /opt/guestd/guestd and
+# needs no udev (libblkid scans /dev directly), at /opt: runner lives at /opt/runner/atelier-runner and
 # the agent at /opt/atelier (the paths the Session Manager execs). The volume is the sole
 # delivery path on every target; a missing/unmountable volume drops to a shell so the failure
 # is visible on the serial console. /opt exists in the rootfs (read-only) and the mount shadows
 # it — a runtime `mkdir` there would EROFS-fail (and, under `set -e`, kill PID 1), so we don't.
-if mount -t ext4 -o ro -L guestd /opt 2>/dev/null && [ -x /opt/guestd/guestd ]; then
-  echo "atelier guest init: starting guestd from volume (LABEL=guestd, /opt) ..."
-  exec /opt/guestd/guestd
+if mount -t ext4 -o ro -L runner /opt 2>/dev/null && [ -x /opt/runner/atelier-runner ]; then
+  echo "atelier guest init: starting runner from volume (LABEL=runner, /opt) ..."
+  exec /opt/runner/atelier-runner
 fi
-echo "atelier guest init: guest volume (LABEL=guestd) not mounted — dropping to shell"
+echo "atelier guest init: guest volume (LABEL=runner) not mounted — dropping to shell"
 exec /bin/sh

@@ -25,7 +25,7 @@ type frame struct {
 
 // TestHandlerNotificationsThenResponse proves a handler can stream notifications
 // over the same connection while it runs, and that they arrive before the final
-// response, in order — the plumbing guestd's exec method relies on.
+// response, in order — the plumbing runner's exec method relies on.
 func TestHandlerNotificationsThenResponse(t *testing.T) {
 	srv := NewServer(slog.New(slog.NewTextHandler(io.Discard, nil)))
 	srv.Register("exec", func(ctx context.Context, _ json.RawMessage) (any, error) {

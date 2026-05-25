@@ -20,7 +20,7 @@ only ~940 MB free for user work.
 Two things get conflated under "handle package installs":
 
 1. **Tool binaries** (`node`, `pip`, `uv`, `npm`) — immutable runtime. These belong baked into the
-   ro image surface (rootfs / the `/opt` volume), exactly like `guestd` + the agent ship today. Not
+   ro image surface (rootfs / the `/opt` volume), exactly like `runner` + the agent ship today. Not
    the interesting question.
 2. **What installs *produce*** — the download cache (wheels/tarballs) and the resolved install tree
    (`site-packages`, `node_modules`). This is the real design question: where do these land so that
@@ -71,8 +71,8 @@ overlay.
 
 ## 3. Map onto Atelier's volumes
 
-- **lowerdir** → ship the warm cache on a ro volume, like `guestd`/agent ride `/opt` today
-  (`image/build.sh guestd`, mounted in `image/guest/init.sh`). Or attach as a separate ro disk.
+- **lowerdir** → ship the warm cache on a ro volume, like `runner`/agent ride `/opt` today
+  (`image/build.sh runner`, mounted in `image/guest/init.sh`). Or attach as a separate ro disk.
 - **upperdir + workdir** → carve from `/sessions/<tag>` (e.g. `/sessions/<tag>/.cache-upper` +
   `.cache-work`). overlayfs requires `upper` and `workdir` on the **same filesystem**, both
   writeable — `/sessions` already is.

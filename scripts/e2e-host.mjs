@@ -6,7 +6,7 @@
 // Neither boots the *shipped* broker and
 // drives every door the way the product does. This harness does: it builds (or reuses) build/<config>/,
 // spawns the real `host` over a unix socket, boots a real VM via VZ, and exercises all 12 protocol
-// doors + the in-guest agent loop end to end through the `vmctl` dev CLI — the same Hop-2 wire the
+// doors + the in-guest agent loop end to end through the `atelierctl` dev CLI — the same Hop-2 wire the
 // desktop app uses.
 //
 // It mirrors build-all.mjs: zero-dep Node, the same logging helpers, --config/--skip-build flags,
@@ -51,7 +51,7 @@ const isMac = process.platform === 'darwin';
 const exe = isWin ? '.exe' : '';
 const target = isMac ? 'darwin-arm64-vz' : 'windows-amd64-hyperv';
 const rootfsName = isMac ? 'rootfs.raw' : 'rootfs.vhd';
-const guestdName = isMac ? 'guestd.raw' : 'guestd.vhd'; // guest payload volume: guestd + agent (not baked into rootfs)
+const runnerName = isMac ? 'runner.raw' : 'runner.vhd'; // guest payload volume: runner + agent (not baked into rootfs)
 
 // ----- args ---------------------------------------------------------------------------------------
 
@@ -69,14 +69,14 @@ for (const a of process.argv.slice(2)) {
 }
 
 const config = flags.config;
-const ADDR = '/tmp/atelier-e2e-host.sock';
+const ADDR = '/tmp/atelierd-e2e.sock';
 // Both logs land in build/<config>/, sharing one filename-safe timestamp so a run's pair is obvious.
 const stamp = new Date().toISOString().replace(/:/g, '-').replace(/\..+$/, ''); // 2026-05-24T15-30-45
 const LOG_FILE = rel('build', config, `e2e-host-${stamp}.log`);
 const BROKER_LOG = rel('build', config, `e2e-host-${stamp}.broker.log`);
 const CONSOLE_LOG = rel('build', config, `e2e-host-${stamp}.console.log`); // distilled guest kernel/console
-const HOST = rel('build', config, `host${exe}`);
-const VMCTL = rel('build', config, `vmctl${exe}`);
+const HOST = rel('build', config, `atelierd${exe}`);
+const VMCTL = rel('build', config, `atelierctl${exe}`);
 const BUNDLE = rel('build', config, 'image', target);
 
 // ----- tee all stdout/stderr to the timestamped log ----------------------------------------------
@@ -143,10 +143,10 @@ function run(cmd, args) {
   });
 }
 
-// vmctl drives one door. vmctl wants the subcommand FIRST (a leading "-" makes it fall back to
-// getStatus), so -addr is injected right after it. For `exec`, vmctl's own exit status IS the guest
+// atelierctl drives one door. atelierctl wants the subcommand FIRST (a leading "-" makes it fall back to
+// getStatus), so -addr is injected right after it. For `exec`, atelierctl's own exit status IS the guest
 // exit code; for null-result doors it prints "ok (<method>)" and exits 0.
-function vmctl(sub, args = [], { timeout = 30000 } = {}) {
+function atelierctl(sub, args = [], { timeout = 30000 } = {}) {
   const res = spawnSync(VMCTL, [sub, '-addr', ADDR, ...args], {
     cwd: repoRoot,
     encoding: 'utf8',
@@ -198,28 +198,28 @@ async function readHostRetry(p, tries = 6, ms = 200) {
 // ----- build / preflight --------------------------------------------------------------------------
 
 function bundleComplete() {
-  return ['vmlinuz', 'initrd', rootfsName, guestdName].every((f) => fs.existsSync(path.join(BUNDLE, f)));
+  return ['vmlinuz', 'initrd', rootfsName, runnerName].every((f) => fs.existsSync(path.join(BUNDLE, f)));
 }
 
 async function ensureBuild() {
   if (flags.skipBuild) {
     section('Preflight (reusing build, --skip-build)');
     for (const [label, p] of [
-      ['host', HOST],
-      ['vmctl', VMCTL],
+      ['atelierd', HOST],
+      ['atelierctl', VMCTL],
     ]) {
       if (!fs.existsSync(p)) die(`${label} not found at ${p} — run: npm run build:all -- --config=${config} --only=host`);
     }
     if (!bundleComplete()) die(`image bundle incomplete at ${BUNDLE} — run: npm run build:all -- --config=${config} --only=image`);
     info(`host:   ${HOST}`);
-    info(`vmctl:  ${VMCTL}`);
+    info(`atelierctl:  ${VMCTL}`);
     info(`bundle: ${BUNDLE}`);
     if (isMac) warn('--skip-build trusts the existing broker is codesigned; VZ refuses an unsigned host.');
     return;
   }
 
   // build-all --only=host does the cgo build + (on macOS) the codesign VZ requires.
-  section(`Build host + vmctl (${config})`);
+  section(`Build atelierd + atelierctl (${config})`);
   await run('node', [rel('scripts', 'build-all.mjs'), `--config=${config}`, '--only=host', '--no-verify']);
 
   if (flags.rebuildImage || !bundleComplete()) {
@@ -242,7 +242,7 @@ function startBroker() {
 }
 async function waitForBroker() {
   for (let i = 0; i < 50; i++) {
-    if (vmctl('getStatus', [], { timeout: 3000 }).status === 0) return;
+    if (atelierctl('getStatus', [], { timeout: 3000 }).status === 0) return;
     if (broker && broker.exitCode !== null) {
       die(`broker exited early (code ${broker.exitCode}); see ${BROKER_LOG}:\n${tail(fs.readFileSync(BROKER_LOG, 'utf8'))}`);
     }
@@ -251,7 +251,7 @@ async function waitForBroker() {
   die(`broker did not come up on ${ADDR}; see ${BROKER_LOG}`);
 }
 function stopBroker() {
-  vmctl('stopVM', ['-id', 'vm0'], { timeout: 30000 });
+  atelierctl('stopVM', ['-id', 'vm0'], { timeout: 30000 });
   if (broker && broker.exitCode === null) broker.kill('SIGTERM');
 }
 
@@ -293,58 +293,58 @@ async function runBattery(work) {
   section('Doors: control plane (no VM)');
 
   await test('getStatus reports a fresh host', () => {
-    const r = vmctl('getStatus');
+    const r = atelierctl('getStatus');
     assert(r.status === 0, `exit ${r.status}: ${r.err}`);
     const st = JSON.parse(r.out);
-    assert(st.service === 'atelier-host', `service=${st.service}`);
+    assert(st.service === 'atelierd', `service=${st.service}`);
     assert(st.platform.includes(isMac ? 'darwin' : 'windows'), `platform=${st.platform}`);
     assert(st.vmCount === 0, `vmCount=${st.vmCount} (expected 0)`);
     return `${st.service} ${st.version} ${st.platform}`;
   });
 
   await test('createVM registers vm0', () => {
-    const r = vmctl('createVM', [
+    const r = atelierctl('createVM', [
       '-id', 'vm0',
       '-kernel', path.join(BUNDLE, 'vmlinuz'),
       '-initrd', path.join(BUNDLE, 'initrd'),
       '-rootfs', path.join(BUNDLE, rootfsName),
-      '-guestd', path.join(BUNDLE, guestdName),
+      '-runner', path.join(BUNDLE, runnerName),
     ]);
     assert(r.status === 0, `${r.err}`);
-    assert(JSON.parse(vmctl('getStatus').out).vmCount === 1, 'vmCount did not become 1');
+    assert(JSON.parse(atelierctl('getStatus').out).vmCount === 1, 'vmCount did not become 1');
   });
 
   section('Doors: boot + compute');
 
   await test('startVM boots the guest', () => {
-    const r = vmctl('startVM', ['-id', 'vm0'], { timeout: 180000 });
+    const r = atelierctl('startVM', ['-id', 'vm0'], { timeout: 180000 });
     assert(r.status === 0, `boot failed: ${r.err}\n${tail(fs.readFileSync(BROKER_LOG, 'utf8'))}`);
   });
 
   await test('setTime pushes the host wall clock into the guest', () => {
     // The slim virtual-hwe kernel has no RTC and VZ offers no time-sync, so the
     // guest boots at 1970; the host must push its clock or the agent's TLS fails.
-    const r = vmctl('setTime', ['-id', 'vm0']);
+    const r = atelierctl('setTime', ['-id', 'vm0']);
     assert(r.status === 0, `setTime failed: ${r.err}`);
-    const y = vmctl('exec', ['-id', 'vm0', '--', 'date', '-u', '+%Y']);
+    const y = atelierctl('exec', ['-id', 'vm0', '--', 'date', '-u', '+%Y']);
     assert(y.status === 0, `date exit ${y.status}: ${y.err}`);
     const year = parseInt(y.out.trim(), 10);
     assert(year >= 2026, `guest clock not seeded: year ${JSON.stringify(y.out)}`);
   });
 
   await test('exec runs a command and streams output', () => {
-    const r = vmctl('exec', ['-id', 'vm0', '--', 'uname', '-s']);
+    const r = atelierctl('exec', ['-id', 'vm0', '--', 'uname', '-s']);
     assert(r.status === 0, `exit ${r.status}: ${r.err}`);
     assert(r.out.includes('Linux'), `unexpected output: ${JSON.stringify(r.out)}`);
   });
 
   await test('exec propagates the guest exit code', () => {
-    const r = vmctl('exec', ['-id', 'vm0', '--', 'sh', '-c', 'exit 7']);
+    const r = atelierctl('exec', ['-id', 'vm0', '--', 'sh', '-c', 'exit 7']);
     assert(r.status === 7, `expected exit 7, got ${r.status}`);
   });
 
   await test('exec honors -cwd and -env', () => {
-    const r = vmctl('exec', ['-id', 'vm0', '-cwd', '/tmp', '-env', 'FOO=bar', '--', 'sh', '-c', 'pwd; echo $FOO']);
+    const r = atelierctl('exec', ['-id', 'vm0', '-cwd', '/tmp', '-env', 'FOO=bar', '--', 'sh', '-c', 'pwd; echo $FOO']);
     assert(r.status === 0, `exit ${r.status}: ${r.err}`);
     assert(r.out.includes('/tmp') && r.out.includes('bar'), `cwd/env not applied: ${JSON.stringify(r.out)}`);
   });
@@ -359,8 +359,8 @@ async function runBattery(work) {
     let out = '';
     child.stdout.on('data', (d) => (out += d));
     child.stderr.on('data', () => {});
-    await sleep(1500); // let guestd register the session before we push input
-    const fed = vmctl('execInput', ['-id', 'vm0', '-session', sess, '-content', 'STDIN_ECHO\n']);
+    await sleep(1500); // let runner register the session before we push input
+    const fed = atelierctl('execInput', ['-id', 'vm0', '-session', sess, '-content', 'STDIN_ECHO\n']);
     assert(fed.status === 0, `execInput rpc failed: ${fed.err}`);
     const code = await new Promise((resolve) => {
       const to = setTimeout(() => {
@@ -379,9 +379,9 @@ async function runBattery(work) {
   section('Doors: sandbox seccomp (F-13, closing F-01)');
 
   await test('sandboxed exec runs under a seccomp filter', () => {
-    // vmctl exec is the non-privileged (bwrap) path, so the cBPF filter is installed. /proc/self
+    // atelierctl exec is the non-privileged (bwrap) path, so the cBPF filter is installed. /proc/self
     // is the grep process inside that sandbox: Seccomp: 2 = SECCOMP_MODE_FILTER.
-    const r = vmctl('exec', ['-id', 'vm0', '--', 'grep', '-E', '^(Seccomp|NoNewPrivs):', '/proc/self/status']);
+    const r = atelierctl('exec', ['-id', 'vm0', '--', 'grep', '-E', '^(Seccomp|NoNewPrivs):', '/proc/self/status']);
     assert(r.status === 0, `exit ${r.status}: ${r.err}`);
     assert(/Seccomp:\s*2/.test(r.out), `expected seccomp filter mode (Seccomp: 2): ${JSON.stringify(r.out)}`);
     assert(/NoNewPrivs:\s*1/.test(r.out), `expected NoNewPrivs: 1: ${JSON.stringify(r.out)}`);
@@ -394,7 +394,7 @@ async function runBattery(work) {
     // the filter this returned uid=0 with all caps — the user-namespace escalation primitive.
     const py =
       "import ctypes;l=ctypes.CDLL(None,use_errno=True);r=l.unshare(0x10000000);print('rc=%d errno=%d'%(r,ctypes.get_errno()))";
-    const r = vmctl('exec', ['-id', 'vm0', '--', 'python3', '-c', py]);
+    const r = atelierctl('exec', ['-id', 'vm0', '--', 'python3', '-c', py]);
     assert(r.status === 0, `python probe failed: exit ${r.status}: ${r.err}`);
     assert(/rc=-1 errno=1/.test(r.out), `unshare(CLONE_NEWUSER) was not EPERM-denied: ${JSON.stringify(r.out)}${r.err}`);
     return 'unshare(CLONE_NEWUSER) → EPERM';
@@ -403,101 +403,101 @@ async function runBattery(work) {
   section('Doors: legacy workspace + Files door (host<->guest bridge)');
 
   await test('attachWorkspace (legacy) shares the folder at /workspace', () => {
-    const r = vmctl('attachWorkspace', ['-id', 'vm0', '-path', path.join(work, 'A')]);
+    const r = atelierctl('attachWorkspace', ['-id', 'vm0', '-path', path.join(work, 'A')]);
     assert(r.status === 0, `${r.err}`);
-    const ls = vmctl('exec', ['-id', 'vm0', '--', 'cat', '/workspace/a.txt']);
+    const ls = atelierctl('exec', ['-id', 'vm0', '--', 'cat', '/workspace/a.txt']);
     assert(ls.out.includes('alpha'), `a.txt not visible at /workspace: ${ls.out}${ls.err}`);
   });
 
   await test('writeFile (host Files door) is visible to guest exec over the fs share', () => {
-    const w = vmctl('writeFile', ['-path', 'from-host.txt', '-content', 'HOST_WROTE_THIS']);
+    const w = atelierctl('writeFile', ['-path', 'from-host.txt', '-content', 'HOST_WROTE_THIS']);
     assert(w.status === 0, `${w.err}`);
-    const r = vmctl('exec', ['-id', 'vm0', '--', 'cat', '/workspace/from-host.txt']);
+    const r = atelierctl('exec', ['-id', 'vm0', '--', 'cat', '/workspace/from-host.txt']);
     assert(r.out.includes('HOST_WROTE_THIS'), `host write not seen in guest: ${r.out}${r.err}`);
   });
 
   await test('readFile (host Files door) sees what guest exec wrote', () => {
-    const g = vmctl('exec', ['-id', 'vm0', '--', 'sh', '-c', 'printf GUEST_WROTE_THIS > /workspace/from-guest.txt']);
+    const g = atelierctl('exec', ['-id', 'vm0', '--', 'sh', '-c', 'printf GUEST_WROTE_THIS > /workspace/from-guest.txt']);
     assert(g.status === 0, `guest write failed: ${g.err}`);
-    const r = vmctl('readFile', ['-path', 'from-guest.txt']);
+    const r = atelierctl('readFile', ['-path', 'from-guest.txt']);
     assert(r.status === 0, `${r.err}`);
     assert(r.out.includes('GUEST_WROTE_THIS'), `readFile returned: ${JSON.stringify(r.out)}`);
   });
 
   await test('Files door jails path traversal', () => {
-    const r = vmctl('readFile', ['-path', '../../../../etc/passwd']);
+    const r = atelierctl('readFile', ['-path', '../../../../etc/passwd']);
     assert(r.status !== 0, 'traversal was NOT rejected');
     assert(/escape|relative|workspace/i.test(r.err), `unexpected error text: ${r.err}`);
   });
 
   await test('detachWorkspace (legacy) closes the Files door', () => {
-    const r = vmctl('detachWorkspace', ['-id', 'vm0']);
+    const r = atelierctl('detachWorkspace', ['-id', 'vm0']);
     assert(r.status === 0, `${r.err}`);
-    assert(vmctl('readFile', ['-path', 'a.txt']).status !== 0, 'Files door still open after detach');
+    assert(atelierctl('readFile', ['-path', 'a.txt']).status !== 0, 'Files door still open after detach');
   });
 
   section('Doors: multi-session shares (the new model — concurrent /sessions/<tag>)');
 
   const attach = (tag, dir, tgt) =>
-    vmctl('attachWorkspace', ['-id', 'vm0', '-path', path.join(work, dir), '-tag', tag, '-target', tgt]);
+    atelierctl('attachWorkspace', ['-id', 'vm0', '-path', path.join(work, dir), '-tag', tag, '-target', tgt]);
 
   await test('many tagged shares mount concurrently at chosen targets', () => {
     assert(attach('s1', 's1', '/sessions/s1').status === 0, 's1 attach failed');
     assert(attach('s2', 's2', '/sessions/s2').status === 0, 's2 attach failed');
     assert(attach('proj', 'proj', '/mnt/proj').status === 0, 'custom-target attach failed');
-    assert(vmctl('exec', ['-id', 'vm0', '--', 'cat', '/sessions/s1/b.txt']).out.includes('bravo'), 's1 not mounted');
-    assert(vmctl('exec', ['-id', 'vm0', '--', 'cat', '/sessions/s2/c.txt']).out.includes('charlie'), 's2 not mounted');
+    assert(atelierctl('exec', ['-id', 'vm0', '--', 'cat', '/sessions/s1/b.txt']).out.includes('bravo'), 's1 not mounted');
+    assert(atelierctl('exec', ['-id', 'vm0', '--', 'cat', '/sessions/s2/c.txt']).out.includes('charlie'), 's2 not mounted');
     // The new model isn't tied to /sessions: target is arbitrary (here /mnt/proj).
-    assert(vmctl('exec', ['-id', 'vm0', '--', 'cat', '/mnt/proj/p.txt']).out.includes('project'), 'custom target not mounted');
+    assert(atelierctl('exec', ['-id', 'vm0', '--', 'cat', '/mnt/proj/p.txt']).out.includes('project'), 'custom target not mounted');
   });
 
   await test('sessions are isolated from one another', () => {
-    assert(!vmctl('exec', ['-id', 'vm0', '--', 'ls', '/sessions/s1']).out.includes('c.txt'), 's2 content leaked into s1');
-    assert(!vmctl('exec', ['-id', 'vm0', '--', 'ls', '/sessions/s2']).out.includes('b.txt'), 's1 content leaked into s2');
+    assert(!atelierctl('exec', ['-id', 'vm0', '--', 'ls', '/sessions/s1']).out.includes('c.txt'), 's2 content leaked into s1');
+    assert(!atelierctl('exec', ['-id', 'vm0', '--', 'ls', '/sessions/s2']).out.includes('b.txt'), 's1 content leaked into s2');
   });
 
   await test('a session share is read-write host<->guest (no Files door)', async () => {
     // host -> guest: write the host backing dir directly, guest sees it through the share.
     fs.writeFileSync(path.join(work, 's1', 'host-seed.txt'), 'FROM_HOST_S1');
     assert(
-      vmctl('exec', ['-id', 'vm0', '--', 'cat', '/sessions/s1/host-seed.txt']).out.includes('FROM_HOST_S1'),
+      atelierctl('exec', ['-id', 'vm0', '--', 'cat', '/sessions/s1/host-seed.txt']).out.includes('FROM_HOST_S1'),
       'host write not seen in session',
     );
     // guest -> host: guest writes via the share; verify on the host backing dir (readFile can't —
     // the Files door is jailed to the legacy workspace, which is now detached).
-    const g = vmctl('exec', ['-id', 'vm0', '--', 'sh', '-c', 'printf FROM_GUEST_S1 > /sessions/s1/guest-out.txt']);
+    const g = atelierctl('exec', ['-id', 'vm0', '--', 'sh', '-c', 'printf FROM_GUEST_S1 > /sessions/s1/guest-out.txt']);
     assert(g.status === 0, `guest write failed: ${g.err}`);
     const got = await readHostRetry(path.join(work, 's1', 'guest-out.txt'));
     assert(got.includes('FROM_GUEST_S1'), `guest write not on host backing dir: ${JSON.stringify(got)}`);
-    assert(vmctl('readFile', ['-path', 'guest-out.txt']).status !== 0, 'Files door unexpectedly reached a session share');
+    assert(atelierctl('readFile', ['-path', 'guest-out.txt']).status !== 0, 'Files door unexpectedly reached a session share');
   });
 
   await test('detach is sibling-safe (one session out, the rest survive)', () => {
-    assert(vmctl('detachWorkspace', ['-id', 'vm0', '-tag', 's1']).status === 0, 's1 detach failed');
-    assert(!vmctl('exec', ['-id', 'vm0', '--', 'cat', '/sessions/s1/b.txt']).out.includes('bravo'), 's1 survived detach');
-    assert(vmctl('exec', ['-id', 'vm0', '--', 'cat', '/sessions/s2/c.txt']).out.includes('charlie'), 'sibling s2 lost after s1 detach');
-    assert(vmctl('exec', ['-id', 'vm0', '--', 'cat', '/mnt/proj/p.txt']).out.includes('project'), 'sibling proj lost after s1 detach');
-    assert(vmctl('detachWorkspace', ['-id', 'vm0', '-tag', 's2']).status === 0, 's2 detach failed');
-    assert(vmctl('detachWorkspace', ['-id', 'vm0', '-tag', 'proj']).status === 0, 'proj detach failed');
+    assert(atelierctl('detachWorkspace', ['-id', 'vm0', '-tag', 's1']).status === 0, 's1 detach failed');
+    assert(!atelierctl('exec', ['-id', 'vm0', '--', 'cat', '/sessions/s1/b.txt']).out.includes('bravo'), 's1 survived detach');
+    assert(atelierctl('exec', ['-id', 'vm0', '--', 'cat', '/sessions/s2/c.txt']).out.includes('charlie'), 'sibling s2 lost after s1 detach');
+    assert(atelierctl('exec', ['-id', 'vm0', '--', 'cat', '/mnt/proj/p.txt']).out.includes('project'), 'sibling proj lost after s1 detach');
+    assert(atelierctl('detachWorkspace', ['-id', 'vm0', '-tag', 's2']).status === 0, 's2 detach failed');
+    assert(atelierctl('detachWorkspace', ['-id', 'vm0', '-tag', 'proj']).status === 0, 'proj detach failed');
   });
 
   await test('detaching an unknown tag is rejected', () => {
-    assert(vmctl('detachWorkspace', ['-id', 'vm0', '-tag', 'nope']).status !== 0, 'unknown-tag detach was not rejected');
+    assert(atelierctl('detachWorkspace', ['-id', 'vm0', '-tag', 'nope']).status !== 0, 'unknown-tag detach was not rejected');
   });
 
   section('Doors: egress jail');
 
   await test('setEgressPolicy accepts deny-all and an allowlist', () => {
-    assert(vmctl('setEgressPolicy', ['-allow', '']).status === 0, 'deny-all rejected');
-    assert(vmctl('setEgressPolicy', ['-allow', 'pypi.org,files.pythonhosted.org']).status === 0, 'allowlist rejected');
+    assert(atelierctl('setEgressPolicy', ['-allow', '']).status === 0, 'deny-all rejected');
+    assert(atelierctl('setEgressPolicy', ['-allow', 'pypi.org,files.pythonhosted.org']).status === 0, 'allowlist rejected');
   });
 
   await test('default-deny blocks a non-allowlisted host', () => {
-    vmctl('setEgressPolicy', ['-allow', '']); // deny all
+    atelierctl('setEgressPolicy', ['-allow', '']); // deny all
     const probe =
       "fetch('https://example.com',{signal:AbortSignal.timeout(4000)})" +
       ".then(r=>console.log('REACHED '+r.status)).catch(e=>console.log('BLOCKED '+(e&&e.name)))";
-    const r = vmctl('exec', ['-id', 'vm0', '--', 'node', '-e', probe], { timeout: 30000 });
+    const r = atelierctl('exec', ['-id', 'vm0', '--', 'node', '-e', probe], { timeout: 30000 });
     assert((r.out + r.err).includes('BLOCKED'), `egress was not blocked: ${r.out}${r.err}`);
   });
 
@@ -507,16 +507,16 @@ async function runBattery(work) {
     assert(process.env.ANTHROPIC_API_KEY, 'ANTHROPIC_API_KEY is not set in this environment');
     const token = 'ATELIER_E2E_OK_4710';
     const taskText = `Respond with exactly this token and nothing else: ${token}`;
-    // `vmctl agent` opens egress to api.anthropic.com, then execs the in-guest agent CLI; a real
+    // `atelierctl agent` opens egress to api.anthropic.com, then execs the in-guest agent CLI; a real
     // model round-trip through the jail is the positive egress proof.
-    const r = vmctl('agent', ['-id', 'vm0', '--', taskText], { timeout: 180000 });
+    const r = atelierctl('agent', ['-id', 'vm0', '--', taskText], { timeout: 180000 });
     assert(r.status === 0, `agent exited ${r.status}: ${tail(r.err)}`);
     assert((r.out + r.err).includes(token), `agent output missing token:\n${tail(r.out + r.err)}`);
   });
 
   await test('serve-mode agent loop: a persistent turn over execInput (the desktop path)', async () => {
     assert(process.env.ANTHROPIC_API_KEY, 'ANTHROPIC_API_KEY is not set in this environment');
-    // The test above drives `vmctl agent` (one-shot runOnce). The DESKTOP instead runs a PERSISTENT
+    // The test above drives `atelierctl agent` (one-shot runOnce). The DESKTOP instead runs a PERSISTENT
     // loop — `cli-guest --serve`, fed user turns over execInput as NDJSON (the Session Manager). That
     // path had zero e2e coverage, which is how an env-drift regression shipped: HOME on a non-writable
     // dir → the SDK's native `claude` binary "exists but failed to launch". Reproduce the desktop path:
@@ -525,16 +525,16 @@ async function runBattery(work) {
     const tag = 'serve';
     const gpath = `/sessions/${tag}`;
     fs.mkdirSync(path.join(work, tag), { recursive: true });
-    vmctl('setEgressPolicy', ['-allow', 'api.anthropic.com']); // serve's only escape (vmctl exec won't set it)
-    vmctl('setTime', ['-id', 'vm0']); // the model's TLS needs a valid guest clock
+    atelierctl('setEgressPolicy', ['-allow', 'api.anthropic.com']); // serve's only escape (atelierctl exec won't set it)
+    atelierctl('setTime', ['-id', 'vm0']); // the model's TLS needs a valid guest clock
     assert(
-      vmctl('attachWorkspace', ['-id', 'vm0', '-path', path.join(work, tag), '-tag', tag, '-target', gpath]).status === 0,
+      atelierctl('attachWorkspace', ['-id', 'vm0', '-path', path.join(work, tag), '-tag', tag, '-target', gpath]).status === 0,
       'serve share attach failed',
     );
 
     const sess = 'e2e-serve';
     const token = 'ATELIER_SERVE_OK_8842';
-    // KEEP IN SYNC with apps/desktop/src/main/sessions/manager.ts startLoop (itself mirroring vmctl
+    // KEEP IN SYNC with apps/desktop/src/main/sessions/manager.ts startLoop (itself mirroring atelierctl
     // agent's genv): the writable HOME/TMPDIR/XDG_CACHE_HOME are load-bearing — the non-root agent
     // (uid 1001, /opt read-only) can't launch the SDK's native binary without them.
     const env = [
@@ -550,8 +550,8 @@ async function runBattery(work) {
     const child = spawn(
       VMCTL,
       [
-        'exec', '-addr', ADDR, '-id', 'vm0', '-session', sess, '-cwd', '/opt/atelier/packages/agent', ...env,
-        '--', '/opt/atelier/packages/agent/node_modules/.bin/tsx', 'src/cli-guest.ts', '--serve', '--workspace', gpath,
+        'exec', '-addr', ADDR, '-id', 'vm0', '-session', sess, '-cwd', '/opt/atelier/packages/artisan', ...env,
+        '--', '/opt/atelier/packages/artisan/node_modules/.bin/tsx', 'src/cli-guest.ts', '--serve', '--workspace', gpath,
       ],
       { cwd: repoRoot, env: process.env },
     );
@@ -569,7 +569,7 @@ async function runBattery(work) {
           try {
             events.push(JSON.parse(line));
           } catch {
-            /* vmctl/guest noise that isn't a wire event */
+            /* atelierctl/guest noise that isn't a wire event */
           }
       }
     });
@@ -595,14 +595,14 @@ async function runBattery(work) {
       });
 
     try {
-      await sleep(1500); // let guestd register the session's stdin channel (mirrors the stdin-feed test)
+      await sleep(1500); // let runner register the session's stdin channel (mirrors the stdin-feed test)
       // If the loop crashed on launch (the native-binary regression this guards), report it plainly.
       const early = events.find((e) => e.type === 'error');
       assert(!early, `loop errored on launch: ${early && early.message}\n${tail(errOut)}`);
       assert(exited === null, `loop exited (code ${exited}) before first turn\n${tail(errOut)}`);
 
       const turn = JSON.stringify({ type: 'user', text: `Respond with exactly this token and nothing else: ${token}` });
-      const fed = vmctl('execInput', ['-id', 'vm0', '-session', sess, '-content', turn + '\n']);
+      const fed = atelierctl('execInput', ['-id', 'vm0', '-session', sess, '-content', turn + '\n']);
       assert(fed.status === 0, `execInput failed: ${fed.err}`);
       await waitEvent((e) => e.type === 'result' || e.type === 'turn_done', 180000, 'turn result');
 
@@ -615,7 +615,7 @@ async function runBattery(work) {
       assert(sawToken, `token missing from loop output; saw [${events.map((e) => e.type).join(', ')}]\n${tail(errOut)}`);
 
       // Clean shutdown: {"type":"close"} ends the input queue → the loop exits 0 (hibernate's path too).
-      vmctl('execInput', ['-id', 'vm0', '-session', sess, '-content', '{"type":"close"}\n']);
+      atelierctl('execInput', ['-id', 'vm0', '-session', sess, '-content', '{"type":"close"}\n']);
       const code = await new Promise((resolve) => {
         const started = Date.now();
         const poll = () => {
@@ -631,7 +631,7 @@ async function runBattery(work) {
       assert(code === 0, `serve loop did not exit cleanly on close (got ${code})`);
     } finally {
       if (exited === null) child.kill('SIGKILL');
-      vmctl('detachWorkspace', ['-id', 'vm0', '-tag', tag]);
+      atelierctl('detachWorkspace', ['-id', 'vm0', '-tag', tag]);
     }
     return 'init → turn → token → clean close';
   });
@@ -639,9 +639,9 @@ async function runBattery(work) {
   section('Doors: teardown');
 
   await test('stopVM tears the guest down', () => {
-    const r = vmctl('stopVM', ['-id', 'vm0']);
+    const r = atelierctl('stopVM', ['-id', 'vm0']);
     assert(r.status === 0, `${r.err}`);
-    assert(JSON.parse(vmctl('getStatus').out).vmCount === 0, 'vmCount did not return to 0');
+    assert(JSON.parse(atelierctl('getStatus').out).vmCount === 0, 'vmCount did not return to 0');
   });
 }
 

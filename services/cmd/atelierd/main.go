@@ -1,4 +1,4 @@
-// Command host is the privileged broker service. On Windows it runs as a
+// Command atelierd is the privileged broker service. On Windows it runs as a
 // LocalSystem service exposing a named pipe (design.md §9); on other platforms it
 // runs over a unix socket for terminal-driven development.
 package main
@@ -36,10 +36,10 @@ func main() {
 		_ = ln.Close()
 	}()
 
-	log.Info("atelier-host listening", "addr", *addr)
+	log.Info("atelierd listening", "addr", *addr)
 	if err := srv.Serve(ctx, ln); err != nil {
 		log.Error("serve", "err", err)
 		os.Exit(1)
 	}
-	log.Info("atelier-host stopped")
+	log.Info("atelierd stopped")
 }

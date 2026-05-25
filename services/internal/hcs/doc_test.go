@@ -48,9 +48,9 @@ func TestMakeLCOWDocShape(t *testing.T) {
 	if att.Type != "VirtualDisk" || att.Path != `C:\boot\rootfs.vhd` {
 		t.Fatalf("root attachment wrong: %+v", att)
 	}
-	// With no guestd volume configured, there is no second disk.
+	// With no runner volume configured, there is no second disk.
 	if _, ok := doc.VirtualMachine.Devices.Scsi["0"].Attachments["1"]; ok {
-		t.Fatalf("unexpected lun1 attachment without GuestdImagePath: %+v", doc.VirtualMachine.Devices.Scsi["0"].Attachments)
+		t.Fatalf("unexpected lun1 attachment without RunnerImagePath: %+v", doc.VirtualMachine.Devices.Scsi["0"].Attachments)
 	}
 
 	// Defaults applied.
@@ -77,11 +77,11 @@ func TestMakeLCOWDocShape(t *testing.T) {
 	}
 }
 
-func TestMakeLCOWDocGuestdVolume(t *testing.T) {
+func TestMakeLCOWDocRunnerVolume(t *testing.T) {
 	raw, err := MakeLCOWDoc(DocConfig{
 		KernelFilePath:  "k",
 		RootFSPath:      `C:\boot\rootfs.vhd`,
-		GuestdImagePath: `C:\boot\guestd.vhd`,
+		RunnerImagePath: `C:\boot\runner.vhd`,
 	})
 	if err != nil {
 		t.Fatalf("MakeLCOWDoc: %v", err)
@@ -90,14 +90,14 @@ func TestMakeLCOWDocGuestdVolume(t *testing.T) {
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	// guestd volume rides controller0/lun1 (/dev/sdb), always read-only; init.sh
-	// mounts it by LABEL=guestd and execs guestd from it (it's not baked into the rootfs).
+	// runner volume rides controller0/lun1 (/dev/sdb), always read-only; init.sh
+	// mounts it by LABEL=runner and execs runner from it (it's not baked into the rootfs).
 	att := doc.VirtualMachine.Devices.Scsi["0"].Attachments["1"]
-	if att.Type != "VirtualDisk" || att.Path != `C:\boot\guestd.vhd` {
-		t.Fatalf("guestd attachment wrong: %+v", att)
+	if att.Type != "VirtualDisk" || att.Path != `C:\boot\runner.vhd` {
+		t.Fatalf("runner attachment wrong: %+v", att)
 	}
 	if !att.ReadOnly {
-		t.Fatalf("guestd volume must be read-only, got %+v", att)
+		t.Fatalf("runner volume must be read-only, got %+v", att)
 	}
 }
 

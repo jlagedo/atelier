@@ -12,7 +12,7 @@
 # coupling rule of design.md §7 holds by construction). `rootfs` builds the ext4;
 # `kernel`/`initrd` extract + pin vmlinuz/initrd from /boot of that same tree.
 #
-# Usage: image/build.sh {check|rootfs|initrd|kernel|guestd|bundle|all|clean}
+# Usage: image/build.sh {check|rootfs|initrd|kernel|runner|bundle|all|clean}
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -23,7 +23,7 @@ UBUNTU_VERSION="24.04"
 # Docker build platform, the Go cross-compile GOARCH, the disk format, and the per-target
 # output dir. Default is the Windows/Hyper-V bundle so existing invocations are unchanged.
 # --platform pins the rootfs arch to the TARGET (not the Docker host), so the apt kernel +
-# baked node_modules can never drift from the GOARCH-built guestd/gvforwarder.
+# baked node_modules can never drift from the GOARCH-built runner/gvforwarder.
 TARGET="${TARGET:-windows-amd64-hyperv}"
 case "$TARGET" in
   windows-amd64-hyperv) ARCH="x86_64";  DOCKER_PLATFORM="linux/amd64"; GOARCH="amd64"; DISK="vhd" ;;
@@ -51,7 +51,7 @@ stage_pkg() {
 
 # stage_agent_ctx assembles the in-guest agent's Docker build context in $WORK/agentctx so
 # image/agent/Dockerfile can COPY + npm-install the agent (Topology B, S5b.1). The agent is
-# packed into the guestd volume (cmd_guestd), NOT baked into the rootfs. npm install runs INSIDE
+# packed into the runner volume (cmd_runner), NOT baked into the rootfs. npm install runs INSIDE
 # that build (linux/$GOARCH via --platform) so the node_modules has the right platform binaries.
 stage_agent_ctx() {
   # protocol/src is generated (gitignored). It must exist before we stage it.
@@ -62,14 +62,14 @@ stage_agent_ctx() {
   cp agent/Dockerfile "$WORK/agentctx/Dockerfile"
   # seccomp profile + translator (F-13); the Dockerfile compiles it for the target arch.
   cp -r agent/seccomp "$WORK/agentctx/seccomp"
-  stage_pkg "$WORK/agentctx" agent
+  stage_pkg "$WORK/agentctx" artisan
   stage_pkg "$WORK/agentctx" provider
   stage_pkg "$WORK/agentctx" protocol
 }
 
 cmd_check() {
   log "target:  $TARGET (arch=$ARCH platform=$DOCKER_PLATFORM goarch=$GOARCH disk=$DISK out=$OUT)"
-  log "volume:  guestd + in-guest agent shipped together on one volume (guestd.$([ "$DISK" = raw ] && echo raw || echo vhd)), not baked into the rootfs"
+  log "volume:  runner + in-guest agent shipped together on one volume (runner.$([ "$DISK" = raw ] && echo raw || echo vhd)), not baked into the rootfs"
   log "tool readiness:"
   for t in docker go qemu-img sha256sum; do
     if have "$t"; then printf '  ok    %s\n' "$t"; else printf '  MISSING %s\n' "$t"; fi
@@ -89,7 +89,7 @@ ensure_tree() {
   have docker || die "docker not found (needed to build/export the Ubuntu rootfs + kernel)"
   mkdir -p "$WORK/rootfs" "$OUT"
 
-  # The rootfs no longer COPYs the agent (it ships on the guestd volume — cmd_guestd), so its
+  # The rootfs no longer COPYs the agent (it ships on the runner volume — cmd_runner), so its
   # build context is just image/rootfs/ (the Dockerfile). No package staging needed here.
   log "building rootfs container image ($ROOTFS_TAG, $DOCKER_PLATFORM)"
   docker build --platform "$DOCKER_PLATFORM" -t "$ROOTFS_TAG" rootfs
@@ -106,8 +106,8 @@ ensure_tree() {
   rm -rf "$WORK/rootfs"; mkdir -p "$WORK/rootfs"
   tar -x -C "$WORK/rootfs" -f "$WORK/rootfs.tar"
 
-  # gvforwarder is baked into the rootfs (installed by the imager step below); guestd + the
-  # in-guest agent are NOT — they ship on the guestd volume built separately by cmd_guestd, so
+  # gvforwarder is baked into the rootfs (installed by the imager step below); runner + the
+  # in-guest agent are NOT — they ship on the runner volume built separately by cmd_runner, so
   # they iterate without an image rebuild. gvforwarder needs the Go toolchain + $WORK/bin.
   have go || die "go not found (needed to cross-compile the guest network forwarder, gvforwarder)"
   mkdir -p "$WORK/bin"
@@ -115,7 +115,7 @@ ensure_tree() {
   # Guest network forwarder (gvforwarder, design.md §8 Hop 3 channel 2 — S4.1):
   # gvisor-tap-vsock's cmd/vm at the exact version services/go.mod pins (go install
   # pkg@version resolves against the library's own module, independent of our go.mod).
-  # guestd supervises it at boot, now with -preexisting since networking is static (S4.1).
+  # runner supervises it at boot, now with -preexisting since networking is static (S4.1).
   local gvbin gvver gvpath gvsrc
   gvver="$(cd ../services && go list -m -f '{{.Version}}' github.com/containers/gvisor-tap-vsock)"
   log "building guest network forwarder (gvforwarder ${gvver}, linux/$GOARCH static)"
@@ -223,7 +223,7 @@ cmd_bundle() {
   mkdir -p "$OUT"
   log "assembling bundle in $OUT/ (pin kernel+initrd+rootfs with sha256 .origin markers)"
   written=0
-  for f in vmlinuz initrd rootfs.vhd rootfs.raw rootfs.ext4 guestd.vhd guestd.raw; do
+  for f in vmlinuz initrd rootfs.vhd rootfs.raw rootfs.ext4 runner.vhd runner.raw; do
     if [ -f "$OUT/$f" ]; then
       sha256sum "$OUT/$f" | awk '{print $1}' > "$OUT/$f.origin"
       printf '  pinned %s -> %s.origin\n' "$f" "$f"
@@ -243,26 +243,26 @@ built:  $(date -u +%Y-%m-%dT%H:%M:%SZ)
 EOF
 }
 
-# cmd_guestd builds the guestd volume — one ro ext4 shipped as a separate disk so guestd AND the
+# cmd_runner builds the runner volume — one ro ext4 shipped as a separate disk so runner AND the
 # in-guest agent iterate in seconds without rebuilding the rootfs (design.md §7/§8). It carries
-# both: guestd (/opt/guestd/guestd, the vsock RPC daemon) and the agent (/opt/atelier, Topology B
-# — code + node_modules), plus the sandbox seccomp filter (/opt/guestd/seccomp.bpf, F-13) compiled
+# both: runner (/opt/runner/atelier-runner, the vsock RPC daemon) and the agent (/opt/atelier, Topology B
+# — code + node_modules), plus the sandbox seccomp filter (/opt/runner/seccomp.bpf, F-13) compiled
 # for the target arch in the agent image. init.sh mounts the volume ro at /opt. Self-contained vs
 # the rootfs (no ensure_tree, no apt/kernel), but the agent's node_modules DO need a target-arch
 # npm install, so this builds image/agent/Dockerfile (npm ci) and exports /opt/atelier from it. Cross-compile
-# guestd, pack a labeled ext4 INSIDE the imager (perms preserved, sized from the staged tree),
+# runner, pack a labeled ext4 INSIDE the imager (perms preserved, sized from the staged tree),
 # then emit raw (VZ attaches as-is) or convert to VHD (HCS SCSI disk), mirroring cmd_rootfs.
-cmd_guestd() {
-  have go     || die "go not found (needed to cross-compile guestd, services/cmd/guestd)"
+cmd_runner() {
+  have go     || die "go not found (needed to cross-compile runner, services/cmd/runner)"
   have docker || die "docker not found (needed to build the agent payload + mke2fs the volume)"
   mkdir -p "$WORK/bin" "$OUT"
-  log "building guest daemon (guestd, linux/$GOARCH static) for the guestd volume"
-  local gout; gout="$(pwd)/$WORK/bin/guestd"
-  ( cd ../services && env GOOS=linux GOARCH="$GOARCH" CGO_ENABLED=0 go build -trimpath -o "$gout" ./cmd/guestd )
+  log "building guest daemon (runner, linux/$GOARCH static) for the runner volume"
+  local gout; gout="$(pwd)/$WORK/bin/runner"
+  ( cd ../services && env GOOS=linux GOARCH="$GOARCH" CGO_ENABLED=0 go build -trimpath -o "$gout" ./cmd/runner )
 
-  log "staging agent build context (agent/Dockerfile + packages/{agent,provider,protocol})"
+  log "staging agent build context (agent/Dockerfile + packages/{artisan,provider,protocol})"
   stage_agent_ctx
-  local agent_tag="atelier-agent:${UBUNTU_VERSION}-${ARCH}"
+  local agent_tag="atelier-artisan:${UBUNTU_VERSION}-${ARCH}"
   log "building agent payload image ($agent_tag, $DOCKER_PLATFORM) — npm ci for linux/$GOARCH"
   docker build --platform "$DOCKER_PLATFORM" -t "$agent_tag" "$WORK/agentctx"
   log "exporting agent tree (/opt/atelier) from the payload image"
@@ -275,48 +275,48 @@ cmd_guestd() {
   log "building imager image (e2fsprogs) for in-Linux ext4 population"
   docker build --platform "$DOCKER_PLATFORM" -t atelier-imager imager
 
-  log "packing guestd volume (LABEL=guestd; /guestd + /atelier) — ext4 via mke2fs -d"
-  # Combined payload: guestd binary + the agent tree, both root-owned (read-only at runtime; the
+  log "packing runner volume (LABEL=runner; /runner + /atelier) — ext4 via mke2fs -d"
+  # Combined payload: runner binary + the agent tree, both root-owned (read-only at runtime; the
   # agent drops to uid 1001 via bwrap). Size from the staged tree (node_modules dominates) + 128M
   # headroom so mke2fs -d always fits. node_modules has thousands of tiny files, so the default
   # inode budget (~1/16KB) under-provisions — set -N from the actual file count + margin or the
   # populate fails with "out of inodes". mke2fs -d needs no mount/loop/privilege.
   local build='set -eu
-mkdir -p /stage/guestd
-install -D -m 0755 /guestd /stage/guestd/guestd
-install -D -m 0644 /seccomp.bpf /stage/guestd/seccomp.bpf
+mkdir -p /stage/runner
+install -D -m 0755 /runner /stage/runner/atelier-runner
+install -D -m 0644 /seccomp.bpf /stage/runner/seccomp.bpf
 cp -a /atelier /stage/atelier
 chown -R 0:0 /stage
 sz=$(($(du -sm /stage | cut -f1) + 128))
 ninodes=$(($(find /stage | wc -l) + 4096))
-mke2fs -q -t ext4 -L guestd -d /stage -r 1 -N "$ninodes" -m 0 /guestd.ext4 "${sz}M"'
+mke2fs -q -t ext4 -L runner -d /stage -r 1 -N "$ninodes" -m 0 /runner.ext4 "${sz}M"'
   local icid; icid="$(docker create atelier-imager bash -c "$build")"
-  docker cp "$WORK/bin/guestd"      "$icid:/guestd"
+  docker cp "$WORK/bin/runner"      "$icid:/runner"
   docker cp "$WORK/agent/seccomp.bpf" "$icid:/seccomp.bpf"
   docker cp "$WORK/agent/atelier"   "$icid:/atelier"
   if ! docker start -a "$icid"; then
     docker rm -f "$icid" >/dev/null 2>&1 || true
-    die "imager failed to build the guestd volume"
+    die "imager failed to build the runner volume"
   fi
-  docker cp "$icid:/guestd.ext4" "$WORK/guestd.ext4"
+  docker cp "$icid:/runner.ext4" "$WORK/runner.ext4"
   docker rm -f "$icid" >/dev/null 2>&1 || true
 
   if [ "$DISK" = raw ]; then
-    log "emitting raw guestd volume for $TARGET (VZ attaches it as-is)"
-    cp "$WORK/guestd.ext4" "$OUT/guestd.raw"
+    log "emitting raw runner volume for $TARGET (VZ attaches it as-is)"
+    cp "$WORK/runner.ext4" "$OUT/runner.raw"
   elif have qemu-img; then
-    log "converting guestd volume ext4 -> VHD (HCS SCSI disk)"
-    qemu-img convert -f raw -O vpc "$WORK/guestd.ext4" "$OUT/guestd.vhd"
+    log "converting runner volume ext4 -> VHD (HCS SCSI disk)"
+    qemu-img convert -f raw -O vpc "$WORK/runner.ext4" "$OUT/runner.vhd"
   else
-    die "qemu-img missing — needed to convert the guestd volume to VHD for $TARGET"
+    die "qemu-img missing — needed to convert the runner volume to VHD for $TARGET"
   fi
-  log "guestd volume done"
+  log "runner volume done"
 }
 
 # rootfs first builds the tree once; kernel/initrd extract from the retained
-# $WORK/rootfs (ensure_tree is memoized for the invocation). guestd ships as its own
-# volume (cmd_guestd), built before the bundle pins everything.
-cmd_all() { cmd_rootfs; cmd_kernel; cmd_initrd; cmd_guestd; cmd_bundle; }
+# $WORK/rootfs (ensure_tree is memoized for the invocation). runner ships as its own
+# volume (cmd_runner), built before the bundle pins everything.
+cmd_all() { cmd_rootfs; cmd_kernel; cmd_initrd; cmd_runner; cmd_bundle; }
 
 # OUT/WORK are per-target (bundle/$TARGET, .work/$TARGET), so removing them wholesale never
 # touches bundle/README.md or the other target's output.
@@ -327,9 +327,9 @@ case "${1:-}" in
   rootfs) cmd_rootfs ;;
   initrd) cmd_initrd ;;
   kernel) cmd_kernel ;;
-  guestd) cmd_guestd ;;
+  runner) cmd_runner ;;
   bundle) cmd_bundle ;;
   all)    cmd_all ;;
   clean)  cmd_clean ;;
-  *) echo "usage: $0 {check|rootfs|initrd|kernel|guestd|bundle|all|clean}" >&2; exit 2 ;;
+  *) echo "usage: $0 {check|rootfs|initrd|kernel|runner|bundle|all|clean}" >&2; exit 2 ;;
 esac

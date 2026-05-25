@@ -20,8 +20,8 @@ import type {
  *  socket for macOS/Linux dev. `net.createConnection({ path })` handles both. */
 export function defaultHostAddress(platform: NodeJS.Platform = process.platform): string {
   return platform === "win32"
-    ? String.raw`\\.\pipe\atelier-host`
-    : "/tmp/atelier-host.sock"; // matches the Go broker dev default (README §"Dev without HCS")
+    ? String.raw`\\.\pipe\atelierd`
+    : "/tmp/atelierd.sock"; // matches the Go broker dev default (README §"Dev without HCS")
 }
 
 export type OutputStream = "stdout" | "stderr";
@@ -36,8 +36,8 @@ export interface ExecRun {
 
 export class HostClient {
   constructor(
-    private readonly address: string = process.env.ATELIER_HOST_ADDR ??
-      process.env.ATELIER_HOST_PIPE ??
+    private readonly address: string = process.env.ATELIER_ADDR ??
+      process.env.ATELIER_PIPE ??
       defaultHostAddress(),
   ) {}
 

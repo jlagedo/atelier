@@ -1,7 +1,7 @@
 # Build stage for the in-guest agent payload (Topology B, S5b.1, design.md §8). Produces
-# /opt/atelier/packages/{agent,provider,protocol} with the agent's runtime node_modules for
+# /opt/atelier/packages/{artisan,provider,protocol} with the agent's runtime node_modules for
 # the target platform. The agent is NOT baked into the rootfs — image/build.sh exports
-# /opt/atelier from this image and packs it into the guestd volume (LABEL=guestd, mounted
+# /opt/atelier from this image and packs it into the runner volume (LABEL=runner, mounted
 # read-only at /opt at runtime), so the agent iterates in seconds on the fast volume loop
 # instead of forcing a full rootfs rebuild.
 #
@@ -28,14 +28,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Source only (no node_modules/dist — image/build.sh stages it that way); install the agent's
 # runtime deps here so they're baked with the right platform binaries.
 COPY packages /opt/atelier/packages
-RUN cd /opt/atelier/packages/agent \
+RUN cd /opt/atelier/packages/artisan \
     && npm ci --omit=dev \
     && npm cache clean --force
 
 # Compile the agent sandbox's seccomp filter (docs/security.md F-13, closing F-01) from Docker's
 # vendored default profile, evaluated as a no-capability process. Runs in this --platform
 # container so the cBPF blob carries the target arch's syscall numbers by construction.
-# image/build.sh exports /opt/seccomp/seccomp.bpf onto the guestd volume next to the binary.
+# image/build.sh exports /opt/seccomp/seccomp.bpf onto the runner volume next to the binary.
 COPY seccomp /opt/seccomp-src
 RUN mkdir -p /opt/seccomp \
     && python3 /opt/seccomp-src/compile-seccomp.py /opt/seccomp-src/default.json /opt/seccomp/seccomp.bpf

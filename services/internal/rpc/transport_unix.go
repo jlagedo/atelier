@@ -9,7 +9,7 @@ import (
 
 // DefaultAddress is a unix socket used for terminal-driven development on
 // non-Windows hosts. On Windows the transport is a named pipe (design.md §8).
-const DefaultAddress = "/tmp/atelier-host.sock"
+const DefaultAddress = "/tmp/atelierd.sock"
 
 // Listen opens the unix-socket listener, clearing any stale socket file first.
 func Listen(addr string) (net.Listener, error) {

@@ -1,10 +1,10 @@
 // Package vsock owns the guest↔host control-plane socket (design.md §8, Hop 3).
-// The guest daemon (cmd/guestd) binds AF_VSOCK and listens on GuestRPCPort; the
+// The guest daemon (cmd/runner) binds AF_VSOCK and listens on GuestRPCPort; the
 // host (S2.2) connects over AF_HYPERV. Both sides import this package for the one
 // shared port number, so they can never drift.
 package vsock
 
-// GuestRPCPort is the vsock port guestd's JSON-RPC server listens on. The value
+// GuestRPCPort is the vsock port runner's JSON-RPC server listens on. The value
 // is arbitrary: our boot carries no GCS/vsockexec tail (design.md §16), so no
 // Microsoft service occupies a fixed port we'd clash with.
 //
@@ -23,7 +23,7 @@ const GuestRPCPort uint32 = 5000
 //
 // These Plan9 vsock ports (and WorkspaceShare.Port) are Windows/9p-only. On macOS
 // the files door is virtio-fs, which is tag-addressed, not vsock-port-addressed
-// (S6): the darwin driver ignores Port, and guestd mounts `-t virtiofs <tag>`.
+// (S6): the darwin driver ignores Port, and runner mounts `-t virtiofs <tag>`.
 const WorkspacePlan9Port uint32 = 564
 
 // WorkspaceShareTag is the 9p share name: the host doc's Plan9Share AccessName
@@ -49,11 +49,11 @@ const SessionPlan9PortBase uint32 = 600
 const EgressLinkPort uint32 = 1024
 
 // Guest network parameters (design.md §10 Network door — S4.1). The host's user-mode
-// network (internal/netjail) and the guest's static bring-up (cmd/guestd/egress_linux)
+// network (internal/netjail) and the guest's static bring-up (cmd/runner/egress_linux)
 // both import these so they can never drift. Values mirror gvisor-tap-vsock's canonical
 // gvproxy defaults: the gateway owns .1, the guest has a reserved static lease at .2, and
 // there is no general DHCP/NAT (egress only, jailed). Networking is configured statically
-// in the guest — guestd brings tap0 up with these values and runs gvforwarder with
+// in the guest — runner brings tap0 up with these values and runs gvforwarder with
 // -preexisting (so no DHCP client is needed in the image).
 const (
 	// NetworkCIDR is the guest subnet in CIDR form (host side parses it for the netstack).
@@ -67,7 +67,7 @@ const (
 	// GuestStaticCIDR is GuestStaticIP with the subnet prefix, for `ip addr add` on tap0.
 	GuestStaticCIDR = "192.168.127.2/24"
 	// GuestMAC is the guest tap0 MAC (gvforwarder's default; reserved host-side so the
-	// static lease matches). guestd sets it explicitly since -preexisting skips linkUp.
+	// static lease matches). runner sets it explicitly since -preexisting skips linkUp.
 	GuestMAC = "5a:94:ef:e4:0c:ee"
 	// NetworkMTU is the link MTU for tap0 and the host endpoint.
 	NetworkMTU = 1500

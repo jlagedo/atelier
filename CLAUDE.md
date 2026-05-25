@@ -26,8 +26,8 @@ This repo is small (~175 files) but its docs are large. Keep the main context le
 | Dir | What | State |
 |---|---|---|
 | `apps/desktop` | Electron/React desktop UI (the shell) | WORK mode wired to the broker; chat mode mock |
-| `services` | One Go module — host broker (`host`), in-VM daemon (`guestd`), dev CLI (`vmctl`) | full substrate (boot/exec/files/net) |
-| `packages/agent` | The Claude Agent SDK loop — host (`cli.ts`) and in-guest (`cli-guest.ts`) | both topologies; in-guest is the live path |
+| `services` | One Go module — host broker (`atelierd`), in-VM daemon (`runner`), dev CLI (`atelierctl`) | full substrate (boot/exec/files/net) |
+| `packages/artisan` | The Claude Agent SDK loop — host (`cli.ts`) and in-guest (`cli-guest.ts`) | both topologies; in-guest is the live path |
 | `packages/provider` | Provider seam — resolves model + env for the loop | Anthropic API now, Eliza later |
 | `packages/protocol` | Generated Hop-2 protocol bindings (schema is canonical) | generated, gitignored |
 | `image` | VM image build — kernel + initrd + rootfs bundle; bakes in the agent | build pipeline |
@@ -50,8 +50,8 @@ Generated/build output is gitignored: `build/` (the orchestrator's staged artifa
 | Windows HCS bindings | `services/internal/hcs/computecore_windows.go` |
 | Session Manager (host state machine) | `apps/desktop/src/main/sessions/manager.ts` |
 | Hop-2 named-pipe JSON-RPC client | `apps/desktop/src/main/host-client/client.ts` |
-| In-guest agent loop (live path) | `packages/agent/src/cli-guest.ts` |
-| Host agent loop + broker tools | `packages/agent/src/cli.ts`, `packages/agent/src/broker/client.ts` |
+| In-guest agent loop (live path) | `packages/artisan/src/cli-guest.ts` |
+| Host agent loop + broker tools | `packages/artisan/src/cli.ts`, `packages/artisan/src/broker/client.ts` |
 | Protocol (canonical schema) | `packages/protocol/schema/protocol.json` |
 
 ## Build the whole stack
@@ -60,10 +60,10 @@ Generated/build output is gitignored: `build/` (the orchestrator's staged artifa
 verifies everything from zero and writes **every artifact into one tree**, `build/<config>/`:
 
 ```sh
-npm run build:all                      # debug (default): host + desktop + guestd volume; full image skipped -> build/debug/
+npm run build:all                      # debug (default): host + desktop + runner volume; full image skipped -> build/debug/
 npm run build:all -- --image           # also build the heavy VM image (rootfs+kernel+initrd) -> build/debug/
 npm run build:all -- --config=release  # stripped Go + self-contained               -> build/release/
-npm run build:all -- --only=host       # one phase: protocol + host/vmctl (codesigned on macOS)
+npm run build:all -- --only=host       # one phase: protocol + host/atelierctl (codesigned on macOS)
 npm run build:all -- --only=image      # one phase: full VM image bundle
 npm run build:all -- --only=desktop    # one phase: packaged desktop app
 npm run build:all -- --deep            # true from-zero: also wipe node_modules + image/.work
@@ -71,22 +71,22 @@ npm run build:all -- --no-verify       # skip tests/typecheck/lint
 ```
 
 The full rootfs/kernel/initrd image is the heavy, rarely-changing part, so the default run **skips it**
-and only (re)builds the `guestd` volume next to a reused image — pass `--image` (or `--only=image`)
-to rebuild the whole bundle. The `guestd` volume carries **both** guestd and the in-guest agent
-(code + node_modules), so rebuilding it does an `npm ci` for the agent (not the old guestd-only ~10s);
-it's still far cheaper than a full rootfs rebuild. The `guestd` volume is **always** built when the
+and only (re)builds the `runner` volume next to a reused image — pass `--image` (or `--only=image`)
+to rebuild the whole bundle. The `runner` volume carries **both** runner and the in-guest agent
+(code + node_modules), so rebuilding it does an `npm ci` for the agent (not the old runner-only ~10s);
+it's still far cheaper than a full rootfs rebuild. The `runner` volume is **always** built when the
 image phase runs; both the default and `--image` need Docker.
 
-`build/<config>/` layout: `host(.exe)` + `vmctl(.exe)` (Go broker + dev CLI, broker codesigned on
+`build/<config>/` layout: `atelierd(.exe)` + `atelierctl(.exe)` (Go broker + dev CLI, broker codesigned on
 macOS), `image/<target>/` (the VM bundle), `desktop/` (packaged Electron app).
 
 The orchestrator (zero-dep Node, runs on both OSes) drives the chain in order — submodule → clean →
 protogen → host build (cgo + codesign, done **in-process**, no per-OS shell script) → VM image →
 desktop → verify — branching only for the irreducible platform bits: `codesign` on macOS (VZ refuses
 an unsigned broker) and the `wsl` prefix for the Docker image build on Windows (unverified from a
-Mac). Neither `guestd` nor the in-guest agent is baked into the rootfs — they ship together on one ro
-volume (`guestd.{raw,vhd}`, mounted at `/opt`), built by the image build and attached as a second disk;
-verify also linux-cross-compiles `guestd`.
+Mac). Neither `runner` nor the in-guest agent is baked into the rootfs — they ship together on one ro
+volume (`runner.{raw,vhd}`, mounted at `/opt`), built by the image build and attached as a second disk;
+verify also linux-cross-compiles `runner`.
 
 The image build lives in `image/build.sh` — one cross-OS bash+Docker script (native on macOS, via
 `wsl` on Windows). It writes to `image/bundle/<target>/` by default; the orchestrator redirects it
@@ -94,9 +94,9 @@ into `build/<config>/image/` via `ATELIER_OUT_BASE`. Generated source (`packages
 `services/pkg/protocol`) is imported by module path, so it stays in-tree (regenerated by `protogen`,
 not moved into `build/`). All of `build/` is gitignored.
 
-Then run the broker (`build/<config>/host`; elevated only on Windows) and the app
+Then run the broker (`build/<config>/atelierd`; elevated only on Windows) and the app
 (`ATELIER_BUNDLE_DIR=build/<config>/image/<target> npm run dev`). See the root [`README`](README) for
-the full run guide + the `vmctl` terminal path + dev-without-VM.
+the full run guide + the `atelierctl` terminal path + dev-without-VM.
 
 ## Desktop app — `apps/desktop` (TypeScript / Electron)
 
@@ -146,9 +146,9 @@ Conventions:
 
 Module: `github.com/jlagedo/atelier/services`. Protocol (Hop 2, design §8): JSON-RPC 2.0 with
 Content-Length framing, over a named pipe on Windows / a unix socket for dev. Three binaries under
-`cmd/`: **`host`** (the privileged broker), **`guestd`** (the in-VM daemon, shipped on the ro guest
-payload volume — `image/build.sh guestd`, which also carries the in-guest agent — attached as a second
-disk, **not** baked into the rootfs, so it iterates without rebuilding the image), **`vmctl`** (dev CLI).
+`cmd/`: **`atelierd`** (the privileged broker), **`runner`** (the in-VM daemon, shipped on the ro guest
+payload volume — `image/build.sh runner`, which also carries the in-guest agent — attached as a second
+disk, **not** baked into the rootfs, so it iterates without rebuilding the image), **`atelierctl`** (dev CLI).
 
 ```sh
 cd services
@@ -156,8 +156,8 @@ go build ./... && go test ./... && go vet ./... && gofmt -l .
 GOOS=windows go build ./...     # verify the Windows named-pipe / HCS paths compile
 
 # dev end-to-end (unix socket, no VM):
-go run ./cmd/host  -addr /tmp/atelier-host.sock &
-go run ./cmd/vmctl -addr /tmp/atelier-host.sock getStatus
+go run ./cmd/atelierd  -addr /tmp/atelierd.sock &
+go run ./cmd/atelierctl -addr /tmp/atelierd.sock getStatus
 ```
 
 On **macOS (Apple Silicon)** the broker drives Apple's Virtualization.framework via the
@@ -168,13 +168,13 @@ under the hardened runtime — the framework refuses to start otherwise, and cgo
 the signature on every rebuild. Build + sign via the orchestrator phase instead of a bare `go build`:
 
 ```sh
-npm run build:all -- --only=host      # protogen -> cgo build host+vmctl -> codesign host -> build/debug/
-build/debug/host  -addr /tmp/atelier-host.sock &
+npm run build:all -- --only=host      # protogen -> cgo build host+atelierctl -> codesign host -> build/debug/
+build/debug/atelierd  -addr /tmp/atelierd.sock &
 B=build/debug/image/darwin-arm64-vz
-build/debug/vmctl -addr /tmp/atelier-host.sock createVM -id vm0 \
+build/debug/atelierctl -addr /tmp/atelierd.sock createVM -id vm0 \
   -kernel $B/vmlinuz -initrd $B/initrd -rootfs $B/rootfs.raw
-build/debug/vmctl -addr /tmp/atelier-host.sock startVM -id vm0   # serial boot log -> broker stderr
-build/debug/vmctl -addr /tmp/atelier-host.sock stopVM  -id vm0
+build/debug/atelierctl -addr /tmp/atelierd.sock startVM -id vm0   # serial boot log -> broker stderr
+build/debug/atelierctl -addr /tmp/atelierd.sock stopVM  -id vm0
 ```
 
 End-to-end integration battery (mirrors `build:all` — zero-dep Node, `build/<config>/` tree):
@@ -186,7 +186,7 @@ npm run e2e:host -- --skip-build      # reuse build/<config>/ as-is (fast-fail i
 ```
 
 `scripts/e2e-host.mjs` spawns the **shipped** broker over a unix socket and exercises every door + the
-in-guest agent loop through `vmctl` — the real Hop-2 wire, which the Go unit tests (fake drivers) and
+in-guest agent loop through `atelierctl` — the real Hop-2 wire, which the Go unit tests (fake drivers) and
 the S7 probe (`services/internal/vmm/s7_probe_darwin_test.go`, share shape) don't cover. It splits the two share models into their own sections
 (legacy `/workspace` + Files door; concurrent `/sessions/<tag>` — isolation, arbitrary targets,
 sibling-safe detach), plus the egress jail (default-deny blocks, allow reaches the model) and
@@ -202,14 +202,14 @@ via gvisor-tap-vsock). The 12 doors live in `pkg/protocol` (generated): `getStat
 
 Conventions:
 - Windows/Linux-only code lives behind `//go:build` tags with a sibling stub
-  (e.g. `internal/rpc/transport_*.go`, `internal/hcs/hcs_*.go`, `cmd/guestd/*_linux.go` +
+  (e.g. `internal/rpc/transport_*.go`, `internal/hcs/hcs_*.go`, `cmd/runner/*_linux.go` +
   `*_other.go`) so `go build ./...` works on either host.
 - `internal/broker` is the containment chokepoint: every capability use passes the policy gate
   (allow/ask/deny) + audit log before acting (design §10). The Files door is workspace-relative and
   jails paths (rejects `..` and escaping symlinks).
 - `go.mod` `go` directive is pinned to the installed toolchain (1.25); latest stable is Go 1.26.
 
-## Agent loop — `packages/agent` (TypeScript)
+## Agent loop — `packages/artisan` (TypeScript)
 
 Hosts `@anthropic-ai/claude-agent-sdk`. Two entry points sharing the same provider + policy seams:
 - `cli.ts` — **Topology A** (host loop): the SDK's "hands" are an in-process MCP server whose tools
@@ -217,14 +217,14 @@ Hosts `@anthropic-ai/claude-agent-sdk`. Two entry points sharing the same provid
 - `cli-guest.ts` — **Topology B** (in-guest loop, the live path): the loop runs *in the cage*, so its
   hands are the SDK's built-in coding tools (Bash/Read/Write/Edit/Glob/Grep) acting directly on the
   guest fs — no broker round-trip for tools; only the model call escapes via the egress jail. Has a
-  one-shot mode (`--task`, drives `vmctl agent`) and a persistent `--serve` mode (NDJSON over
+  one-shot mode (`--task`, drives `atelierctl agent`) and a persistent `--serve` mode (NDJSON over
   stdin/stdout, driven by the Session Manager; `--resume <id>` for hibernate→resume).
 
 The policy gate (`seams/policy.ts`, wired as the SDK's `canUseTool`) audits **every** tool call in
 both topologies. `packages/provider` (`resolveProvider`) picks model + env.
 
 ```sh
-cd packages/agent
+cd packages/artisan
 npm install
 npm run typecheck    # tsc --noEmit
 npm test             # vitest run
@@ -233,7 +233,7 @@ npm run start:guest  # tsx src/cli-guest.ts  (Topology B)
 ```
 
 The in-guest agent (with its `node_modules` for the target arch — `linux/amd64` on Windows,
-`linux/arm64` on macOS) ships on the guestd volume (`image/build.sh guestd` builds it via
+`linux/arm64` on macOS) ships on the runner volume (`image/build.sh runner` builds it via
 `image/agent/Dockerfile` and packs it at `/opt/atelier`; mounted at `/opt`), **not** baked into the
 rootfs — so the desktop app does not install or ship it separately, and it iterates without a rootfs
 rebuild. The rootfs still provides the Node 22 runtime that `tsx` runs the agent under.
@@ -258,19 +258,19 @@ analog (design §7). Sources are tracked under `image/{rootfs,initrd,kernel,gues
 goes to `image/bundle/` (gitignored). The matched kernel + `/lib/modules` + boot initramfs all come
 from one Ubuntu 24.04 Docker build (so the §7 coupling holds by construction); the same build
 cross-compiles `gvforwarder`. The in-guest agent is **not** baked into the rootfs — `image/build.sh
-guestd` builds it (`stage_agent_ctx` assembles a small Docker context from `packages/{agent,provider,
+runner` builds it (`stage_agent_ctx` assembles a small Docker context from `packages/{agent,provider,
 protocol}` source; `image/agent/Dockerfile` runs `npm install` inside the target-arch build —
-`--platform linux/amd64` or `linux/arm64`) and packs it onto the guestd volume. Big artifacts
+`--platform linux/amd64` or `linux/arm64`) and packs it onto the runner volume. Big artifacts
 (multi-GB VHDs) are **not** committed — produced here and stored externally, not in git/LFS.
 
-Neither `guestd` nor the agent is baked into the rootfs: `image/build.sh guestd` ships them together on
-one ro ext4 **volume** (`guestd.raw` for VZ / `guestd.vhd` for HCS, `LABEL=guestd`) — guestd at
-`/opt/guestd/guestd`, the agent at `/opt/atelier` — attached as a second disk and mounted at `/opt`
-(then guestd exec'd) by `image/guest/init.sh`. This is the fast dev loop: rebuild only the volume
-(compile guestd + agent `npm ci` + `mke2fs`, no rootfs export/apt/kernel) and reboot, instead of the
+Neither `runner` nor the agent is baked into the rootfs: `image/build.sh runner` ships them together on
+one ro ext4 **volume** (`runner.raw` for VZ / `runner.vhd` for HCS, `LABEL=runner`) — runner at
+`/opt/runner/atelier-runner`, the agent at `/opt/atelier` — attached as a second disk and mounted at `/opt`
+(then runner exec'd) by `image/guest/init.sh`. This is the fast dev loop: rebuild only the volume
+(compile runner + agent `npm ci` + `mke2fs`, no rootfs export/apt/kernel) and reboot, instead of the
 whole image. (Because `init.sh` lives in the rootfs, the **first** build after this layout change needs
 one full `--image` rebuild; thereafter the volume rebuilds on the fast path.) `createVM` carries its
-host path (`guestdImagePath`); `vmctl createVM -guestd <img>` and the desktop
+host path (`runnerImagePath`); `atelierctl createVM -runner <img>` and the desktop
 Session Manager both supply it from the bundle. `make all` / `build:all` include it automatically.
 
 A build `TARGET` (default `windows-amd64-hyperv`) selects guest arch + Docker platform + GOARCH +
@@ -316,8 +316,8 @@ fully exercised without the matching host. For Linux build steps (VM image, root
 macOS uses **Docker via OrbStack**; Windows uses **WSL2**.
 
 **Always validate substrate changes with `npm run build:all` then `npm run e2e:host`.** For any
-change touching the host broker (`services`), the in-guest daemon/agent (`guestd`,
-`packages/agent`), or the VM image (`image/`), these two are the source-of-truth build +
+change touching the host broker (`services`), the in-guest daemon/agent (`runner`,
+`packages/artisan`), or the VM image (`image/`), these two are the source-of-truth build +
 integration checks and must pass before the change is considered done — run them, and when you add
 behavior, add a matching assertion to `scripts/e2e-host.mjs`. The per-package checks below are the
 fast inner loop, not a substitute. (`e2e:host` needs `ANTHROPIC_API_KEY` and a real VZ boot on

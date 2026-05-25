@@ -1,9 +1,9 @@
 {
-  "name": "@atelier/agent",
+  "name": "@atelier/artisan",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "The agent loop — hosts @anthropic-ai/claude-agent-sdk on the host (Topology A). See docs/design.md §8.",
+  "description": "The artisan agent loop — hosts @anthropic-ai/claude-agent-sdk (Topology A host loop + Topology B in-guest loop). See docs/design.md §8.",
   "license": "UNLICENSED",
   "engines": {
     "node": ">=22.12.0"

@@ -48,10 +48,10 @@ type DocConfig struct {
 	// RootFSReadOnly attaches the root disk read-only (default false: rw).
 	RootFSReadOnly bool
 
-	// GuestdImagePath, when set, attaches the guestd volume (its own ro ext4-in-VHD)
+	// RunnerImagePath, when set, attaches the runner volume (its own ro ext4-in-VHD)
 	// as a second SCSI disk (surfaced in-guest as /dev/sdb). init.sh mounts it by
-	// LABEL=guestd and execs guestd from it — guestd is not baked into the rootfs.
-	GuestdImagePath string
+	// LABEL=runner and execs runner from it — runner is not baked into the rootfs.
+	RunnerImagePath string
 
 	// MemoryMB / ProcessorCount default to 2048 / 2 when zero.
 	MemoryMB       uint64
@@ -87,7 +87,7 @@ func MakeLCOWDoc(c DocConfig) ([]byte, error) {
 		cpu = 2
 	}
 
-	// SCSI controller 0: the rootfs at LUN 0 (/dev/sda) and, when shipped, the guestd
+	// SCSI controller 0: the rootfs at LUN 0 (/dev/sda) and, when shipped, the runner
 	// volume at LUN 1 (/dev/sdb, always read-only). init.sh mounts the latter by label.
 	scsiAttachments := map[string]Attachment{
 		"0": {
@@ -96,10 +96,10 @@ func MakeLCOWDoc(c DocConfig) ([]byte, error) {
 			ReadOnly: c.RootFSReadOnly,
 		},
 	}
-	if c.GuestdImagePath != "" {
+	if c.RunnerImagePath != "" {
 		scsiAttachments["1"] = Attachment{
 			Type:     "VirtualDisk",
-			Path:     c.GuestdImagePath,
+			Path:     c.RunnerImagePath,
 			ReadOnly: true,
 		}
 	}
@@ -194,7 +194,7 @@ const plan9ShareResourcePath = "VirtualMachine/Devices/Plan9/Shares"
 // share (host folder hostPath, share name/AccessName tag, served on vsock port)
 // to a running VM (Files door, S3.1; concurrent per-session shares, S6.1). It
 // carries only the host-side Settings — no GuestRequest — because we run no GCS:
-// the guest (guestd) mounts the share itself over our control plane. tag/port
+// the guest (runner) mounts the share itself over our control plane. tag/port
 // must be unique among a VM's live shares so several can coexist.
 func MakePlan9AddRequest(hostPath string, readOnly bool, tag string, port uint32) ([]byte, error) {
 	flags := plan9FlagLinuxMetadata

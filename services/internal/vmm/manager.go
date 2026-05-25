@@ -131,7 +131,7 @@ func (m *Manager) Stop(ctx context.Context, id string) error {
 	return err
 }
 
-// DialGuest opens a connection to guestd's control-plane RPC port.
+// DialGuest opens a connection to runner's control-plane RPC port.
 func (m *Manager) DialGuest(ctx context.Context, id string) (net.Conn, error) {
 	if _, ok := m.get(id); !ok {
 		return nil, fmt.Errorf("vm: %q not found", id)
@@ -165,7 +165,7 @@ func (m *Manager) SeedTime(ctx context.Context, id string) error {
 // syncTimeLoop seeds the guest clock immediately (boot seed) then every 30s
 // (self-heals after host sleep/resume within one tick). Errors are logged and
 // retried — a failed sync must never crash the goroutine or the broker. The boot
-// seed leans on DialGuest's retry to absorb guestd not yet listening.
+// seed leans on DialGuest's retry to absorb runner not yet listening.
 func (m *Manager) syncTimeLoop(ctx context.Context, id string) {
 	if err := m.SeedTime(ctx, id); err != nil {
 		m.log.Warn("boot time seed failed (will retry next tick)", "vm", id, "err", err)

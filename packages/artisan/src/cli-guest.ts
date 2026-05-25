@@ -8,7 +8,7 @@
 //
 // Two run modes:
 //   - one-shot (default): `--task "<task>"` runs once, prints human-readable
-//     output, exits. Drives `vmctl agent`/`exec` — unchanged.
+//     output, exits. Drives `atelierctl agent`/`exec` — unchanged.
 //   - serve (--serve): a PERSISTENT multi-turn loop (S6.1). It reads NDJSON
 //     control messages on stdin and emits NDJSON events on stdout, so the host
 //     (Electron Session Manager) drives one long-lived in-guest session per WORK
@@ -262,7 +262,7 @@ async function serve(values: ReturnType<typeof parse>["values"]): Promise<void> 
 }
 
 // runOnce is the original one-shot path: run a single task, print human-readable
-// output, exit. Keeps `vmctl agent`/`exec` behavior unchanged.
+// output, exit. Keeps `atelierctl agent`/`exec` behavior unchanged.
 async function runOnce(values: ReturnType<typeof parse>["values"], task: string): Promise<void> {
   const provider = resolveProvider({ model: values.model });
   const workspace = values.workspace as string;
@@ -320,6 +320,7 @@ async function runOnce(values: ReturnType<typeof parse>["values"], task: string)
 }
 
 async function main(): Promise<void> {
+  process.title = "atelier-artisan";
   const { values, task } = parse();
 
   if (values.serve) {

@@ -10,7 +10,7 @@ see [`vm-hardening.md`](vm-hardening.md).
 | Side | Identity | Privilege |
 |------|----------|-----------|
 | Electron **main** (Hop 2 client) | runs as the interactive user | unprivileged |
-| Host **broker** (`cmd/host`, Hop 2 server) | elevated process now; planned Windows service | privileged |
+| Host **broker** (`cmd/atelierd`, Hop 2 server) | elevated process now; planned Windows service | privileged |
 
 The pipe exposes the **full privileged surface** — `exec`, `readFile`/`writeFile`,
 `setEgressPolicy`, plus VM lifecycle (`pkg/protocol/protocol.go`). Anyone who can
@@ -29,7 +29,7 @@ named pipe / unix socket — **TLS/mTLS buys nothing here.** The real controls a
 - **Windows:** `winio.ListenPipe(addr, &winio.PipeConfig{MessageMode:false})` sets
   **no `SecurityDescriptor`** → permissive default DACL
   (`services/internal/rpc/transport_windows.go`).
-- **Unix dev transport:** unix socket at **`/tmp/atelier-host.sock`** with default umask
+- **Unix dev transport:** unix socket at **`/tmp/atelierd.sock`** with default umask
   perms — `/tmp` is world-accessible
   (`services/internal/rpc/transport_unix.go`).
 - **Both:** the policy gate is `AllowAll` (`services/internal/broker/policy.go`) —
@@ -61,7 +61,7 @@ The same five levels apply on both platforms; the *mechanisms* differ. L1–L3 g
   ```
 
 - **macOS:** move the socket **off `/tmp`**. Either per-user
-  (`~/…/atelier-host.sock`, mode `0600`, owned by the user) or a system helper
+  (`~/…/atelierd.sock`, mode `0600`, owned by the user) or a system helper
   socket in `/var/run/atelier/` owned by root, mode `0660` + a dedicated group.
 
 **Stops:** arbitrary unprivileged / other-user processes. **Doesn't stop:** a

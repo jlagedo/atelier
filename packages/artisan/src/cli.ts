@@ -44,15 +44,16 @@ function parse() {
 }
 
 async function main(): Promise<void> {
+  process.title = "atelier-artisan";
   const { values, task } = parse();
   if (!task) {
-    console.error('usage: agent [--vm vm0] [--workspace /workspace] [--model <id>] "<task>"');
+    console.error('usage: atelier-artisan [--vm vm0] [--workspace /workspace] [--model <id>] "<task>"');
     process.exit(2);
   }
 
   const provider = resolveProvider({ model: values.model });
 
-  const broker = new BrokerClient(values.pipe ?? process.env.ATELIER_HOST_PIPE ?? DEFAULT_PIPE);
+  const broker = new BrokerClient(values.pipe ?? process.env.ATELIER_PIPE ?? DEFAULT_PIPE);
   try {
     await broker.ready();
   } catch (e) {

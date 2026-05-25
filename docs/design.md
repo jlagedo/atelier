@@ -309,7 +309,7 @@ Reverse-engineered from the Go symbol table of **`cowork-svc.exe`** (package `gi
 |---|---|---|---|
 | 1 | **Custom hvsocket RPC** | `vm.RPCServer` over `vm.HVSocketConn`/`HVSockAddr`/`HVSocketListener`; methods `Start`/`acceptLoop`/`handleConnection`/`handleMessage`/`handleResponse`/`handleEvent`/`SendGuestResponse` | **Control plane** to the in-guest `cowork-daemon`. Async, bidirectional request/response **+ events** over a single AF_HYPERV socket. Comes up first; bootstraps the rest. |
 | 2 | **User-mode network over hvsocket** | `github.com/containers/gvisor-tap-vsock` (`pkg/tap` IP-pool/DHCP, `services/dns`/`dhcp`/`forwarder`, `virtualnetwork`, `types.ExposeRequest`/`UnexposeRequest`) + `inetaf/tcpproxy` | Guest has **no real Hyper-V NIC**; the host process *is* the guest's entire network in user space → DNS/DHCP/forward/**allowlist** all host-controlled. **This is the egress jail, by construction.** |
-| 3 | **Exec/file plane** | Cowork symbols suggest SSH over the vsock network; Atelier instead uses guestd RPC for exec/`execInput` and Plan9/9p for files. | **Our implementation:** no sshd in the guest; guestd streams stdout/stderr as JSON-RPC notifications, and host folders mount over 9p. |
+| 3 | **Exec/file plane** | Cowork symbols suggest SSH over the vsock network; Atelier instead uses runner RPC for exec/`execInput` and Plan9/9p for files. | **Our implementation:** no sshd in the guest; runner streams stdout/stderr as JSON-RPC notifications, and host folders mount over 9p. |
 
 **The console pipe** `\\.\pipe\cowork-daemon-console-<vmid>` = the **guest serial console only** (`vm.ConsoleReader`/`readConsole`/`writeConsole`, bridged via `Microsoft/go-winio`). Boot log + daemon stdout/diagnostics — **not** control, **not** exec.
 
@@ -321,7 +321,7 @@ Reverse-engineered from the Go symbol table of **`cowork-svc.exe`** (package `gi
 > broker tracks a `mounts` map and allocates vsock ports from a session pool above the default 564), so each
 > session's host folder mounts at its own `/sessions/<id>` alongside the others (`ModifyComputeSystem` Add/
 > Remove by tag); and (2) **`execInput`** — `exec` accepts a `sessionId` that registers the child's stdin in
-> guestd; a new `execInput` RPC pushes bytes (a new user turn, or an `export_context`/`close` control) into
+> runner; a new `execInput` RPC pushes bytes (a new user turn, or an `export_context`/`close` control) into
 > that already-running process. Together these let each session run its **own persistent in-guest agent loop**
 > (`cli-guest --serve`, NDJSON over stdio) that the host can feed, hibernate (export context → kill → detach),
 > and resume (`query({resume})`).
@@ -380,7 +380,7 @@ The agent loop's *location* is the one big runtime choice. Both topologies run t
 > centrally), then enforced + audited automatically. Allowed actions run and are audited; **denied actions
 > don't run, warn the user, and are logged** (shown as display-only *policy-decision cards*). The goal is an
 > agent that is USER-proof and policy-guided. Enforcement lives in the policy seam
-> (`packages/agent/src/seams/policy.ts`, `mode:"guest"`) via the SDK `canUseTool` hook; the broker remains
+> (`packages/artisan/src/seams/policy.ts`, `mode:"guest"`) via the SDK `canUseTool` hook; the broker remains
 > the wire-level gate/audit point. For Topology B (the in-guest loop) the cage boundary is the **VM**: in-cage
 > file + shell tools are allowed; egress-bound tools (network) are denied.
 
@@ -546,7 +546,7 @@ Quick decoder for the jargon in this doc. Grouped by area; one line each.
   document shape and Plan9 conventions, not our lifecycle driver.
 - **LCOW (Linux Containers on Windows)** — running Linux under HCS by direct-booting a kernel + rootfs (no full installer). Our boot model.
 - **UVM (Utility VM)** — a lightweight, purpose-built VM (like Cowork's) — not a general-purpose desktop VM.
-- **GCS (Guest Compute Service) / OpenGCS** — Microsoft's in-guest Linux agent that talks to HCS. Cowork ships its *own* daemon instead — **confirmed (S0a, 2026-05-20): `coworkd`**, a Go binary on `smol-bin.vhdx` (no GCS/`vsockexec` present), talking over `hv_sock`, with built-in egress control (`cowork-egress-blocked`) and an inner `bwrap` sandbox. This forces our **own-bindings** HCS path (§16) and is the model for our `guestd` (§8 Hop 3).
+- **GCS (Guest Compute Service) / OpenGCS** — Microsoft's in-guest Linux agent that talks to HCS. Cowork ships its *own* daemon instead — **confirmed (S0a, 2026-05-20): `coworkd`**, a Go binary on `smol-bin.vhdx` (no GCS/`vsockexec` present), talking over `hv_sock`, with built-in egress control (`cowork-egress-blocked`) and an inner `bwrap` sandbox. This forces our **own-bindings** HCS path (§16) and is the model for our `runner` (§8 Hop 3).
 - **KernelDirect** — booting by handing the hypervisor a kernel file directly, skipping BIOS/GRUB.
 - **VHD / VHDX** — Microsoft virtual hard-disk file formats; our rootfs/session disks are VHDX.
 - **VMBus** — the Hyper-V guest↔host device channel; drivers like `hv_storvsc` (disk), `hv_netvsc` (net), `hv_sock` (sockets) ride it.

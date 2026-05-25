@@ -36,8 +36,8 @@ describe("bundle resolution", () => {
 
 describe("host address default", () => {
   it("is a named pipe on Windows and a unix socket elsewhere", () => {
-    expect(defaultHostAddress("win32")).toBe(String.raw`\\.\pipe\atelier-host`);
-    expect(defaultHostAddress("darwin")).toBe("/tmp/atelier-host.sock");
-    expect(defaultHostAddress("linux")).toBe("/tmp/atelier-host.sock");
+    expect(defaultHostAddress("win32")).toBe(String.raw`\\.\pipe\atelierd`);
+    expect(defaultHostAddress("darwin")).toBe("/tmp/atelierd.sock");
+    expect(defaultHostAddress("linux")).toBe("/tmp/atelierd.sock");
   });
 });

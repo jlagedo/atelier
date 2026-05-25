@@ -26,11 +26,11 @@ type VMConfig struct {
 	// keeps the older built-in-driver boot path.
 	InitrdPath string
 	RootFSPath string
-	// GuestdImagePath is the host path to the guestd volume — its own ro image holding
-	// /guestd, attached as a second disk (VZ -> /dev/vdb; HCS -> a SCSI disk) and mounted
-	// by init.sh (LABEL=guestd). guestd is not baked into the rootfs, so this is the sole
-	// delivery path; the desktop/vmctl always set it. Empty = no second disk (boot to shell).
-	GuestdImagePath string
+	// RunnerImagePath is the host path to the runner volume — its own ro image holding
+	// /runner, attached as a second disk (VZ -> /dev/vdb; HCS -> a SCSI disk) and mounted
+	// by init.sh (LABEL=runner). runner is not baked into the rootfs, so this is the sole
+	// delivery path; the desktop/atelierctl always set it. Empty = no second disk (boot to shell).
+	RunnerImagePath string
 	MemoryMB        uint64
 	CPUCount        int32
 }

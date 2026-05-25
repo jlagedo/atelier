@@ -58,13 +58,13 @@ on macOS) → VM image → packaged desktop → verify — writing **every artif
 
 ```
 build/<config>/
-  host(.exe), vmctl(.exe)        # Go broker + dev CLI (broker codesigned on macOS)
+  atelierd(.exe), atelierctl(.exe)        # Go broker + dev CLI (broker codesigned on macOS)
   image/<target>/                # vmlinuz, initrd, rootfs.raw|vhd, *.origin, manifest.txt
   desktop/                       # packaged Electron app
 ```
 
 By default this **skips the heavy rootfs/kernel/initrd image** (it changes rarely) and only rebuilds
-the small `guestd` volume next to a reused image — pass `--image` to build the whole bundle. Other
+the small `runner` volume next to a reused image — pass `--image` to build the whole bundle. Other
 flags: `--deep` (also wipe `node_modules` + image cache for a true from-zero), `--no-verify`, and
 `--only=host|image|desktop` to build a single phase (`--only=image` always builds the full image).
 Then run as below.
@@ -74,7 +74,7 @@ Then run as below.
 The same orchestrator drives each component — no per-OS build scripts:
 
 ```sh
-node scripts/build-all.mjs --only=host     # protocol + broker/vmctl (codesigned on macOS)
+node scripts/build-all.mjs --only=host     # protocol + broker/atelierctl (codesigned on macOS)
 node scripts/build-all.mjs --only=image    # VM image bundle (Docker; via WSL on Windows)
 node scripts/build-all.mjs --only=desktop  # packaged desktop app
 ```
@@ -87,11 +87,11 @@ node scripts/build-all.mjs --only=desktop  # packaged desktop app
 
 ```sh
 # macOS (Apple Silicon) — broker needs no root (codesigned with the VZ entitlement)
-build/debug/host                                                       # broker -> /tmp/atelier-host.sock
+build/debug/atelierd                                                       # broker -> /tmp/atelierd.sock
 ATELIER_BUNDLE_DIR=build/debug/image/darwin-arm64-vz npm run dev       # desktop (AI_API_KEY set)
 
 # Windows — broker must run elevated
-build\debug\host.exe
+build\debug\atelierd.exe
 $env:ATELIER_BUNDLE_DIR="build\debug\image\windows-amd64-hyperv"; npm run dev
 ```
 
@@ -100,13 +100,13 @@ In the app: **Work → New work → pick a folder.** The app boots `vm0`, mounts
 ### Terminal path (no Electron)
 
 ```sh
-B=build/debug/image/darwin-arm64-vz   # the bundle dir (use vmctl from build/debug/)
-vmctl createVM -id vm0 -kernel $B/vmlinuz -initrd $B/initrd -rootfs $B/rootfs.raw
-vmctl startVM  -id vm0
-vmctl attachWorkspace -id vm0 -path /path/to/folder
-vmctl setEgressPolicy -allow <model-api-host>
-vmctl agent    -id vm0 -- "read orders.csv, write summary.csv"
-vmctl stopVM   -id vm0
+B=build/debug/image/darwin-arm64-vz   # the bundle dir (use atelierctl from build/debug/)
+atelierctl createVM -id vm0 -kernel $B/vmlinuz -initrd $B/initrd -rootfs $B/rootfs.raw
+atelierctl startVM  -id vm0
+atelierctl attachWorkspace -id vm0 -path /path/to/folder
+atelierctl setEgressPolicy -allow <model-api-host>
+atelierctl agent    -id vm0 -- "read orders.csv, write summary.csv"
+atelierctl stopVM   -id vm0
 ```
 
 ### Test (end-to-end)
@@ -118,7 +118,7 @@ npm run e2e:host -- --skip-build       # reuse build/<config>/ as-is
 ```
 
 `scripts/e2e-host.mjs` spawns the real broker, boots `vm0`, and exercises all 12 protocol doors plus
-the in-guest agent loop through `vmctl` — both share models (legacy `/workspace` + Files door and
+the in-guest agent loop through `atelierctl` — both share models (legacy `/workspace` + Files door and
 concurrent `/sessions/<tag>`), the egress jail, and host↔guest file bridging both ways. It needs the
 same prerequisites as a real run (VZ + codesigned broker + image bundle); the agent check also needs
 `AI_API_KEY` and live egress to the model API.

@@ -119,9 +119,9 @@ type DetachWorkspaceParams struct {
 	Tag string `json:"tag,omitempty"`
 }
 
-// attachWorkspace shares a host folder into the running VM and tells guestd to
+// attachWorkspace shares a host folder into the running VM and tells runner to
 // mount it (design.md §10 — S3.1; concurrent per-session shares — S6.1). Host
-// side: grant + add the Plan9 share via ModifyComputeSystem. Guest side: guestd
+// side: grant + add the Plan9 share via ModifyComputeSystem. Guest side: runner
 // mounts it. Legacy mode (no Tag) mounts at /workspace, swap-replacing any prior
 // default share and setting the Files-door jail root. Multi mode (Tag set) mounts
 // at Target and is added alongside other shares — the basis for many sessions in
@@ -139,7 +139,7 @@ func (b *Broker) attachWorkspace(ctx context.Context, params json.RawMessage) (a
 	}
 
 	// Serialize attach/detach for this VM: the steps below drive HCS (async, and
-	// it rejects duplicate Plan9 share names) + guestd + the mounts map across
+	// it rejects duplicate Plan9 share names) + runner + the mounts map across
 	// several awaits, so two concurrent calls for the same tag must not interleave.
 	opLock := b.vmOpLock(p.ID)
 	opLock.Lock()
@@ -231,7 +231,7 @@ func (b *Broker) detachWorkspace(ctx context.Context, params json.RawMessage) (a
 	return nil, nil
 }
 
-// guestMount tells guestd to mount share m (the guest half of attach).
+// guestMount tells runner to mount share m (the guest half of attach).
 func (b *Broker) guestMount(ctx context.Context, id string, m mountInfo) error {
 	conn, err := b.vms.DialGuest(ctx, id)
 	if err != nil {
@@ -245,7 +245,7 @@ func (b *Broker) guestMount(ctx context.Context, id string, m mountInfo) error {
 	}, nil)
 }
 
-// guestUnmount tells guestd to unmount the share at target (guest half of detach).
+// guestUnmount tells runner to unmount the share at target (guest half of detach).
 func (b *Broker) guestUnmount(ctx context.Context, id, target string) error {
 	conn, err := b.vms.DialGuest(ctx, id)
 	if err != nil {

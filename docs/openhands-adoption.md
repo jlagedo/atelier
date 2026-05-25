@@ -36,7 +36,7 @@ lock-in for OpenHands *engine* lock-in. We keep an abstraction boundary we own a
 behind it as a swappable implementation.
 
 **That boundary already exists — the NDJSON serve protocol**
-(`packages/agent/src/cli-guest.ts:18-33`). The host Session Manager neither knows nor cares which
+(`packages/artisan/src/cli-guest.ts:18-33`). The host Session Manager neither knows nor cares which
 engine sits behind the wire. The plan is therefore to keep the NDJSON seam and put OpenHands behind
 it.
 
@@ -135,7 +135,7 @@ Four composable PyPI packages (`pip install openhands-sdk`, etc.; import root `o
 
 The seams an engine swap must satisfy (confirmed `file:line`):
 
-### NDJSON serve protocol — `packages/agent/src/cli-guest.ts`
+### NDJSON serve protocol — `packages/artisan/src/cli-guest.ts`
 
 - **Wire types** (`:18-33`)
   - stdin (host → agent): `{"type":"user","text"}`, `{"type":"export_context"}`, `{"type":"close"}`
@@ -147,7 +147,7 @@ The seams an engine swap must satisfy (confirmed `file:line`):
 - **Provider consumed** (`:128`): `resolveProvider({ model: values.model })`
 - **Policy gate wired** (`:195-199`): `canUseTool` → `policy.evaluate(toolName, input)` → allow/deny
 
-### Policy / audit seam — `packages/agent/src/seams/policy.ts`
+### Policy / audit seam — `packages/artisan/src/seams/policy.ts`
 
 - `Decision { behavior: "allow"|"deny"; reason }` (`:22-25`)
 - `AuditEntry { door: "files"|"compute"|"network"|"other"; action; decision; reason; path? }`
@@ -168,8 +168,8 @@ The seams an engine swap must satisfy (confirmed `file:line`):
 
 ### Session Manager — `apps/desktop/src/main/sessions/manager.ts`
 
-- Path constants (`:51-53`): `GUEST_TSX=/opt/atelier/packages/agent/node_modules/.bin/tsx`,
-  `GUEST_CWD=/opt/atelier/packages/agent`, `GUEST_AGENT=src/cli-guest.ts`
+- Path constants (`:51-53`): `GUEST_TSX=/opt/atelier/packages/artisan/node_modules/.bin/tsx`,
+  `GUEST_CWD=/opt/atelier/packages/artisan`, `GUEST_AGENT=src/cli-guest.ts`
 - Launch (`:358-360`): `tsx src/cli-guest.ts --serve --workspace <guestPath> [--resume <id>]`
 - Injected env (`:361-377`): `ANTHROPIC_API_KEY`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`,
   `DISABLE_AUTOUPDATER/TELEMETRY/ERROR_REPORTING=1`, `HOME=/home/atelier`, `TMPDIR=/tmp`,
@@ -179,7 +179,7 @@ The seams an engine swap must satisfy (confirmed `file:line`):
 - Persistence — `store.ts:12-22`: `StoredSession { appId, folder, title, sdkSessionId, transcript[],
   status, updatedAt }`, file `work-sessions.json` in userData
 
-### One-shot path — `services/cmd/vmctl/main.go`
+### One-shot path — `services/cmd/atelierctl/main.go`
 
 - Egress (`:183-197`): default `["api.anthropic.com"]`; clock sync `setTime` (`:199-206`)
 - Exec (`:232-238`): `tsx src/cli-guest.ts --task <task>` in `GUEST_CWD`; env (`:208-226`) mirrors
@@ -188,11 +188,11 @@ The seams an engine swap must satisfy (confirmed `file:line`):
 ### Guest packaging — `image/`
 
 - `image/agent/Dockerfile`: base `ubuntu:24.04`, Node.js 22.x via NodeSource (`:23`), copies
-  `packages/` to `/opt/atelier/packages` (`:29`), `npm ci --omit=dev` in `packages/agent` (`:30-32`)
+  `packages/` to `/opt/atelier/packages` (`:29`), `npm ci --omit=dev` in `packages/artisan` (`:30-32`)
 - `image/build.sh`: `stage_agent_ctx` (`:56-66`) stages `packages/{agent,provider,protocol}`;
-  `cmd_guestd` (`:252-308`) cross-compiles guestd, builds the agent image, and packs both into ext4
-- `image/guest/init.sh:79`: mounts the guestd volume read-only at `/opt`
-  (`mount -t ext4 -o ro -L guestd /opt`), then `exec /opt/guestd/guestd` (`:81`)
+  `cmd_runner` (`:252-308`) cross-compiles runner, builds the agent image, and packs both into ext4
+- `image/guest/init.sh:79`: mounts the runner volume read-only at `/opt`
+  (`mount -t ext4 -o ro -L runner /opt`), then `exec /opt/runner/atelier-runner` (`:81`)
 - Agent engines pin: `"node": ">=22.12.0"`
 
 ### Egress jail — `services/internal/netjail/*`, `services/internal/broker/network.go`
@@ -204,7 +204,7 @@ The seams an engine swap must satisfy (confirmed `file:line`):
   (`:129-136`); pin TTL 5 min (`:21`)
 - `netjail/network.go`: TCP forwarder checks `AllowIP` before dial, else RST (`:187-211`); DNS via
   `pinResolver` (`:219-243`); no UDP/ICMP forwarders
-- guestd runs `gvforwarder` over vsock (`cmd/guestd/egress_linux.go:27-54`)
+- runner runs `gvforwarder` over vsock (`cmd/runner/egress_linux.go:27-54`)
 - For goal 1, the default allowlist must become per-provider (today hardcoded `api.anthropic.com`).
 
 ---
@@ -247,7 +247,7 @@ The seams an engine swap must satisfy (confirmed `file:line`):
 ### Phase 1 — goals 1 + 2: like-for-like swap behind the NDJSON seam
 
 Replace the TypeScript claude-agent-sdk agent with a Python OpenHands agent, keeping the existing
-NDJSON serve contract so the host (Session Manager + vmctl) is unchanged on the wire.
+NDJSON serve contract so the host (Session Manager + atelierctl) is unchanged on the wire.
 
 - **Engine:** `Agent(llm=LLM(...), tools=[TerminalTool, FileEditorTool, GrepTool])` + `Conversation`
   with `persistence_dir` for resume.
@@ -266,7 +266,7 @@ NDJSON serve contract so the host (Session Manager + vmctl) is unchanged on the 
     `SecurityAnalyzer`; keep emitting `policy` NDJSON events for the host audit stream.
 - **Packaging:** add Python 3.12 + `openhands-sdk` (plus Terminal/FileEditor/Grep tools, no browser)
   to the guest image; pack on the read-only `/opt` volume with writable `HOME` / `TMP` / cache. Update
-  `image/agent/Dockerfile` and the guestd-volume build.
+  `image/agent/Dockerfile` and the runner-volume build.
 
 **Outcome:** WORK keeps working; Claude lock-in is gone. Low conceptual risk — a straight
 substitution behind a seam we already own.
@@ -315,9 +315,9 @@ introduces.
   Feasible (headless, no browser), but mind the footprint: the dependency tree is larger than the core
   five and is not native-dep-free (`pillow`, `fakeredis[lua]`) — it must install for the guest's
   target arch (`linux/arm64` on macOS, `linux/amd64` on Windows), mirroring how the Node agent already
-  pins arch. Real changes to `image/agent/Dockerfile` and the guestd-volume build, and the in-guest
+  pins arch. Real changes to `image/agent/Dockerfile` and the runner-volume build, and the in-guest
   agent is rewritten in Python.
-- **Two runtimes or one?** guestd is Go (unaffected). The agent moves Node → Python. Decide whether
+- **Two runtimes or one?** runner is Go (unaffected). The agent moves Node → Python. Decide whether
   to drop Node from the guest entirely (if nothing else needs `tsx`) or keep both during transition.
 - **Adapter surface.** The `on_event` → NDJSON bridge, the stdin → Conversation bridge, and the
   policy → ConfirmationPolicy bridge are net-new code we own.

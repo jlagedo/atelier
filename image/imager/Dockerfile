@@ -4,7 +4,7 @@
 # into the image; only the opaque rootfs.ext4 blob is copied back to the (Windows) host,
 # so no permission round-trip through a non-Linux filesystem ever happens.
 #
-# build.sh feeds the inputs in via `docker cp` (rootfs.tar, init.sh, guestd, gvforwarder)
+# build.sh feeds the inputs in via `docker cp` (rootfs.tar, init.sh, runner, gvforwarder)
 # and overrides the command, so this image only needs the tooling.
 FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive

@@ -1,6 +1,6 @@
 # apps/desktop/src/main/host-client
 
-Hop 2: named-pipe JSON-RPC client → Go host service (`\\.\pipe\atelier-host`).
+Hop 2: named-pipe JSON-RPC client → Go host service (`\\.\pipe\atelierd`).
 
 - `client.ts` — low-level `PipeClient`: one connection, Content-Length framing,
   unary `call` + streaming `callStream`. Exports the pure codec (`encodeFrame`,
@@ -11,4 +11,4 @@ Hop 2: named-pipe JSON-RPC client → Go host service (`\\.\pipe\atelier-host`).
   streamed `exec/output` notifications never mix.
 - `types.ts` — protocol + agent-loop (`--serve` NDJSON) types, inlined to avoid a
   cross-package build dep on the generated `packages/protocol`. Keep in sync with
-  `packages/protocol/schema/protocol.json` and `packages/agent/src/cli-guest.ts`.
+  `packages/protocol/schema/protocol.json` and `packages/artisan/src/cli-guest.ts`.

@@ -9,7 +9,7 @@ import (
 )
 
 // Client is a minimal synchronous JSON-RPC client (one in-flight call at a time),
-// enough to drive the host from vmctl. A pipelined client comes later if needed.
+// enough to drive the host from atelierctl. A pipelined client comes later if needed.
 type Client struct {
 	conn net.Conn
 	br   *bufio.Reader

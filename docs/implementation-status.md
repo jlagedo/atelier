@@ -19,7 +19,7 @@
 - **"Vertical" early ≠ "reaches the UI."** `design.md` §6 accepts that Electron is the
   *last* milestone, not the first. So early slices are vertical through the stack *that
   exists at that point* — each ends in a real, demoable command from the **terminal /
-  `vmctl`**, not a mock. Once the bridge lands (M2), slices become genuinely
+  `atelierctl`**, not a mock. Once the bridge lands (M2), slices become genuinely
   feature-vertical: each of the **three doors** (§10) is its own slice.
 - Each slice below lists: **Goal · Work · Touches · Verify · Exit · Depends · Risk.**
 - Keep the **status box** at the top of each phase current: `☐` todo · `◐` in progress · `☑` done.
@@ -44,7 +44,7 @@ The scaffold went **wide and shallow**: every layer has a seam, almost no depth.
 |---|---|
 | Go RPC (Hop 2) — JSON-RPC 2.0 + Content-Length framing, server/client/codec | **Real**, tests green |
 | Broker / policy gate / audit log | **Real seam**; `getStatus` works, capability methods are gated stubs |
-| `internal/hcs`, `internal/vmm`, `internal/netjail`, `cmd/guestd` | **Stubs / empty** |
+| `internal/hcs`, `internal/vmm`, `internal/netjail`, `cmd/runner` | **Stubs / empty** |
 | Protocol codegen (`protocol.json` → TS + Go) | **Real**, zero-dep, regenerates |
 | Image build | **Partial** — rootfs stage real; **kernel + initrd are TODO** |
 | Desktop shell (hardened renderer, CSP, narrow IPC, one channel) | **Real shell**, no host-client wiring |
@@ -81,8 +81,8 @@ These were **not** settled in the original design and gated the early slices:
 | Phase | Milestones (§14) | Theme | Demoable from |
 |---|---|---|---|
 | **0** | — | Dev-environment unblock | shell |
-| **1** | M0–M2 | **Compute substrate**: boot a VM + exec bridge | `vmctl` |
-| **2** | M3–M4 | **The doors**: workspace files + egress jail | `vmctl` |
+| **1** | M0–M2 | **Compute substrate**: boot a VM + exec bridge | `atelierctl` |
+| **2** | M3–M4 | **The doors**: workspace files + egress jail | `atelierctl` |
 | **3** | M5a–M5b | **The agent**: SDK loop, host then in-guest | Node CLI |
 | **4** | M6 | **The product**: Electron shell + ship | Electron |
 
@@ -177,7 +177,7 @@ Tiny but blocking. No product code; just make the toolchain usable.
   to it (replace the gated stubs).
 - **Touches:** `internal/hcs/hcs_windows.go`, `internal/vmm/*`, `internal/broker/broker.go`,
   `protocol.json` (CreateVM doc field already present).
-- **Verify:** `vmctl createVM` + `startVM`; serial console (`hvc0`) shows the boot;
+- **Verify:** `atelierctl createVM` + `startVM`; serial console (`hvc0`) shows the boot;
   `cat /etc/os-release` = Ubuntu 22.04; `python3 --version` works.
 - **Exit:** our VM, our userland, started by our broker.
 - **Depends:** S0a (strategy), S1.1.  **Risk:** the JSON doc shape; root-disk attach;
@@ -191,7 +191,7 @@ Tiny but blocking. No product code; just make the toolchain usable.
   callbacks, no polling; vmcompute.dll lacks it — probed on the box). `MakeLCOWDoc` authors the
   schema-2.1 doc (no gcs/vsockexec tail; `init=/sbin/init`); `internal/vmm.Manager` builds the
   doc, drives the driver, and bridges COM1→named-pipe console; broker `createVM`/`startVM`/`stopVM`
-  now real (through the policy gate + audit); `vmctl` gained `-id/-kernel/-rootfs/-mem/-cpu`.
+  now real (through the policy gate + audit); `atelierctl` gained `-id/-kernel/-rootfs/-mem/-cpu`.
   Booted the **WSL2 built-in-driver kernel** (`6.6.114.1-microsoft-standard-WSL2`, **no initrd**)
   with `rootfs.vhd` SCSI-attached as **`/dev/sda`**, cmdline
   `console=ttyS0,115200 root=/dev/sda rw init=/sbin/init`. Serial log:
@@ -202,7 +202,7 @@ Tiny but blocking. No product code; just make the toolchain usable.
   from it) — live interactive proof lands with the exec bridge (**S2.2**). Empirical wins: HCS
   COM-port pipe = **host-as-server** (`winio.ListenPipe`, HCS connects in); `HcsGrantVmAccess(id, vhd)`
   is **required** for the VM-worker virtual account to open the disk; built-in-driver kernel boots a
-  VHD root with no initrd, as designed. Binaries `.spike/bin/{host,vmctl}.exe`; runner
+  VHD root with no initrd, as designed. Binaries `.spike/bin/{host,atelierctl}.exe`; runner
   `.spike/boot_ours.ps1` (disposable spike harness).
 
 ### S1.3 — M1: Matched kernel + initrd (the real §7 image)
@@ -231,7 +231,7 @@ Tiny but blocking. No product code; just make the toolchain usable.
   reference-only (every driver is already in the full initrd). Go side: threaded an optional
   `initrdPath` through `protocol.json` (regenerated) → broker `CreateVMParams` → `vmm.VMConfig` →
   `hcs.DocConfig.InitrdPath` (the doc field `LinuxKernelDirect.InitRdPath` was already wired in
-  S1.2) → `GrantVMAccess` (VM-worker account reads the initrd); `vmctl` gained `-initrd`. Empty
+  S1.2) → `GrantVMAccess` (VM-worker account reads the initrd); `atelierctl` gained `-initrd`. Empty
   `initrdPath` preserves the S1.2 no-initrd boot (regression-safe). **Empirical boot
   (`.spike/boot_ours.ps1`, elevated):** serial log shows `Linux version 6.8.0-117-generic` →
   initrd unpacked → `hv_vmbus`/`hv_storvsc` from the initrd → `[sda] … 4.00 GiB` →
@@ -247,18 +247,18 @@ Tiny but blocking. No product code; just make the toolchain usable.
   `/proc`,`/sys`,`/dev` into the real root on switch_root, so our init's re-`mount` returned
   "already mounted" (exit 32) and under `set -e` killed PID 1 → kernel panic; the mounts now
   tolerate it (`2>/dev/null || true`). `go build ./...`/`vet`/`test` green. Spike runner extended
-  with `-Initrd` (defaults to the bundle); binaries `.spike/bin/{host,vmctl}.exe`.
+  with `-Initrd` (defaults to the bundle); binaries `.spike/bin/{host,atelierctl}.exe`.
 
 ### S2.1 — M2: Guest daemon (hvsocket server side)
 - **Goal:** an in-VM agent that accepts commands over vsock and streams stdout.
-- **Work:** implement `cmd/guestd`: AF_VSOCK RPC server reusing `internal/rpc` (JSON-RPC +
+- **Work:** implement `cmd/runner`: AF_VSOCK RPC server reusing `internal/rpc` (JSON-RPC +
   Content-Length); one method `exec` → run a command, emit stdout/stderr as **JSON-RPC
-  notifications** (§8 streaming = notifications). `init.sh` execs `guestd` instead of `sh`.
-- **Touches:** `cmd/guestd/main.go`, `internal/vmm` (guest transport), `image/guest/init.sh`,
-  rootfs manifest (ship the `guestd` binary).
-- **Verify:** boot logs show `guestd` listening on the vsock port.
+  notifications** (§8 streaming = notifications). `init.sh` execs `runner` instead of `sh`.
+- **Touches:** `cmd/runner/main.go`, `internal/vmm` (guest transport), `image/guest/init.sh`,
+  rootfs manifest (ship the `runner` binary).
+- **Verify:** boot logs show `runner` listening on the vsock port.
 - **Exit:** guest daemon up at boot.
-- **Depends:** S1.2 (a booting VM).  **Risk:** static-linking `guestd` for the rootfs;
+- **Depends:** S1.2 (a booting VM).  **Risk:** static-linking `runner` for the rootfs;
   vsock port/CID conventions.
 - **Result (2026-05-20): DONE — our guest daemon comes up on the vsock port at boot.**
   Implemented the guest side end-to-end (host side is S2.2). **`internal/rpc` gained a server→client notification
@@ -268,31 +268,31 @@ Tiny but blocking. No product code; just make the toolchain usable.
   the one shared `GuestRPCPort = 5000` (host reaches it in S2.2 via the AF_HYPERV GUID
   `00001388-facb-11e6-bd58-64006a7986d3`) + a Linux `Listen()` over **`github.com/mdlayher/vsock`**
   (returns a `net.Listener`, plugs straight into `rpc.Server.Serve`) and a non-Linux stub so
-  `go build ./...` stays green on the Windows box. **`cmd/guestd`** (was a scaffold) now binds
+  `go build ./...` stays green on the Windows box. **`cmd/runner`** (was a scaffold) now binds
   vsock, serves `exec` (streams stdout/stderr as `exec/output` notifications, returns
   `{exitCode}`), and is robust as PID 1 (never `os.Exit`s — on listen failure it logs and
   blocks so the serial console stays readable, no kernel panic). Image: **`build.sh`**
-  cross-compiles guestd (`GOOS=linux GOARCH=amd64 CGO_ENABLED=0`, static) inside `ensure_tree`
-  and installs it to `/usr/sbin/guestd` like `init.sh` (`go` added to the tool checks);
-  **`init.sh`** now `modprobe hv_sock` then `exec /usr/sbin/guestd` (falls back to a shell if
+  cross-compiles runner (`GOOS=linux GOARCH=amd64 CGO_ENABLED=0`, static) inside `ensure_tree`
+  and installs it to `/usr/sbin/runner` like `init.sh` (`go` added to the tool checks);
+  **`init.sh`** now `modprobe hv_sock` then `exec /usr/sbin/runner` (falls back to a shell if
   absent). `exec`'s wire shapes are deliberately **not** in `protocol.json` yet — they land in
   S2.2 with the host caller. **Verified:** `go build ./...` (native + `GOOS=linux`), `go vet`,
   `go test` all green, incl. a new `rpc` test asserting two notifications arrive before the
   response, in order. **Empirical boot (`.spike/boot_ours.ps1`, elevated):** serial console shows
   `EXT4-fs (sda): mounted … r/w` → our init (`kernel 6.8.0-117-generic`, `modprobe ok`) →
   `NET: Registered PF_VSOCK protocol family` + `hv_vmbus: registering driver hv_sock` →
-  `atelier guest init: starting guestd …` →
-  **`{"msg":"atelier-guestd listening","transport":"vsock","port":5000}`**, then the guest
+  `atelier guest init: starting runner …` →
+  **`{"msg":"atelier-runner listening","transport":"vsock","port":5000}`**, then the guest
   holds PID 1 (no kernel panic) through a clean `stopVM` (`err:null`).
 
 ### S2.2 — M2: Host↔guest exec bridge (Hop 3)
 - **Goal:** **the** Phase-1 payoff — run a guest command from the host and stream output.
 - **Work:** host `vm.RPCClient` over **AF_HYPERV** (`Microsoft/go-winio` hvsock); broker
   `exec` method → policy gate → guest `exec`; relay notifications back over Hop 2; add
-  `vmctl exec`.
-- **Touches:** `internal/vmm` (host hvsock client), `internal/broker` (`exec`), `cmd/vmctl`,
+  `atelierctl exec`.
+- **Touches:** `internal/vmm` (host hvsock client), `internal/broker` (`exec`), `cmd/atelierctl`,
   `protocol.json` (`exec` method + params).
-- **Verify:** `vmctl exec -- ls -la /` streams the guest's output to the terminal,
+- **Verify:** `atelierctl exec -- ls -la /` streams the guest's output to the terminal,
   end-to-end across Hop 2 → Hop 3.
 - **Exit:** **host drives the guest.** Substrate complete.
 - **Depends:** S2.1.  **Risk:** hvsock connect handshake; back-pressure on streaming.
@@ -308,7 +308,7 @@ Tiny but blocking. No product code; just make the toolchain usable.
   new `Driver.RuntimeID`. `internal/vmm.Manager.DialGuest` (Windows; stub elsewhere) dials with
   go-winio's root `winio` package — `winio.Dial(ctx, &winio.HvsockAddr{VMID: runtimeID GUID,
   ServiceID: winio.VsockServiceID(5000)})` — caching the GUID on the instance and using a bounded
-  `HvsockDialer{Retries,RetryWait}` to absorb the `startVM`→guestd-bind race. The compute-system
+  `HvsockDialer{Retries,RetryWait}` to absorb the `startVM`→runner-bind race. The compute-system
   doc now also sets **`DefaultConnectSecurityDescriptor`** (host *connects*, so the bind SD alone
   isn't enough). **Broker `exec`** runs the gate (`door:"compute"`) → `DialGuest` → `CallStream`,
   relaying the guest's `exec/output` straight back to the Hop-2 caller via the per-connection
@@ -316,17 +316,17 @@ Tiny but blocking. No product code; just make the toolchain usable.
   a persistent pooled client because `rpc.Client` is single-in-flight; pooling/multiplexing is a
   later optimization). **Protocol:** `tools/protogen` gained array (`T[]`) and map (`map<K,V>`)
   types; `protocol.json` gained the `exec` method + `ExecParams`/`ExecResult`, regenerated
-  (generated Go/TS now carry `Args []string` / `Env map[string]string`). **`vmctl exec`**:
-  `vmctl exec -id vm0 [-cwd …] [-env K=V] -- <cmd> <args…>` streams stdout/stderr live and exits
+  (generated Go/TS now carry `Args []string` / `Env map[string]string`). **`atelierctl exec`**:
+  `atelierctl exec -id vm0 [-cwd …] [-env K=V] -- <cmd> <args…>` streams stdout/stderr live and exits
   with the guest's exit code (`flag` stops at `--`). `go build`/`vet`/`test` green (incl. the new
   `CallStream` test) on Windows and `GOOS=linux`. **Empirical (elevated, reusing the S2.1
-  bundle):** `vmctl exec -id vm0 -- ls -la /` streamed the guest root; `cat /etc/os-release` →
+  bundle):** `atelierctl exec -id vm0 -- ls -la /` streamed the guest root; `cat /etc/os-release` →
   **`Ubuntu 22.04.5 LTS`** (the live "it's really our rootfs" proof deferred since S1.2);
   `python3 --version` → `Python 3.10.12`; exit-code propagation (`sh -c 'exit 3'` → host
   `$LASTEXITCODE == 3`); stdout/stderr split (`… 1>out.txt` captured only `OUT`, `ERR` to the
   console); `-cwd /etc` → `/etc`; `-env GREETING=hello` → `hello`; unknown VM (`-id ghost`) →
   clean error, no hang. Spike runner `.spike/boot_ours.ps1` extended with the exec round-trip;
-  binaries `.spike/bin/{host,vmctl}.exe` rebuilt.
+  binaries `.spike/bin/{host,atelierctl}.exe` rebuilt.
 
 ---
 
@@ -335,7 +335,7 @@ Tiny but blocking. No product code; just make the toolchain usable.
 > Status: `☑ S3.1` `☑ S4.1`
 >
 > Now slices are genuinely **feature-vertical**: each door (§10) is one capability,
-> independently demoable through `vmctl`. **Files** and **Compute** are unlocked here;
+> independently demoable through `atelierctl`. **Files** and **Compute** are unlocked here;
 > **Network** is the egress jail.
 
 ### S3.1 — M3: Files door (workspace 9p share + jail)
@@ -357,7 +357,7 @@ Tiny but blocking. No product code; just make the toolchain usable.
   against hcsshim's guest `plan9.Mount`: HCS serves a Plan9 share over **hvsock**, so the guest
   **dials AF_VSOCK to the host (CID 2) on the share's port (564)**, takes the connection **fd**,
   and mounts `9p -o trans=fd,rfdno=N,wfdno=N,msize=65536,version=9p2000.L,aname=workspace`. A
-  shell can't hand an fd to `mount(2)`, so the mount lives in **guestd** (raw `unix.Socket`/
+  shell can't hand an fd to `mount(2)`, so the mount lives in **runner** (raw `unix.Socket`/
   `Connect`/`Mount`); the scaffolded `init.sh` `trans=virtio` line was wrong and was removed.
   **Pivoted from boot-time to runtime attach** (design call with the user): baking the share into
   the create doc would force a VM reboot to swap workspaces — a non-starter for the planned
@@ -365,28 +365,28 @@ Tiny but blocking. No product code; just make the toolchain usable.
   shares are added/removed on the **running** VM. Our `computecore.dll` bindings gained
   **`HcsModifyComputeSystem`** + `Driver.Modify`; `MakePlan9AddRequest`/`RemoveRequest` author the
   `ModifySettingRequest` (`ResourcePath VirtualMachine/Devices/Plan9/Shares`, `RequestType
-  Add`/`Remove`) — **host-side Settings only, no GuestRequest** (we run no GCS; guestd mounts
+  Add`/`Remove`) — **host-side Settings only, no GuestRequest** (we run no GCS; runner mounts
   itself). New broker verbs **`attachWorkspace`/`detachWorkspace`** (gate `door:"files"`, audited)
-  orchestrate both halves: host `GrantVMAccess`+`Modify` then a guestd `mount`/`unmount` RPC over
+  orchestrate both halves: host `GrantVMAccess`+`Modify` then a runner `mount`/`unmount` RPC over
   Hop 3; `attachWorkspace` auto-detaches any current workspace first, so swapping needs no reboot.
   **`readFile`/`writeFile`** are real (replacing the gated stubs): host-side, broker-mediated I/O
   jailed to the **currently-attached** workspace — `jailPath` rejects absolute paths, `..`
   escapes, and escaping symlinks (resolves the deepest existing ancestor so not-yet-created files
   are still vetted); content is **base64** on the wire so Excel/binary survive (the S2.2 lesson).
-  `vmctl` gained `attachWorkspace`/`detachWorkspace`/`readFile`/`writeFile`. Protocol grew the two
+  `atelierctl` gained `attachWorkspace`/`detachWorkspace`/`readFile`/`writeFile`. Protocol grew the two
   workspace verbs + `AttachWorkspaceParams` (regenerated). `go build`/`vet`/`test` green on Windows
   and `GOOS=linux` (incl. new `jailPath` + round-trip unit tests). **Empirical (elevated):** on a
   running VM, `attachWorkspace ws` → guest `/workspace` shows the host file; broker `writeFile` →
   guest `cat` sees it; guest write → broker `readFile` sees it; `readFile ../../..` is denied;
   **swap** `attachWorkspace ws2` flips `/workspace` to the second folder's file **with no reboot**;
   `detachWorkspace` unmounts it (guest `/workspace` empties, `readFile` → "files door not
-  configured"). Serial log shows guestd `mounted share … port 564` / `unmounted share`; every op
+  configured"). Serial log shows runner `mounted share … port 564` / `unmounted share`; every op
   audited `door=files`; no warnings/errors/panics. The VM-worker account's directory ACL via
   `HcsGrantVmAccess` sufficed both directions. Multi-share-per-VM / per-session `sessionId` +
   in-VM bwrap isolation (the multi-tab end-state) remain a later slice; the runtime-attach
   primitives built here are its foundation. Spike runner `.spike/boot_ours.ps1` extended with the
-  attach→round-trip→swap→detach flow; binaries `.spike/bin/{host,vmctl}.exe` rebuilt; rootfs
-  rebuilt to ship the RPC-mount guestd.
+  attach→round-trip→swap→detach flow; binaries `.spike/bin/{host,atelierctl}.exe` rebuilt; rootfs
+  rebuilt to ship the RPC-mount runner.
 
 ### S4.1 — M4: Network door (egress jail)
 - **Goal:** the guest reaches **only** allowlisted destinations; everything else blocked
@@ -409,7 +409,7 @@ Tiny but blocking. No product code; just make the toolchain usable.
   gVisor pattern** is to allow/deny in the TCP **forwarder handler** (`r.ID()` → complete or RST).
 - **Result (2026-05-20): DONE — the Network door is a default-deny egress jail, verified live.**
   The guest gets a `tap0` from **`containers/gvisor-tap-vsock`** (v0.8.9): its `gvforwarder` (built
-  from the lib's `cmd/vm`, shipped in the rootfs, supervised by guestd) dials AF_VSOCK CID 2 :
+  from the lib's `cmd/vm`, shipped in the rootfs, supervised by runner) dials AF_VSOCK CID 2 :
   **1024** and bridges the tap to the host's user-mode TCP/IP stack served over an **AF_HYPERV
   listener** — the host *is* the guest's whole network (DHCP/DNS/forward). The egress jail is
   **composed, not forked**: `internal/netjail` reuses the library's exported DHCP/DNS/tap/stack but
@@ -456,20 +456,20 @@ Tiny but blocking. No product code; just make the toolchain usable.
 
 ### S5a.1 — M5a: Agent loop on the HOST (Topology A)
 - **Goal:** first end-to-end agent on the real sandbox — brain outside, hands inside.
-- **Work:** `packages/agent` hosts `@anthropic-ai/claude-agent-sdk`. Wire seams:
+- **Work:** `packages/artisan` hosts `@anthropic-ai/claude-agent-sdk`. Wire seams:
   `executeTool` → broker `exec`/file methods (Hop 2 → guest Hop 3); `callModel` →
   `packages/provider` seam (§13); approvals → broker
   policy gate. Standalone Node CLI, **not** welded to Electron (so S5b reuses it verbatim).
-- **Touches:** `packages/agent/*`, `packages/provider/*`, `protocol.json` (tool/approval verbs).
+- **Touches:** `packages/artisan/*`, `packages/provider/*`, `protocol.json` (tool/approval verbs).
 - **Verify:** a task — *"read `/workspace/orders.csv`, compute totals in Python, write
   `summary.csv`"* — completes via the SDK loop, with the file write gated by an approval.
 - **Exit:** working agent against a real VM, from a host CLI.
 - **Depends:** S3.1 (files), S4.1 (egress for any MCP/network).  **Risk:** seam wiring;
   provider auth/keys; approval round-trip latency.
-- **Result (2026-05-20):** ✅ Done. `packages/agent` (standalone npm pkg, `tsx`) hosts
+- **Result (2026-05-20):** ✅ Done. `packages/artisan` (standalone npm pkg, `tsx`) hosts
   `@anthropic-ai/claude-agent-sdk` and supplies the three seams: **executeTool** = an in-process
   MCP server (`shell`/`read_file`/`write_file`) over a new TS Hop-2 client (`src/broker/client.ts`:
-  named pipe + Content-Length + JSON-RPC 2.0, base64 exec/file framing matching `vmctl`);
+  named pipe + Content-Length + JSON-RPC 2.0, base64 exec/file framing matching `atelierctl`);
   **callModel** = `packages/provider` (model `claude-sonnet-4-6` + `ANTHROPIC_API_KEY` from env,
   `ANTHROPIC_BASE_URL` for endpoint override); **approvals** = a pre-baked policy via the SDK's
   `canUseTool` (no end-user prompt — enterprise-shaped, audited). Live run against `vm0`: agent did
@@ -486,7 +486,7 @@ Tiny but blocking. No product code; just make the toolchain usable.
 - **Work:** ship Node + the agent module in the rootfs (manifest already lists `node`);
   reverse the `callModel`/MCP/approval transports to go **guest → host broker** over Hop 3.
   Same code, two seams differ (§8 Topology A/B).
-- **Touches:** `packages/agent` (transport seam), `cmd/guestd` (host-bound RPC), rootfs manifest.
+- **Touches:** `packages/artisan` (transport seam), `cmd/runner` (host-bound RPC), rootfs manifest.
 - **Verify:** the S5a.1 task passes again, loop now **inside** the VM; pull the host process
   and confirm the agent can't reach the model except through the broker.
 - **Exit:** Cowork-parity containment.
@@ -498,11 +498,11 @@ Tiny but blocking. No product code; just make the toolchain usable.
   no broker client, no `mcpServers`); **approvals** stayed the pre-baked `Policy` via `canUseTool`,
   extended with a `mode:"guest"` map that allows the in-cage coding set (audited) and denies
   out-of-cage tools (`WebFetch`/`WebSearch`) + unknowns (`src/seams/policy.ts`). **callModel** escapes
-  via the **existing egress jail** (S4.1): `vmctl agent` calls `setEgressPolicy(["api.anthropic.com"])`
-  then execs the agent over the broker — so **no new guestd/broker/protocol code was needed**.
+  via the **existing egress jail** (S4.1): `atelierctl agent` calls `setEgressPolicy(["api.anthropic.com"])`
+  then execs the agent over the broker — so **no new runner/broker/protocol code was needed**.
   Packaging: the rootfs ships **NodeSource Node 22** (apt's is v12) as the runtime; the agent +
-  `node_modules` ship on the guestd volume at `/opt/atelier/packages/agent` (`image/agent/Dockerfile`
-  + `stage_agent_ctx` in `image/build.sh`, packed by `cmd_guestd`; mounted at `/opt`), **not** baked
+  `node_modules` ship on the runner volume at `/opt/atelier/packages/artisan` (`image/agent/Dockerfile`
+  + `stage_agent_ctx` in `image/build.sh`, packed by `cmd_runner`; mounted at `/opt`), **not** baked
   into the rootfs; runs via `tsx`. Live run against `vm0`: `node v22.22.2`, agent did built-in
   Read → Write and produced `/workspace/summary.csv` (grand total **37.50**, identical on the host via
   9p), the write **audited** by policy; exit 0. **Containment proof:** clearing the allowlist
@@ -547,14 +547,14 @@ Tiny but blocking. No product code; just make the toolchain usable.
     own folder mounted at `/sessions/<id>` and its **own long-lived in-guest agent loop**; new composer
     messages feed the SAME running loop (SDK streaming input). Required **two backend extensions**:
     (1) **concurrent multi-share 9p mounts** in one VM (broker `mounts` map + per-session vsock port pool;
-    `hcs`/`vm`/`vsock`/`guestd` parameterized by tag/port), and (2) a **host→guest input channel**
-    (`execInput`: guestd stdin registry + broker route) to push turns into a running loop.
+    `hcs`/`vm`/`vsock`/`runner` parameterized by tag/port), and (2) a **host→guest input channel**
+    (`execInput`: runner stdin registry + broker route) to push turns into a running loop.
   - **Hibernate/resume to bound memory.** A host-owned state machine caps live loops: an idle timer + a
     max-active LRU **hibernate** a session (export its context → durable store → kill loop → detach mount);
     selecting a dormant session **resumes** it (re-mount + `query({resume})`). Built on the SDK's
     `session_id` + `resume` (verified). `apps/desktop/src/main/sessions/{manager,store}.ts`.
   - **Touched:** `packages/protocol` (+`sessionId`/`execInput`, optional-field codegen), `services/internal/
-    {broker,vm,hcs,vsock}`, `services/cmd/{guestd,vmctl}`, `packages/agent/src/cli-guest.ts`,
+    {broker,vm,hcs,vsock}`, `services/cmd/{runner,atelierctl}`, `packages/artisan/src/cli-guest.ts`,
     `apps/desktop/src/main/{host-client,sessions,workspace,ipc}/*`, `src/preload`, `src/renderer/*`.
   - **Deferred:** chat-mode wiring (stays mock); user-turn persistence in the rebuilt transcript;
     surviving a vm0 reboot for *live* sessions; per-session OS isolation inside the shared VM.

@@ -4,7 +4,7 @@ package main
 
 import "errors"
 
-// guestd only ever sets the clock in the Linux guest, but cmd/guestd must still
+// runner only ever sets the clock in the Linux guest, but cmd/runner must still
 // build on the Windows dev box (go build ./...). The real syscall lives in
 // clock_linux.go; this stub keeps the package compiling elsewhere.
 

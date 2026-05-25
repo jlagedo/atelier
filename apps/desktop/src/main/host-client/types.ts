@@ -2,7 +2,7 @@
 // on the generated `packages/protocol` (gitignored, built by protogen). These
 // mirror packages/protocol/schema/protocol.json — keep them in sync by hand. The
 // LoopEvent/LoopControl unions mirror the in-guest agent's --serve NDJSON wire
-// (packages/agent/src/cli-guest.ts).
+// (packages/artisan/src/cli-guest.ts).
 
 export interface Status {
   service: string;
@@ -18,9 +18,9 @@ export interface CreateVMParams {
   kernelPath: string;
   initrdPath: string;
   rootfsPath: string;
-  // Host path to the guestd volume (its own ro image, attached as a second disk and
-  // mounted by init.sh). guestd is not baked into the rootfs, so this is its sole delivery.
-  guestdImagePath: string;
+  // Host path to the runner volume (its own ro image, attached as a second disk and
+  // mounted by init.sh). runner is not baked into the rootfs, so this is its sole delivery.
+  runnerImagePath: string;
   memoryMB: number;
   cpuCount: number;
 }

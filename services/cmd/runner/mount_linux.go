@@ -20,7 +20,7 @@ const vmaddrCIDHost = 2
 
 // mountShare mounts a host workspace share at target (the Files door, S3.1 / S6 / S7).
 //
-// The same guestd binary boots under two hypervisors with different file-sharing
+// The same runner binary boots under two hypervisors with different file-sharing
 // primitives, so the transport is chosen at runtime, not at build time: if this kernel
 // has virtio-fs (Apple Virtualization.framework) we mount the one virtio-fs device
 // (mountVirtiofsShare); otherwise we fall back to the 9p-over-vsock path (Hyper-V/HCS).
@@ -90,7 +90,7 @@ func mountVirtiofsShare(target string) error {
 // HCS serves the share over hvsock, so we dial AF_VSOCK to the host on the share's port,
 // then mount 9p over that connected socket with trans=fd (the kernel's 9p client has no
 // hvsock transport, so it rides our fd). This mirrors hcsshim's guest-side plan9.Mount.
-// A shell can't pass an fd to mount(2), which is why this lives in guestd.
+// A shell can't pass an fd to mount(2), which is why this lives in runner.
 func mount9pShare(port uint32, tag, target string) error {
 	fd, err := unix.Socket(unix.AF_VSOCK, unix.SOCK_STREAM, 0)
 	if err != nil {
@@ -167,7 +167,7 @@ func unescapeMount(s string) string {
 
 // validShareTag rejects a tag that isn't a safe virtio-fs mount tag / 9p aname (it also
 // becomes a directory name under a MultipleDirectoryShare). The host driver validates the
-// same way; guestd trusts only the broker, but the check is cheap defense in depth.
+// same way; runner trusts only the broker, but the check is cheap defense in depth.
 func validShareTag(tag string) error {
 	if tag == "" || len(tag) >= 36 {
 		return fmt.Errorf("invalid share tag %q", tag)

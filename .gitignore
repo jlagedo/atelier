@@ -24,9 +24,9 @@ apps/desktop/test-results/
 services/bin/*
 !services/bin/.gitkeep
 # Safety net for a naive `go build ./cmd/X` that drops an extensionless binary at the module root.
-/services/guestd
-/services/host
-/services/vmctl
+/services/runner
+/services/atelierd
+/services/atelierctl
 
 # env / secrets
 .env

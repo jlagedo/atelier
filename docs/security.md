@@ -37,12 +37,12 @@ key residency, syscall filtering, resource limits, and shared-VM session separat
 | Area | Current state | Code reference | Finding |
 |---|---|---|---|
 | Hypervisor boundary | Dedicated Linux utility VM driven by HCS/VZ | `services/internal/hcs`, `services/internal/vmm` | — |
-| Agent identity | Launched as uid/gid 1001, not root | `services/cmd/guestd/sandbox_linux.go` | R-01 |
-| Agent process sandbox | bwrap user/pid/ipc/uts/mnt namespaces; caps dropped | `services/cmd/guestd/sandbox_linux.go` | R-01, R-03 |
+| Agent identity | Launched as uid/gid 1001, not root | `services/cmd/runner/sandbox_linux.go` | R-01 |
+| Agent process sandbox | bwrap user/pid/ipc/uts/mnt namespaces; caps dropped | `services/cmd/runner/sandbox_linux.go` | R-01, R-03 |
 | Root filesystem | rootfs read-only; writable paths are tmpfs/session shares | `services/internal/hcs/doc.go`, `image/guest/init.sh` | R-02 |
 | Egress | runtime hostname allowlist + DNS pinning; default deny | `services/internal/netjail` | F-05 |
-| Model credential | still passed into the in-guest process environment | `apps/desktop/src/main/sessions/manager.ts`, `packages/agent/src/cli-guest.ts` | F-02 |
-| Seccomp | cBPF profile applied via `bwrap --seccomp` (Docker default, no-cap) | `services/cmd/guestd/sandbox_linux.go`, `image/agent/seccomp` | F-13 |
+| Model credential | still passed into the in-guest process environment | `apps/desktop/src/main/sessions/manager.ts`, `packages/artisan/src/cli-guest.ts` | F-02 |
+| Seccomp | cBPF profile applied via `bwrap --seccomp` (Docker default, no-cap) | `services/cmd/runner/sandbox_linux.go`, `image/agent/seccomp` | F-13 |
 | Resource limits | no cgroup limits yet | — | F-06 |
 
 **Open finding counts (headline severity):** 1 critical · 10 high · 5 medium.
@@ -71,19 +71,19 @@ on VM teardown. **Rotate the exposed key now** (it was observed during assessmen
 
 ### High
 
-#### F-03 · guestd volume contents readable inside the sandbox
+#### F-03 · runner volume contents readable inside the sandbox
 - **Severity:** High · **Status:** Open · **First seen:** 2026-05-24 · **Prior refs:** 2026-05-24 #2, #3
 
 **Description.** `--bind / /` in the bwrap invocation exposes all host mounts, including the
-read-only guestd volume mounted at `/opt`. Both the `guestd` Go binary (`/opt/guestd/guestd`) and the
+read-only runner volume mounted at `/opt`. Both the `runner` Go binary (`/opt/runner/atelier-runner`) and the
 entire in-guest agent source tree (`/opt/atelier`) are fully readable. This lets an in-sandbox
 attacker enumerate the host-comms layer and read the complete policy engine, broker client, and
 canonical RPC schema to aid targeted exploitation:
 ```
-/opt/guestd/guestd                                   ← host comms binary (4 MB Go ELF)
-/opt/atelier/packages/agent/src/seams/policy.ts      ← full policy engine (allow/deny sets)
-/opt/atelier/packages/agent/src/broker/client.ts     ← broker client
-/opt/atelier/packages/agent/src/cli-guest.ts         ← guest entrypoint
+/opt/runner/atelier-runner                                   ← host comms binary (4 MB Go ELF)
+/opt/atelier/packages/artisan/src/seams/policy.ts      ← full policy engine (allow/deny sets)
+/opt/atelier/packages/artisan/src/broker/client.ts     ← broker client
+/opt/atelier/packages/artisan/src/cli-guest.ts         ← guest entrypoint
 /opt/atelier/packages/protocol/schema/protocol.json  ← full RPC schema (incl. setEgressPolicy)
 ```
 
@@ -91,9 +91,9 @@ canonical RPC schema to aid targeted exploitation:
 readable, including from within a user namespace.
 
 **Recommendation.** Shadow the mount with `--tmpfs /opt` placed **after** `--bind / /` (bwrap
-applies bind args in order; a later entry shadows the earlier path for that mount). Because guestd
+applies bind args in order; a later entry shadows the earlier path for that mount). Because runner
 and the agent now share the single `/opt` volume, one `--tmpfs /opt` covers both (this previously
-required separate `/opt/guestd` and `/opt/atelier` shadows). Verify with `cat /proc/mounts` in a
+required separate `/opt/runner` and `/opt/atelier` shadows). Verify with `cat /proc/mounts` in a
 fresh session.
 
 #### F-04 · `kptr_restrict = 0` — kernel pointer restriction disabled
@@ -254,8 +254,8 @@ The agent and children ran as `uid=0` with all 41 capabilities (incl. `CAP_SYS_M
 `CAP_SYS_ADMIN`, `CAP_SYS_PTRACE`, `CAP_SYS_RAWIO`, `CAP_DAC_OVERRIDE`). **Fix:** the agent is now
 launched inside bubblewrap as uid/gid **1001** with `--cap-drop ALL` and fresh user/pid/ipc/uts/mnt
 namespaces (net deliberately shared so egress still works), with the read-only root bind-mounted. A
-subtle gap was caught and closed: guestd (PID 1, root) launching bwrap mapped sandbox-uid 1001 onto
-host-uid-0 (`uid_map: 1001 0 1`), making the agent DAC-root; guestd now drops the child's real uid/gid
+subtle gap was caught and closed: runner (PID 1, root) launching bwrap mapped sandbox-uid 1001 onto
+host-uid-0 (`uid_map: 1001 0 1`), making the agent DAC-root; runner now drops the child's real uid/gid
 to 1001 (`SysProcAttr.Credential`) **before** exec'ing bwrap, so the namespace can only map to
 host-1001. *Verified in-guest:* `id → uid=1001`; `CapEff/Prm/Bnd = 0`; `cat /etc/shadow → Permission
 denied`; `/workspace`, `/home/atelier`, `/tmp` writable, `/run`, `/sessions` denied; full agent run
@@ -278,7 +278,7 @@ EROFS`.
 
 Every process originally shared all namespaces with PID 1. **Fix:** bubblewrap gives the agent its own
 user, pid, ipc, uts, and mnt namespaces; the network namespace is intentionally shared (the egress
-jail is the boundary). The trusted control-plane processes (guestd, gvforwarder) still share
+jail is the boundary). The trusted control-plane processes (runner, gvforwarder) still share
 namespaces among themselves.
 
 #### R-04 · SSH host keys world-readable — **Resolved**
@@ -297,18 +297,18 @@ egress allow/deny was re-verified (`api.anthropic.com` reachable; other hosts `N
 - **Severity:** Medium · **First seen:** 2026-05-22 · **Prior refs:** 2026-05-24 #5, CRIT-02 (logged Critical), backlog C5
 
 A cBPF profile is now installed for every non-privileged exec via `bwrap --seccomp <fd>`
-(`services/cmd/guestd/sandbox_linux.go`). The profile is Docker's default seccomp allowlist, vendored
+(`services/cmd/runner/sandbox_linux.go`). The profile is Docker's default seccomp allowlist, vendored
 at `image/agent/seccomp/default.json` and compiled to an arch-correct blob by `compile-seccomp.py`
 **inside the target-arch agent image** (`--platform linux/{amd64,arm64}`), then packed onto the
-read-only guestd volume at `/opt/guestd/seccomp.bpf`. guestd opens the blob and hands it to the bwrap
+read-only runner volume at `/opt/runner/seccomp.bpf`. runner opens the blob and hands it to the bwrap
 child on fd 3 (Go `ExtraFiles[0]`); a missing/unreadable blob **fails the exec closed** rather than
 running unfiltered. The privileged operator escape hatch is unchanged (no filter, by design). The
 profile is evaluated as a **no-capability** process (matching `--cap-drop ALL`), so the
 CAP_SYS_ADMIN-gated entries (`unshare`, `setns`, `mount`, `clone3`, `bpf`, `perf_event_open`, …) fall
 through to the default `ERRNO(EPERM)` and `clone` is restricted to non-namespace flags. *Verified:*
 the compiled blob blocks `unshare(CLONE_NEWUSER)` with `EPERM` while still allowing thread creation
-(`clone3`→`ENOSYS`→`clone` fallback) and `execve`; guestd unit tests cover the `--seccomp 3` wiring
-and the fail-closed path; the blob is confirmed packed at `/opt/guestd/seccomp.bpf` (mode 0644). A
+(`clone3`→`ENOSYS`→`clone` fallback) and `execve`; runner unit tests cover the `--seccomp 3` wiring
+and the fail-closed path; the blob is confirmed packed at `/opt/runner/seccomp.bpf` (mode 0644). A
 live VZ boot (`npm run e2e:host`) confirms a sandboxed exec runs under `Seccomp: 2` / `NoNewPrivs: 1`,
 `unshare(CLONE_NEWUSER)` returns `EPERM`, and both agent loops (one-shot + serve) complete
 unstrangled.
@@ -378,7 +378,7 @@ Ordered by leverage; references the finding IDs above (no re-description here).
 
 ## Architecture Notes
 
-The vsock transport (`vmw_vsock_virtio_transport`) is the guestd ↔ host channel. The broker RPC
+The vsock transport (`vmw_vsock_virtio_transport`) is the runner ↔ host channel. The broker RPC
 protocol (`protocol.json`) exposes powerful operations including `setEgressPolicy` and
 `attachWorkspace`; keeping the vsock channel unreachable from inside the bwrap sandbox
 (no `/dev/vsock` exposed — ✅ already the case) is important to maintain.

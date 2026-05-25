@@ -1,6 +1,6 @@
 // Hop 2 (design.md §8): the TypeScript half of the broker client. Speaks JSON-RPC
 // 2.0 over the host named pipe with LSP-style Content-Length framing — the exact
-// wire contract the Go `services/cmd/vmctl` client uses. exec streams the guest's
+// wire contract the Go `services/cmd/atelierctl` client uses. exec streams the guest's
 // stdout/stderr as `exec/output` notifications (base64) before returning an exit
 // code; file content travels base64 so binary files survive the JSON wire.
 
@@ -17,7 +17,7 @@ import {
 } from "../protocol";
 
 /** The broker's named pipe (design.md §8 — Hop 2). */
-export const DEFAULT_PIPE = String.raw`\\.\pipe\atelier-host`;
+export const DEFAULT_PIPE = String.raw`\\.\pipe\atelierd`;
 
 interface RpcRequest {
   jsonrpc: "2.0";
@@ -122,7 +122,7 @@ export class BrokerClient {
   private readonly connected: Promise<void>;
   private closed = false;
 
-  constructor(address: string = process.env.ATELIER_HOST_PIPE || DEFAULT_PIPE) {
+  constructor(address: string = process.env.ATELIER_PIPE || DEFAULT_PIPE) {
     this.socket = net.createConnection({ path: address });
     this.socket.on("data", (chunk) => this.onData(chunk));
     this.socket.on("error", (err) => this.failAll(err));

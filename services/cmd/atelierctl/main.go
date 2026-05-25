@@ -1,24 +1,24 @@
-// Command vmctl is a dev CLI that drives the host from a terminal — no Electron
+// Command atelierctl is a dev CLI that drives the host from a terminal — no Electron
 // needed (design.md §8, M0-M2). It sends one JSON-RPC call over Hop 2 and prints
 // the result.
 //
 // Usage:
 //
-//	vmctl [method] [flags]
+//	atelierctl [method] [flags]
 //
-//	vmctl getStatus
-//	vmctl createVM -id vm0 -kernel C:\path\vmlinuz -rootfs E:\path\rootfs.vhd [-initrd C:\path\initrd -guestd B\guestd.img -mem 2048 -cpu 2]
-//	vmctl startVM  -id vm0
-//	vmctl stopVM   -id vm0
-//	vmctl exec     -id vm0 [-cwd /tmp] [-env K=V ...] [-session s1] -- ls -la /
-//	vmctl execInput -id vm0 -session s1 [-content "..."]  (else reads stdin; feeds the session's stdin)
-//	vmctl attachWorkspace -id vm0 -path E:\path\folder   (share folder at /workspace)
-//	vmctl detachWorkspace -id vm0
-//	vmctl readFile  -path notes.txt                      (prints to stdout)
-//	vmctl writeFile -path out.txt [-content "..."]       (else reads stdin)
-//	vmctl setEgressPolicy -allow pypi.org,files.pythonhosted.org  (empty = deny all)
-//	vmctl setTime  -id vm0                               (push host wall clock into the guest)
-//	vmctl agent    -id vm0 -- "<task>"   (S5b.1: run the agent loop INSIDE the guest)
+//	atelierctl getStatus
+//	atelierctl createVM -id vm0 -kernel C:\path\vmlinuz -rootfs E:\path\rootfs.vhd [-initrd C:\path\initrd -runner B\runner.img -mem 2048 -cpu 2]
+//	atelierctl startVM  -id vm0
+//	atelierctl stopVM   -id vm0
+//	atelierctl exec     -id vm0 [-cwd /tmp] [-env K=V ...] [-session s1] -- ls -la /
+//	atelierctl execInput -id vm0 -session s1 [-content "..."]  (else reads stdin; feeds the session's stdin)
+//	atelierctl attachWorkspace -id vm0 -path E:\path\folder   (share folder at /workspace)
+//	atelierctl detachWorkspace -id vm0
+//	atelierctl readFile  -path notes.txt                      (prints to stdout)
+//	atelierctl writeFile -path out.txt [-content "..."]       (else reads stdin)
+//	atelierctl setEgressPolicy -allow pypi.org,files.pythonhosted.org  (empty = deny all)
+//	atelierctl setTime  -id vm0                               (push host wall clock into the guest)
+//	atelierctl agent    -id vm0 -- "<task>"   (S5b.1: run the agent loop INSIDE the guest)
 package main
 
 import (
@@ -96,7 +96,7 @@ func main() {
 	kernel := fs.String("kernel", "", "host path to a direct-boot kernel")
 	initrd := fs.String("initrd", "", "host path to the boot initrd (optional)")
 	rootfs := fs.String("rootfs", "", "host path to the rootfs VHD")
-	guestd := fs.String("guestd", "", "host path to the guestd volume image (darwin/VZ; attached ro as a second disk)")
+	runner := fs.String("runner", "", "host path to the runner volume image (darwin/VZ; attached ro as a second disk)")
 	mem := fs.Uint64("mem", 0, "memory in MB (0 = broker default)")
 	cpu := fs.Int("cpu", 0, "processor count (0 = broker default)")
 	cwd := fs.String("cwd", "", "working directory in the guest (exec)")
@@ -121,11 +121,11 @@ func main() {
 
 	// exec streams the guest's stdout/stderr back as notifications, then returns
 	// an exit code we propagate. The command vector is everything after the flags
-	// (use "--" to separate, e.g. `vmctl exec -id vm0 -- ls -la /`).
+	// (use "--" to separate, e.g. `atelierctl exec -id vm0 -- ls -la /`).
 	if method == "exec" {
 		cmdv := fs.Args()
 		if len(cmdv) == 0 {
-			fmt.Fprintln(os.Stderr, "exec: missing command (usage: vmctl exec -id vm0 -- cmd args...)")
+			fmt.Fprintln(os.Stderr, "exec: missing command (usage: atelierctl exec -id vm0 -- cmd args...)")
 			os.Exit(2)
 		}
 		params := map[string]any{
@@ -164,14 +164,14 @@ func main() {
 
 	// agent (S5b.1) runs the agent loop INSIDE the guest (Topology B). We open
 	// egress to the model host + pip/npm registries (default; -allow overrides), then
-	// exec the in-guest agent CLI shipped on the guestd volume at /opt/atelier. The loop's
+	// exec the in-guest agent CLI shipped on the runner volume at /opt/atelier. The loop's
 	// tools are the SDK's built-ins acting on the guest fs; only the model call
 	// leaves the cage. The API key rides in via the exec env (the operator's env);
 	// telemetry/autoupdate are disabled so the allowlist can stay tight.
 	if method == "agent" {
 		task := strings.TrimSpace(strings.Join(fs.Args(), " "))
 		if task == "" {
-			fmt.Fprintln(os.Stderr, `agent: missing task (usage: vmctl agent -id vm0 -- "<task>")`)
+			fmt.Fprintln(os.Stderr, `agent: missing task (usage: atelierctl agent -id vm0 -- "<task>")`)
 			os.Exit(2)
 		}
 		apiKey := os.Getenv("ANTHROPIC_API_KEY")
@@ -231,9 +231,9 @@ func main() {
 
 		params := map[string]any{
 			"id":   *id,
-			"cmd":  "/opt/atelier/packages/agent/node_modules/.bin/tsx",
+			"cmd":  "/opt/atelier/packages/artisan/node_modules/.bin/tsx",
 			"args": []string{"src/cli-guest.ts", "--task", task},
-			"cwd":  "/opt/atelier/packages/agent",
+			"cwd":  "/opt/atelier/packages/artisan",
 			"env":  genv,
 		}
 		os.Exit(execStream(client, params))
@@ -287,7 +287,7 @@ func main() {
 			"kernelPath":      *kernel,
 			"initrdPath":      *initrd,
 			"rootfsPath":      *rootfs,
-			"guestdImagePath": *guestd,
+			"runnerImagePath": *runner,
 			"memoryMB":        *mem,
 			"cpuCount":        *cpu,
 		}

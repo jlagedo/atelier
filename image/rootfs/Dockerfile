@@ -7,7 +7,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Manifest (design.md §7): init shell, python3+pip, git, ripgrep, CA certs.
 # Node is installed from NodeSource below (not apt — Ubuntu 22.04's `nodejs` is
-# v12, far too old for the agent SDK). The guest bridge daemon (guestd, design.md
+# v12, far too old for the agent SDK). The guest bridge daemon (runner, design.md
 # §8 Hop 3) is cross-compiled and injected by image/build.sh (not apt).
 #
 # The matched guest kernel (design.md §7 coupling rule) is installed here too, so
@@ -21,7 +21,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # meta only recommends it, and --no-install-recommends would drop it) so the kernel
 # postinst generates /boot/initrd.img-<ver>. image/build.sh extracts vmlinuz +
 # initrd from /boot.
-# Networking is static (CRIT-01/05 hardening): guestd configures tap0 itself
+# Networking is static (CRIT-01/05 hardening): runner configures tap0 itself
 # (192.168.127.2/24, gateway .1) and runs gvforwarder with -preexisting, so no DHCP
 # client is needed. iproute2 brings the interface up (and inspects egress); curl
 # exercises it. bubblewrap (bwrap) sandboxes the in-guest agent as a non-root user
@@ -45,8 +45,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Modern Node + npm (NodeSource). The in-guest agent loop (Topology B, S5b.1) runs via
 # tsx under this Node runtime; the SDK requires Node >=18, pin the 22.x line to match
-# packages/agent's engines. (The agent's own code + node_modules are NOT baked here — they
-# ship on the guestd volume; see /opt below and image/agent/Dockerfile.)
+# packages/artisan's engines. (The agent's own code + node_modules are NOT baked here — they
+# ship on the runner volume; see /opt below and image/agent/Dockerfile.)
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
@@ -54,15 +54,15 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 # /workspace is the only persistent mount (9p/virtiofs share from the host).
 RUN mkdir -p /workspace
 
-# /opt is the mountpoint for the guestd volume (LABEL=guestd), which carries BOTH guestd
-# (/opt/guestd/guestd) and the in-guest agent (/opt/atelier) — neither is baked into the
-# rootfs, so both iterate in seconds without a rootfs rebuild (image/build.sh guestd,
+# /opt is the mountpoint for the runner volume (LABEL=runner), which carries BOTH runner
+# (/opt/runner/atelier-runner) and the in-guest agent (/opt/atelier) — neither is baked into the
+# rootfs, so both iterate in seconds without a rootfs rebuild (image/build.sh runner,
 # image/guest/init.sh). It exists in the base image; the mount shadows it at boot.
 
 # Non-root agent user (CRIT-01): the in-guest agent drops to uid 1001 via bwrap. The agent
 # tree under /opt is root-owned and read-only at runtime (the agent only reads/execs it); its
 # writable HOME is /home/atelier (a tmpfs at boot — see image/guest/init.sh). /sessions is the
-# parent of per-session 9p mount points (also a tmpfs at boot), so guestd can mkdir under it on
+# parent of per-session 9p mount points (also a tmpfs at boot), so runner can mkdir under it on
 # the read-only root.
 RUN useradd -u 1001 -m -d /home/atelier -s /usr/sbin/nologin atelier \
     && mkdir -p /sessions

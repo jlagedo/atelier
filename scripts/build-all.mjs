@@ -16,7 +16,7 @@
 // Zero deps.
 //
 // Usage:
-//   node scripts/build-all.mjs                      debug (default): host + desktop + guestd volume (full VM image skipped)
+//   node scripts/build-all.mjs                      debug (default): host + desktop + runner volume (full VM image skipped)
 //   node scripts/build-all.mjs --config=release     strip Go symbols, self-contained build/release
 //   node scripts/build-all.mjs --only=host          just protogen + host binaries (+codesign on mac)
 //   node scripts/build-all.mjs --only=image         just the VM image bundle
@@ -25,7 +25,7 @@
 //   node scripts/build-all.mjs --no-verify          build artifacts only
 //   node scripts/build-all.mjs --image              also build the heavy VM image (rootfs+kernel+initrd); off by default
 //
-// All artifacts land in build/<config>/: host(.exe), vmctl(.exe), image/<target>/, desktop/.
+// All artifacts land in build/<config>/: atelierd(.exe), atelierctl(.exe), image/<target>/, desktop/.
 
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -61,12 +61,12 @@ for (const a of process.argv.slice(2)) {
 
 // Which phases run this invocation. --only narrows to one; otherwise all three.
 const want = (p) => !flags.only || flags.only === p;
-// The image phase always (re)builds the guestd volume (which now carries both guestd AND the
+// The image phase always (re)builds the runner volume (which now carries both runner AND the
 // in-guest agent — code + node_modules); the heavy rootfs+kernel+initrd image is opt-in (--image,
 // or implied by --only=image). So a default run produces a fresh guest payload volume next to a
 // reused image, and `--image` / `--only=image` rebuilds the whole bundle.
 const buildFullImage = want('image') && (flags.image || flags.only === 'image');
-const buildGuestd = want('image') && !buildFullImage;
+const buildRunner = want('image') && !buildFullImage;
 
 // ----- tiny helpers -------------------------------------------------------------------------------
 
@@ -145,8 +145,8 @@ function preflight() {
 
   const required = ['node', 'npm', 'go', 'git'];
   if (want('image')) {
-    // Both the full image and the guestd-only default run image/build.sh (bash + Docker; via wsl on
-    // Windows) — guestd's volume is mke2fs'd inside the imager container, so it needs Docker too.
+    // Both the full image and the runner-only default run image/build.sh (bash + Docker; via wsl on
+    // Windows) — runner's volume is mke2fs'd inside the imager container, so it needs Docker too.
     required.push('docker');
     required.push(isWin ? 'wsl' : 'bash'); // no make
   }
@@ -164,7 +164,7 @@ function preflight() {
     if (tryCapture('docker', ['info', '--format', '{{.ServerVersion}}']) === null)
       die('docker daemon is not reachable (start OrbStack/Docker Desktop, or build host/desktop only with --only=)');
   }
-  const imageMode = !want('image') ? 'none' : buildFullImage ? 'full' : 'guestd-only';
+  const imageMode = !want('image') ? 'none' : buildFullImage ? 'full' : 'runner-only';
   info(`platform ${process.platform} -> config=${flags.config}, target=${target}, ` +
     `phases=${flags.only ?? 'all'}, image=${imageMode}${flags.deep ? ', deep' : ''}${flags.verify ? '' : ', no-verify'}`);
 }
@@ -182,18 +182,18 @@ function clean() {
   rm('services/pkg/protocol/protocol.go');
   // Drop any stale services/bin from older or manual builds — the orchestrator now writes the host
   // binaries straight into build/<config>/, so services/bin should not shadow them.
-  for (const b of ['host', 'vmctl', 'guestd']) {
+  for (const b of ['atelierd', 'atelierctl', 'runner']) {
     rm('services/bin', b);
     rm('services/bin', `${b}.exe`);
   }
 
   // Only remove the build/<config>/ subtrees the running phases will rebuild — so --only and the
-  // guestd-only default never destroy a sibling artifact (e.g. the ~4GB image bundle).
+  // runner-only default never destroy a sibling artifact (e.g. the ~4GB image bundle).
   const cleaned = [];
   if (want('host')) {
-    rm('build', flags.config, `host${exe}`);
-    rm('build', flags.config, `vmctl${exe}`);
-    cleaned.push(`host${exe},vmctl${exe}`);
+    rm('build', flags.config, `atelierd${exe}`);
+    rm('build', flags.config, `atelierctl${exe}`);
+    cleaned.push(`atelierd${exe},atelierctl${exe}`);
   }
   if (want('desktop')) {
     rm('apps/desktop/.vite');
@@ -204,16 +204,16 @@ function clean() {
   if (buildFullImage) {
     rm('build', flags.config, 'image', target);
     cleaned.push(`image/${target}/`);
-  } else if (buildGuestd) {
-    // Default path: rebuild only the guestd volume, leaving any prior rootfs/kernel/initrd in place.
-    for (const f of ['guestd.raw', 'guestd.vhd', 'guestd.raw.origin', 'guestd.vhd.origin'])
+  } else if (buildRunner) {
+    // Default path: rebuild only the runner volume, leaving any prior rootfs/kernel/initrd in place.
+    for (const f of ['runner.raw', 'runner.vhd', 'runner.raw.origin', 'runner.vhd.origin'])
       rm('build', flags.config, 'image', target, f);
-    cleaned.push(`image/${target}/guestd.*`);
+    cleaned.push(`image/${target}/runner.*`);
   }
   info(`removed generated code, services/bin, build/${flags.config}/{${cleaned.join(', ')}}`);
 
   if (flags.deep) {
-    for (const d of ['', 'apps/desktop', 'packages/agent', 'packages/provider', 'packages/protocol', 'tools/protogen'])
+    for (const d of ['', 'apps/desktop', 'packages/artisan', 'packages/provider', 'packages/protocol', 'tools/protogen'])
       rm(d, 'node_modules');
     info('removed all node_modules');
     if (buildFullImage) {
@@ -240,19 +240,19 @@ function hostBuild() {
   // symbols + trims paths; debug keeps them. `-o <dir>` writes both binaries into build/<config>/.
   const args = ['-C', 'services', 'build'];
   if (flags.config === 'release') args.push('-trimpath', '-ldflags=-s -w');
-  args.push('-o', dest, './cmd/host', './cmd/vmctl');
+  args.push('-o', dest, './cmd/atelierd', './cmd/atelierctl');
   run('go', args, { env: { CGO_ENABLED: '1' } });
-  info(`host${exe}, vmctl${exe} -> build/${flags.config}/`);
+  info(`atelierd${exe}, atelierctl${exe} -> build/${flags.config}/`);
 
   if (isMac) {
     // Virtualization.framework refuses to run unless the broker is codesigned with
     // com.apple.security.virtualization under the hardened runtime, and cgo invalidates the
-    // signature on every rebuild — so (re)sign here. vmctl is a plain RPC client; no entitlement.
+    // signature on every rebuild — so (re)sign here. atelierctl is a plain RPC client; no entitlement.
     section('Codesign broker (virtualization entitlement)');
     const entitlements = rel('services/packaging/darwin/atelier-vm.entitlements');
-    const host = path.join(dest, 'host');
-    run('codesign', ['--force', '--sign', '-', '--options', 'runtime', '--entitlements', entitlements, host]);
-    run('codesign', ['--display', '--entitlements', '-', host]);
+    const atelierd = path.join(dest, 'atelierd');
+    run('codesign', ['--force', '--sign', '-', '--options', 'runtime', '--entitlements', entitlements, atelierd]);
+    run('codesign', ['--display', '--entitlements', '-', atelierd]);
   }
 }
 
@@ -260,17 +260,17 @@ function imageBuild() {
   if (isWin)
     warn("Windows image build runs under WSL2 and is not verified from this repo author's macOS machine");
   if (buildFullImage) {
-    section('VM image bundle (full: rootfs+kernel+initrd+guestd)');
-    imageRun('all'); // -> build/<config>/image/<target>/{vmlinuz,initrd,rootfs.*,guestd.*,*.origin,manifest.txt}
+    section('VM image bundle (full: rootfs+kernel+initrd+runner)');
+    imageRun('all'); // -> build/<config>/image/<target>/{vmlinuz,initrd,rootfs.*,runner.*,*.origin,manifest.txt}
     info(`image/${target}/ -> build/${flags.config}/image/${target}/`);
   } else {
-    // Default: the heavy image is skipped; only the guestd volume is (re)built — the piece that
-    // iterates most (guestd + the in-guest agent). The rootfs/kernel/initrd are reused from a prior
+    // Default: the heavy image is skipped; only the runner volume is (re)built — the piece that
+    // iterates most (runner + the in-guest agent). The rootfs/kernel/initrd are reused from a prior
     // --image run. NOTE: this reuses init.sh from that rootfs, so after a change to the volume's
     // mount layout (e.g. moving the agent onto the volume) one full --image rebuild is needed first.
-    section('VM image: guestd volume only (full image skipped — pass --image to build it)');
-    imageRun('guestd'); // -> build/<config>/image/<target>/guestd.{raw,vhd}
-    info(`image/${target}/guestd.* -> build/${flags.config}/image/${target}/`);
+    section('VM image: runner volume only (full image skipped — pass --image to build it)');
+    imageRun('runner'); // -> build/<config>/image/<target>/runner.{raw,vhd}
+    info(`image/${target}/runner.* -> build/${flags.config}/image/${target}/`);
   }
 }
 
@@ -282,7 +282,7 @@ function desktopLauncher() {
   return `#!/usr/bin/env bash
 # Launch the packaged Atelier desktop app against the VM image bundle in this build tree.
 # Generated by scripts/build-all.mjs — re-run \`npm run build:all\` to refresh; don't hand-edit.
-# Start the broker yourself first, e.g.:  ./host -addr /tmp/atelier-host.sock
+# Start the broker yourself first, e.g.:  ./atelierd -addr /tmp/atelierd.sock
 set -euo pipefail
 
 HERE="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
@@ -307,7 +307,7 @@ exec "$APP/Contents/MacOS/Atelier" "$@"
 function desktop() {
   section('JS dependencies');
   npm(['--prefix', 'apps/desktop', 'install']);
-  npm(['--prefix', 'packages/agent', 'install']); // for the verify phase; runtime deps ship on the guestd volume
+  npm(['--prefix', 'packages/artisan', 'install']); // for the verify phase; runtime deps ship on the runner volume
 
   // Package the Electron app for both configs so build/<config>/desktop/ is runnable. Debug pays the
   // Forge packaging cost too; for fast host-only iteration, run the desktop via `npm run dev`.
@@ -335,7 +335,7 @@ function desktop() {
     warn('apps/desktop/out missing — desktop package not staged (check `npm --prefix apps/desktop run package`)');
   }
 
-  // Stage a self-contained dev launcher next to host/vmctl/desktop/image so the workflow is just
+  // Stage a self-contained dev launcher next to atelierd/atelierctl/desktop/image so the workflow is just
   // `cd build/<config> && ./run.sh`. It self-validates the tree and errors clearly if a phase is
   // missing (e.g. the default run that skips the full image), so it's safe to write whenever the desktop phase runs.
   if (isMac) {
@@ -362,13 +362,13 @@ function verify() {
   const unformatted = tryCapture('gofmt', ['-l', 'services']);
   if (unformatted) warn(`gofmt -l flagged:\n${unformatted}`);
   run('go', ['-C', 'services', 'build', './...'], { env: { GOOS: 'windows', CGO_ENABLED: '0' } });
-  // guestd is cross-compiled into the rootfs by the image build, so the host builds above only
+  // runner is cross-compiled into the rootfs by the image build, so the host builds above only
   // exercise its !linux stubs. Compile it for its real linux target too, so a break in
   // egress/mount/sandbox _linux.go is caught here even when the full image build is skipped.
   const guestArch = isMac ? 'arm64' : 'amd64';
-  const probe = rel('build', flags.config, `.guestd-probe-${process.pid}`);
+  const probe = rel('build', flags.config, `.runner-probe-${process.pid}`);
   fs.mkdirSync(path.dirname(probe), { recursive: true });
-  run('go', ['-C', 'services', 'build', '-o', probe, './cmd/guestd'],
+  run('go', ['-C', 'services', 'build', '-o', probe, './cmd/runner'],
     { env: { GOOS: 'linux', GOARCH: guestArch, CGO_ENABLED: '0' } });
   fs.rmSync(probe, { force: true });
 
@@ -378,8 +378,8 @@ function verify() {
   npm(['--prefix', 'apps/desktop', 'run', 'test']);
 
   section('Verify: agent');
-  npm(['--prefix', 'packages/agent', 'run', 'typecheck']);
-  npm(['--prefix', 'packages/agent', 'run', 'test']);
+  npm(['--prefix', 'packages/artisan', 'run', 'typecheck']);
+  npm(['--prefix', 'packages/artisan', 'run', 'test']);
 }
 
 function summary() {
@@ -395,9 +395,9 @@ function summary() {
   // macOS drives VZ via a codesigned binary with the virtualization entitlement — no root needed.
   // Only the Windows/HCS broker must run elevated.
   if (isWin) {
-    console.log(`    build\\${flags.config}\\host.exe -addr \\\\.\\pipe\\atelier-host   # broker (run elevated)`);
+    console.log(`    build\\${flags.config}\\atelierd.exe -addr \\\\.\\pipe\\atelierd   # broker (run elevated)`);
   } else {
-    console.log(`    build/${flags.config}/host -addr /tmp/atelier-host.sock              # broker`);
+    console.log(`    build/${flags.config}/atelierd -addr /tmp/atelierd.sock              # broker`);
   }
   console.log(`    ATELIER_BUNDLE_DIR=build/${flags.config}/image/${target} npm run dev   # desktop (dev)`);
   if (isMac)

@@ -54,9 +54,9 @@ func (d *windowsDriver) Create(ctx context.Context, cfg VMConfig) error {
 		KernelFilePath: cfg.KernelPath,
 		InitrdPath:     cfg.InitrdPath,
 		RootFSPath:     cfg.RootFSPath,
-		// guestd ships as its own ro volume, SCSI-attached as a second disk (/dev/sdb)
-		// and mounted by init.sh (LABEL=guestd); it is not baked into the rootfs.
-		GuestdImagePath: cfg.GuestdImagePath,
+		// runner ships as its own ro volume, SCSI-attached as a second disk (/dev/sdb)
+		// and mounted by init.sh (LABEL=runner); it is not baked into the rootfs.
+		RunnerImagePath: cfg.RunnerImagePath,
 		MemoryMB:        cfg.MemoryMB,
 		ProcessorCount:  cfg.CPUCount,
 		ConsolePipe:     pipe,
@@ -77,8 +77,8 @@ func (d *windowsDriver) Create(ctx context.Context, cfg VMConfig) error {
 	if cfg.InitrdPath != "" {
 		paths = append(paths, cfg.InitrdPath)
 	}
-	if cfg.GuestdImagePath != "" {
-		paths = append(paths, cfg.GuestdImagePath)
+	if cfg.RunnerImagePath != "" {
+		paths = append(paths, cfg.RunnerImagePath)
 	}
 	for _, p := range paths {
 		if err := hcs.GrantVMAccess(cfg.ID, p); err != nil {
@@ -145,7 +145,7 @@ func (d *windowsDriver) DialGuest(ctx context.Context, id string, port uint32) (
 	}
 
 	addr := &winio.HvsockAddr{VMID: vmID, ServiceID: winio.VsockServiceID(port)}
-	// A few quick retries absorb the race between startVM returning and guestd
+	// A few quick retries absorb the race between startVM returning and runner
 	// binding its vsock listener inside the booting guest.
 	dialer := winio.HvsockDialer{Retries: 8, RetryWait: 250 * time.Millisecond}
 	conn, err := dialer.Dial(ctx, addr)
