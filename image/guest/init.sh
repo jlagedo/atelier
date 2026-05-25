@@ -16,6 +16,13 @@ mount -t sysfs    sysfs    /sys   2>/dev/null || true
 mount -t devtmpfs devtmpfs /dev   2>/dev/null || true
 mount -t tmpfs    tmpfs    /tmp   2>/dev/null || true
 
+# cgroup v2 (unified): mount it and delegate the controllers runner needs so it can place
+# each sandboxed exec in its own cgroup with pids.max/memory.max/cpu.max (F-06, runaway
+# containment). Tolerant: if cgroup2 is unavailable the per-exec limiter soft-fails (runner
+# logs a warning and runs without limits) rather than wedging boot.
+mount -t cgroup2 none /sys/fs/cgroup 2>/dev/null || true
+echo "+pids +memory +cpu" > /sys/fs/cgroup/cgroup.subtree_control 2>/dev/null || true
+
 # Read-only root (CRIT-05): the rootfs is mounted read-only, so the few paths that need
 # runtime writes are tmpfs (ephemeral, per-boot; sized to bound RAM). /run and /var/tmp are
 # general runtime scratch; /sessions is the parent for per-session mount points (under
@@ -66,6 +73,33 @@ modprobe vmw_vsock_virtio_transport 2>/dev/null || true
 # the host shares (S6, macOS/Virtualization.framework). Tolerant like the vsock loads:
 # it no-ops where virtiofs is built-in or absent (e.g. the Hyper-V bundle, which mounts 9p).
 modprobe virtiofs 2>/dev/null || true
+
+# Files door over 9p (HCS/Hyper-V serves shares as Plan9 over hvsock, trans=fd). Preload the
+# 9p stack so runner's runtime `mount -t 9p` works WITHOUT the kernel module autoloader —
+# which the modules_disabled latch below would otherwise block. Tolerant: no-ops on macOS/VZ
+# (the virtiofs path) or where built-in.
+modprobe 9pnet_fd 2>/dev/null || true
+modprobe 9pnet_virtio 2>/dev/null || true
+modprobe 9p 2>/dev/null || true
+
+# Egress prep: runner does `modprobe tun` at runtime (cmd/runner/egress_linux.go) for the
+# tap0 interface. Preload it HERE so the modules_disabled latch below does not block it.
+modprobe tun 2>/dev/null || true
+
+# Kernel hardening sysctls (write /proc/sys directly — no systemd/sysctl in the guest). Each
+# guarded with `|| true` so a knob absent on this kernel never wedges PID 1.
+#   io_uring_disabled=2  belt-and-suspenders behind the seccomp deny; also covers the
+#                        privileged escape hatch, which runs with no seccomp filter.
+#   kptr_restrict=2      hide kernel pointers from all users (defeat KASLR leaks — F-04).
+#   yama/ptrace_scope=2  restrict ptrace to CAP_SYS_PTRACE only.
+echo 2 > /proc/sys/kernel/io_uring_disabled 2>/dev/null || true
+echo 2 > /proc/sys/kernel/kptr_restrict     2>/dev/null || true
+echo 2 > /proc/sys/kernel/yama/ptrace_scope 2>/dev/null || true
+
+# One-way latch (F-16): forbid further module loads for the VM's lifetime. MUST be the LAST
+# module-related action — every module the guest needs (loop, vsock, virtiofs, the 9p stack,
+# tun; ext4 via initramfs) is already loaded above.
+echo 1 > /proc/sys/kernel/modules_disabled 2>/dev/null || true
 
 # runner becomes the long-running PID 1 (the vsock RPC server). Neither runner NOR the
 # in-guest agent is baked into the rootfs — they ship together on ONE read-only ext4 volume

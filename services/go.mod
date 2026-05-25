@@ -7,6 +7,7 @@ require (
 	github.com/Microsoft/go-winio v0.6.2
 	github.com/containers/gvisor-tap-vsock v0.8.9
 	github.com/inetaf/tcpproxy v0.0.0-20250222171855-c4b9df066048
+	github.com/landlock-lsm/go-landlock v0.8.1
 	github.com/mdlayher/vsock v1.2.1
 	github.com/sirupsen/logrus v1.9.4
 	golang.org/x/sys v0.43.0
@@ -30,6 +31,7 @@ require (
 	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/time v0.5.0 // indirect
 	golang.org/x/tools v0.43.0 // indirect
+	kernel.org/pub/linux/libs/security/libcap/psx v1.2.77 // indirect
 )
 
 // S6: forked Code-Hex/vz adds runtime virtio-fs share mutation

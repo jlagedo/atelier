@@ -154,6 +154,9 @@ func (g *guest) exec(ctx context.Context, raw json.RawMessage) (any, error) {
 		}
 		cmd.Env = env
 	}
+	// Per-exec cgroup v2 caps (F-06). Placed via SysProcAttr.CgroupFD before Start, so
+	// the child is born in the cgroup. Soft-fails to unlimited; cleanup rmdir's after Wait.
+	defer applyCgroupLimits(g.log, cmd, p)()
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

@@ -1,7 +1,5 @@
 github.com/Code-Hex/go-infinity-channel v1.0.0 h1:M8BWlfDOxq9or9yvF9+YkceoTkDI1pFAqvnP87Zh0Nw=
 github.com/Code-Hex/go-infinity-channel v1.0.0/go.mod h1:5yUVg/Fqao9dAjcpzoQ33WwfdMWmISOrQloDRn3bsvY=
-github.com/Code-Hex/vz/v3 v3.7.1 h1:EN1yNiyrbPq+dl388nne2NySo8I94EnPppvqypA65XM=
-github.com/Code-Hex/vz/v3 v3.7.1/go.mod h1:1LsW0jqW0r0cQ+IeR4hHbjdqOtSidNCVMWhStMHGho8=
 github.com/Microsoft/go-winio v0.6.2 h1:F2VQgta7ecxGYO8k3ZZz3RS8fVIXVxONVUPlNERoyfY=
 github.com/Microsoft/go-winio v0.6.2/go.mod h1:yd8OoFMLzJbo9gZq8j5qaps8bJ9aShtEA8Ipt1oGCvU=
 github.com/apparentlymart/go-cidr v1.1.1 h1:oEEk8CE0HP0YpHxsegk/TaOtR2FLHdWv4p3eM4ceUwg=
@@ -27,6 +25,8 @@ github.com/insomniacslk/dhcp v0.0.0-20240710054256-ddd8a41251c9 h1:LZJWucZz7ztCq
 github.com/insomniacslk/dhcp v0.0.0-20240710054256-ddd8a41251c9/go.mod h1:KclMyHxX06VrVr0DJmeFSUb1ankt7xTfoOA35pCkoic=
 github.com/josharian/native v1.1.0 h1:uuaP0hAbW7Y4l0ZRQ6C9zfb7Mg1mbFKry/xzDAfmtLA=
 github.com/josharian/native v1.1.0/go.mod h1:7X/raswPFr05uY3HiLlYeyQntB6OO7E/d2Cu7qoaN2w=
+github.com/landlock-lsm/go-landlock v0.8.1 h1:Krs1co16IzN7bQcFYIdtNF+BKwZem3geRBkVsZtlCKU=
+github.com/landlock-lsm/go-landlock v0.8.1/go.mod h1:mn5GSi81Jf7yMs5WSi+SUi4sUeNLUGVdbT4Id6wXNQw=
 github.com/linuxkit/virtsock v0.0.0-20220523201153-1a23e78aa7a2 h1:DZMFueDbfz6PNc1GwDRA8+6lBx1TB9UnxDQliCqR73Y=
 github.com/linuxkit/virtsock v0.0.0-20220523201153-1a23e78aa7a2/go.mod h1:SWzULI85WerrFt3u+nIm5F9l7EvxZTKQvd0InF3nmgM=
 github.com/mdlayher/packet v1.1.2 h1:3Up1NG6LZrsgDVn6X4L9Ge/iyRyxFEFD9o6Pr3Q1nQY=
@@ -91,3 +91,5 @@ gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=
 gopkg.in/yaml.v3 v3.0.1/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
 gvisor.dev/gvisor v0.0.0-20240916094835-a174eb65023f h1:O2w2DymsOlM/nv2pLNWCMCYOldgBBMkD7H0/prN5W2k=
 gvisor.dev/gvisor v0.0.0-20240916094835-a174eb65023f/go.mod h1:sxc3Uvk/vHcd3tj7/DHVBoR5wvWT/MmRq2pj7HRJnwU=
+kernel.org/pub/linux/libs/security/libcap/psx v1.2.77 h1:Z06sMOzc0GNCwp6efaVrIrz4ywGJ1v+DP0pjVkOfDuA=
+kernel.org/pub/linux/libs/security/libcap/psx v1.2.77/go.mod h1:+l6Ee2F59XiJ2I6WR5ObpC1utCQJZ/VLsEbQCD8RG24=

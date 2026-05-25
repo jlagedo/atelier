@@ -400,6 +400,162 @@ async function runBattery(work) {
     return 'unshare(CLONE_NEWUSER) → EPERM';
   });
 
+  await test('ptrace is denied by seccomp (no CAP_SYS_PTRACE)', () => {
+    // ptrace is allowed only with CAP_SYS_PTRACE in the profile; the no-cap agent gets ERRNO.
+    const py = "import ctypes;l=ctypes.CDLL(None,use_errno=True);r=l.ptrace(0,0,0,0);print('rc=%d errno=%d'%(r,ctypes.get_errno()))";
+    const r = atelierctl('exec', ['-id', 'vm0', '--', 'python3', '-c', py]);
+    assert(r.status === 0, `probe failed: ${r.err}`);
+    assert(/rc=-1 errno=1/.test(r.out), `ptrace not EPERM-denied: ${JSON.stringify(r.out)}`);
+    return 'ptrace → EPERM';
+  });
+
+  await test('mount is denied by seccomp (no CAP_SYS_ADMIN)', () => {
+    const py =
+      "import ctypes;l=ctypes.CDLL(None,use_errno=True);r=l.mount(b'none',b'/tmp/x',b'tmpfs',0,None);print('rc=%d errno=%d'%(r,ctypes.get_errno()))";
+    const r = atelierctl('exec', ['-id', 'vm0', '--', 'python3', '-c', py]);
+    assert(r.status === 0, `probe failed: ${r.err}`);
+    assert(/rc=-1 errno=1/.test(r.out), `mount not EPERM-denied: ${JSON.stringify(r.out)}`);
+    return 'mount → EPERM';
+  });
+
+  section('Doors: sandbox hardening (narrowed bind, sysctls, cgroups, Landlock)');
+
+  await test('Landlock shim runs ahead of every sandboxed command', () => {
+    // sandboxedCommand makes the shim the exec target; it logs to stderr, then execs the cmd.
+    const r = atelierctl('exec', ['-id', 'vm0', '--', 'true']);
+    assert(r.status === 0, `exec failed: ${r.err}`);
+    assert(/atelier-landlock: Landlock ruleset applied/.test(r.err), `shim did not apply Landlock: ${JSON.stringify(r.err)}`);
+    return 'Landlock applied before exec';
+  });
+
+  await test('runner volume (/opt/runner) is not bound into the sandbox (F-03)', () => {
+    // The runner binary + seccomp blob are absent (not bound). Landlock also denies them.
+    const cat = atelierctl('exec', ['-id', 'vm0', '--', 'cat', '/opt/runner/atelier-runner']);
+    assert(cat.status !== 0, 'runner binary was readable inside the sandbox');
+    // /opt/atelier IS present (the toolbox). NB: `ls /opt` is itself denied by Landlock (the
+    // /opt parent isn't in the allow-list), so probe the granted subtree directly.
+    const ls = atelierctl('exec', ['-id', 'vm0', '--', 'ls', '/opt/atelier']);
+    assert(ls.status === 0 && ls.out.includes('packages'), `/opt/atelier not usable in sandbox: ${ls.out}${ls.err}`);
+    return '/opt/runner absent, /opt/atelier present';
+  });
+
+  await test('kernel hardening sysctls are set (F-04, F-16)', () => {
+    const r = atelierctl('exec', ['-id', 'vm0', '--', 'sh', '-c',
+      'cat /proc/sys/kernel/kptr_restrict /proc/sys/kernel/io_uring_disabled /proc/sys/kernel/modules_disabled /proc/sys/kernel/yama/ptrace_scope']);
+    assert(r.status === 0, `read sysctls failed: ${r.err}`);
+    const v = r.out.split(/\s+/).filter(Boolean);
+    assert(v[0] === '2', `kptr_restrict=${v[0]} want 2`);
+    assert(v[1] === '2', `io_uring_disabled=${v[1]} want 2`);
+    assert(v[2] === '1', `modules_disabled=${v[2]} want 1`);
+    assert(v[3] === '2', `ptrace_scope=${v[3]} want 2`);
+    return `kptr=${v[0]} io_uring=${v[1]} modules=${v[2]} ptrace=${v[3]}`;
+  });
+
+  await test('io_uring_setup is blocked (seccomp + io_uring_disabled)', () => {
+    // io_uring_setup = 425 on both arm64 and amd64. EPERM(1) from seccomp, or ENOSYS(38)
+    // from io_uring_disabled=2 — either way it must not succeed.
+    const py =
+      "import ctypes;l=ctypes.CDLL(None,use_errno=True);r=l.syscall(425,8,0);print('rc=%d errno=%d'%(r,ctypes.get_errno()))";
+    const r = atelierctl('exec', ['-id', 'vm0', '--', 'python3', '-c', py]);
+    assert(r.status === 0, `probe failed: ${r.err}`);
+    assert(/rc=-1 errno=(1|38)/.test(r.out), `io_uring_setup not blocked: ${JSON.stringify(r.out)}`);
+    return r.out.trim();
+  });
+
+  await test('cgroup pids.max caps process count (F-06)', () => {
+    // Spawn many short sleeps; pids.max=512 makes fork fail well before 700. The PID
+    // namespace tears them all down when the root command exits (no leak).
+    const py = [
+      'import subprocess as s',
+      'ps=[]',
+      'try:',
+      " for i in range(700): ps.append(s.Popen(['sleep','30']))",
+      'except OSError: pass',
+      "print('SPAWNED', len(ps))",
+      'for p in ps: p.kill()',
+    ].join('\n');
+    const r = atelierctl('exec', ['-id', 'vm0', '--', 'python3', '-c', py], { timeout: 60000 });
+    assert(r.status === 0, `probe failed: ${r.err}`);
+    const m = r.out.match(/SPAWNED (\d+)/);
+    assert(m, `no SPAWNED count: ${r.out}`);
+    assert(Number(m[1]) < 640, `pids not capped (spawned ${m[1]}, expected <640 with pids.max=512)`);
+    return `spawned ${m[1]} (capped)`;
+  });
+
+  await test('read-only toolbox rejects writes (Landlock + ro-bind)', () => {
+    const r = atelierctl('exec', ['-id', 'vm0', '--', 'sh', '-c', 'touch /usr/atelier-evil 2>&1; echo rc=$?']);
+    assert(/rc=[^0\s]/.test(r.out), `write to /usr was not denied: ${JSON.stringify(r.out)}`);
+    return '/usr is read-only';
+  });
+
+  await test('toolbox userland still works under the narrowed bind', () => {
+    // Regression guard: narrowing --bind / / must not starve Node/python/git/ripgrep.
+    const r = atelierctl('exec', ['-id', 'vm0', '--', 'sh', '-c',
+      'node --version && python3 --version && git --version && rg --version | head -n1']);
+    assert(r.status === 0, `a toolbox binary failed under the narrowed bind: ${r.err}${r.out}`);
+    assert(/v\d+\./.test(r.out), `node missing: ${r.out}`);
+    assert(/Python 3/.test(r.out), `python3 missing: ${r.out}`);
+    assert(/git version/.test(r.out), `git missing: ${r.out}`);
+    return r.out.trim().replace(/\s+/g, ' ').slice(0, 70);
+  });
+
+  await test('host rootfs is not exposed in the sandbox (F-03 scope)', () => {
+    const r = atelierctl('exec', ['-id', 'vm0', '--', 'sh', '-c',
+      'for p in /etc/shadow /root /boot /var/log /opt/runner /srv; do [ -e "$p" ] && echo "LEAK:$p"; done; echo done']);
+    assert(r.status === 0, `probe failed: ${r.err}`);
+    assert(!/LEAK:/.test(r.out), `a host rootfs path leaked into the sandbox: ${r.out}`);
+    return 'no /etc/shadow, /root, /boot, /var/log, /opt/runner, /srv';
+  });
+
+  await test('raw disk and vsock are unreachable from the sandbox (key invariants)', () => {
+    // The agent must never see the backing block device or the host↔guest vsock node.
+    const r = atelierctl('exec', ['-id', 'vm0', '--', 'sh', '-c',
+      'for d in /dev/vda /dev/vda1 /dev/sda /dev/vsock /dev/mem; do [ -e "$d" ] && echo "PRESENT:$d"; done; echo done']);
+    assert(r.status === 0, `probe failed: ${r.err}`);
+    assert(!/PRESENT:/.test(r.out), `a block/vsock device is reachable in the sandbox: ${r.out}`);
+    return 'no /dev/vda*, /dev/sda, /dev/vsock, /dev/mem';
+  });
+
+  await test('/etc is an allow-list, not the whole host /etc', () => {
+    const ok = atelierctl('exec', ['-id', 'vm0', '--', 'cat', '/etc/resolv.conf']);
+    assert(ok.status === 0, `/etc/resolv.conf should be readable: ${ok.err}`);
+    const bad = atelierctl('exec', ['-id', 'vm0', '--', 'cat', '/etc/shadow']);
+    assert(bad.status !== 0, '/etc/shadow was readable in the sandbox');
+    return 'resolv.conf in, shadow out';
+  });
+
+  await test('runs as uid 1001 with an empty capability set', () => {
+    const r = atelierctl('exec', ['-id', 'vm0', '--', 'sh', '-c', 'id -u; grep -E "^CapEff:" /proc/self/status']);
+    assert(r.status === 0, `probe failed: ${r.err}`);
+    assert(/^1001$/m.test(r.out), `not uid 1001: ${JSON.stringify(r.out)}`);
+    assert(/CapEff:\s*0{16}\b/.test(r.out), `non-empty effective capabilities: ${JSON.stringify(r.out)}`);
+    return r.out.trim().replace(/\s+/g, ' ');
+  });
+
+  await test('PID namespace isolates the process table', () => {
+    const r = atelierctl('exec', ['-id', 'vm0', '--', 'sh', '-c', 'ls /proc | grep -cE "^[0-9]+$"']);
+    assert(r.status === 0, `probe failed: ${r.err}`);
+    const n = Number(r.out.trim());
+    assert(n > 0 && n < 30, `expected a small isolated pid table, got ${n}`);
+    return `${n} pids visible`;
+  });
+
+  await test('Landlock confines outbound TCP to port 443', () => {
+    // Landlock ConnectTCP(443) denies connect() to any other port at the syscall (EACCES),
+    // before the egress jail even sees it; 443 is allowed through (then refused by the stack
+    // since nothing listens locally). EACCES on :9 vs a non-EACCES on :443 isolates the
+    // Landlock network layer from the egress jail.
+    const probe =
+      "const net=require('net');" +
+      "const t=p=>new Promise(r=>{const s=net.connect(p,'127.0.0.1');" +
+      "s.on('connect',()=>{s.destroy();r('OPEN')});s.on('error',e=>r(e.code))});" +
+      "(async()=>{console.log('p9='+await t(9));console.log('p443='+await t(443))})()";
+    const r = atelierctl('exec', ['-id', 'vm0', '--', 'node', '-e', probe], { timeout: 15000 });
+    assert(/p9=(EACCES|EPERM)/.test(r.out), `non-443 connect not denied by Landlock: ${r.out}${r.err}`);
+    assert(!/p443=(EACCES|EPERM)/.test(r.out), `port 443 was wrongly denied by Landlock: ${r.out}`);
+    return r.out.trim().replace(/\s+/g, ' ');
+  });
+
   section('Doors: legacy workspace + Files door (host<->guest bridge)');
 
   await test('attachWorkspace (legacy) shares the folder at /workspace', () => {
@@ -440,32 +596,44 @@ async function runBattery(work) {
 
   const attach = (tag, dir, tgt) =>
     atelierctl('attachWorkspace', ['-id', 'vm0', '-path', path.join(work, dir), '-tag', tag, '-target', tgt]);
+  // Under the narrowed bind, an exec only sees its OWN workspace, so it must declare -cwd
+  // (or -session) for the target it operates on. sexec scopes an exec to one target.
+  const sexec = (tgt, ...cmd) => atelierctl('exec', ['-id', 'vm0', '-cwd', tgt, '--', ...cmd]);
 
   await test('many tagged shares mount concurrently at chosen targets', () => {
     assert(attach('s1', 's1', '/sessions/s1').status === 0, 's1 attach failed');
     assert(attach('s2', 's2', '/sessions/s2').status === 0, 's2 attach failed');
     assert(attach('proj', 'proj', '/mnt/proj').status === 0, 'custom-target attach failed');
-    assert(atelierctl('exec', ['-id', 'vm0', '--', 'cat', '/sessions/s1/b.txt']).out.includes('bravo'), 's1 not mounted');
-    assert(atelierctl('exec', ['-id', 'vm0', '--', 'cat', '/sessions/s2/c.txt']).out.includes('charlie'), 's2 not mounted');
+    assert(sexec('/sessions/s1', 'cat', '/sessions/s1/b.txt').out.includes('bravo'), 's1 not mounted');
+    assert(sexec('/sessions/s2', 'cat', '/sessions/s2/c.txt').out.includes('charlie'), 's2 not mounted');
     // The new model isn't tied to /sessions: target is arbitrary (here /mnt/proj).
-    assert(atelierctl('exec', ['-id', 'vm0', '--', 'cat', '/mnt/proj/p.txt']).out.includes('project'), 'custom target not mounted');
+    assert(sexec('/mnt/proj', 'cat', '/mnt/proj/p.txt').out.includes('project'), 'custom target not mounted');
+  });
+
+  await test('a session cannot see sibling sessions (F-09, structural)', () => {
+    // The narrowed bind only mounts the exec's own target, so siblings are absent from the
+    // namespace entirely — not merely empty.
+    const r = sexec('/sessions/s1', 'ls', '/sessions');
+    assert(!/\bs2\b/.test(r.out), `sibling session s2 visible from s1: ${JSON.stringify(r.out)}`);
+    assert(sexec('/sessions/s1', 'cat', '/sessions/s2/c.txt').status !== 0, 's2 readable from an s1-scoped exec');
+    return 'siblings invisible';
   });
 
   await test('sessions are isolated from one another', () => {
-    assert(!atelierctl('exec', ['-id', 'vm0', '--', 'ls', '/sessions/s1']).out.includes('c.txt'), 's2 content leaked into s1');
-    assert(!atelierctl('exec', ['-id', 'vm0', '--', 'ls', '/sessions/s2']).out.includes('b.txt'), 's1 content leaked into s2');
+    assert(!sexec('/sessions/s1', 'ls', '/sessions/s1').out.includes('c.txt'), 's2 content leaked into s1');
+    assert(!sexec('/sessions/s2', 'ls', '/sessions/s2').out.includes('b.txt'), 's1 content leaked into s2');
   });
 
   await test('a session share is read-write host<->guest (no Files door)', async () => {
     // host -> guest: write the host backing dir directly, guest sees it through the share.
     fs.writeFileSync(path.join(work, 's1', 'host-seed.txt'), 'FROM_HOST_S1');
     assert(
-      atelierctl('exec', ['-id', 'vm0', '--', 'cat', '/sessions/s1/host-seed.txt']).out.includes('FROM_HOST_S1'),
+      sexec('/sessions/s1', 'cat', '/sessions/s1/host-seed.txt').out.includes('FROM_HOST_S1'),
       'host write not seen in session',
     );
     // guest -> host: guest writes via the share; verify on the host backing dir (readFile can't —
     // the Files door is jailed to the legacy workspace, which is now detached).
-    const g = atelierctl('exec', ['-id', 'vm0', '--', 'sh', '-c', 'printf FROM_GUEST_S1 > /sessions/s1/guest-out.txt']);
+    const g = sexec('/sessions/s1', 'sh', '-c', 'printf FROM_GUEST_S1 > /sessions/s1/guest-out.txt');
     assert(g.status === 0, `guest write failed: ${g.err}`);
     const got = await readHostRetry(path.join(work, 's1', 'guest-out.txt'));
     assert(got.includes('FROM_GUEST_S1'), `guest write not on host backing dir: ${JSON.stringify(got)}`);
@@ -474,9 +642,10 @@ async function runBattery(work) {
 
   await test('detach is sibling-safe (one session out, the rest survive)', () => {
     assert(atelierctl('detachWorkspace', ['-id', 'vm0', '-tag', 's1']).status === 0, 's1 detach failed');
-    assert(!atelierctl('exec', ['-id', 'vm0', '--', 'cat', '/sessions/s1/b.txt']).out.includes('bravo'), 's1 survived detach');
-    assert(atelierctl('exec', ['-id', 'vm0', '--', 'cat', '/sessions/s2/c.txt']).out.includes('charlie'), 'sibling s2 lost after s1 detach');
-    assert(atelierctl('exec', ['-id', 'vm0', '--', 'cat', '/mnt/proj/p.txt']).out.includes('project'), 'sibling proj lost after s1 detach');
+    // s1 is gone: a fresh exec can no longer reach it (bind source absent).
+    assert(!sexec('/sessions/s2', 'cat', '/sessions/s1/b.txt').out.includes('bravo'), 's1 survived detach');
+    assert(sexec('/sessions/s2', 'cat', '/sessions/s2/c.txt').out.includes('charlie'), 'sibling s2 lost after s1 detach');
+    assert(sexec('/mnt/proj', 'cat', '/mnt/proj/p.txt').out.includes('project'), 'sibling proj lost after s1 detach');
     assert(atelierctl('detachWorkspace', ['-id', 'vm0', '-tag', 's2']).status === 0, 's2 detach failed');
     assert(atelierctl('detachWorkspace', ['-id', 'vm0', '-tag', 'proj']).status === 0, 'proj detach failed');
   });
@@ -499,6 +668,24 @@ async function runBattery(work) {
       ".then(r=>console.log('REACHED '+r.status)).catch(e=>console.log('BLOCKED '+(e&&e.name)))";
     const r = atelierctl('exec', ['-id', 'vm0', '--', 'node', '-e', probe], { timeout: 30000 });
     assert((r.out + r.err).includes('BLOCKED'), `egress was not blocked: ${r.out}${r.err}`);
+  });
+
+  await test('DNS sinkhole: a disallowed host does not resolve', () => {
+    atelierctl('setEgressPolicy', ['-allow', 'api.anthropic.com']); // only the model host resolves
+    const probe = "require('dns').lookup('example.com',e=>console.log(e?('NXDOMAIN '+e.code):'RESOLVED'))";
+    const r = atelierctl('exec', ['-id', 'vm0', '--', 'node', '-e', probe], { timeout: 15000 });
+    assert(/NXDOMAIN|ENOTFOUND|EAI_AGAIN/.test(r.out), `disallowed host resolved: ${r.out}${r.err}`);
+    return 'example.com → not resolved';
+  });
+
+  await test('direct-by-IP egress is blocked (bypasses the DNS allowlist)', () => {
+    atelierctl('setEgressPolicy', ['-allow', 'api.anthropic.com']); // host allowed, but a raw IP skips DNS
+    const probe =
+      "fetch('https://1.1.1.1',{signal:AbortSignal.timeout(4000)})" +
+      ".then(r=>console.log('REACHED '+r.status)).catch(e=>console.log('BLOCKED '+(e&&e.name)))";
+    const r = atelierctl('exec', ['-id', 'vm0', '--', 'node', '-e', probe], { timeout: 30000 });
+    assert((r.out + r.err).includes('BLOCKED'), `direct-IP egress was not blocked: ${r.out}${r.err}`);
+    return 'direct IP → blocked';
   });
 
   section('Door + loop: in-guest agent (Topology B)');

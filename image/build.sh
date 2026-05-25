@@ -259,6 +259,9 @@ cmd_runner() {
   log "building guest daemon (runner, linux/$GOARCH static) for the runner volume"
   local gout; gout="$(pwd)/$WORK/bin/runner"
   ( cd ../services && env GOOS=linux GOARCH="$GOARCH" CGO_ENABLED=0 go build -trimpath -o "$gout" ./cmd/runner )
+  log "building Landlock shim (atelier-landlock, linux/$GOARCH static) for the runner volume"
+  local lout; lout="$(pwd)/$WORK/bin/atelier-landlock"
+  ( cd ../services && env GOOS=linux GOARCH="$GOARCH" CGO_ENABLED=0 go build -trimpath -o "$lout" ./cmd/atelier-landlock )
 
   log "staging agent build context (agent/Dockerfile + packages/{artisan,provider,protocol})"
   stage_agent_ctx
@@ -286,12 +289,14 @@ mkdir -p /stage/runner
 install -D -m 0755 /runner /stage/runner/atelier-runner
 install -D -m 0644 /seccomp.bpf /stage/runner/seccomp.bpf
 cp -a /atelier /stage/atelier
+install -D -m 0755 /atelier-landlock /stage/atelier/sbin/atelier-landlock
 chown -R 0:0 /stage
 sz=$(($(du -sm /stage | cut -f1) + 128))
 ninodes=$(($(find /stage | wc -l) + 4096))
 mke2fs -q -t ext4 -L runner -d /stage -r 1 -N "$ninodes" -m 0 /runner.ext4 "${sz}M"'
   local icid; icid="$(docker create atelier-imager bash -c "$build")"
   docker cp "$WORK/bin/runner"      "$icid:/runner"
+  docker cp "$WORK/bin/atelier-landlock" "$icid:/atelier-landlock"
   docker cp "$WORK/agent/seccomp.bpf" "$icid:/seccomp.bpf"
   docker cp "$WORK/agent/atelier"   "$icid:/atelier"
   if ! docker start -a "$icid"; then
