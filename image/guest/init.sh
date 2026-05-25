@@ -28,7 +28,8 @@ echo "+pids +memory +cpu" > /sys/fs/cgroup/cgroup.subtree_control 2>/dev/null ||
 # general runtime scratch; /sessions is the parent for per-session mount points (under
 # Hyper-V runner mkdirs a 9p mount per session here; under VZ runner mounts the single
 # virtio-fs device once at /sessions and each session is a <tag> subdir, S7 — either way it
-# MUST be writable on a ro root); /home/atelier is the non-root
+# MUST be writable on a ro root); /mnt is shadowed so runner can mkdir arbitrary targets like
+# /mnt/proj for non-/sessions workspace shares; /home/atelier is the non-root
 # agent's writable HOME (CRIT-01), chowned to that uid after the tmpfs is mounted. Tolerate
 # "already mounted" (initramfs may have done some) so a re-mount never wedges PID 1.
 # Explicit mode= on every tmpfs: tmpfs defaults its root dir to 1777 (world-writable,
@@ -39,6 +40,7 @@ echo "+pids +memory +cpu" > /sys/fs/cgroup/cgroup.subtree_control 2>/dev/null ||
 mount -t tmpfs -o size=64m,mode=0755  tmpfs /run          2>/dev/null || true
 mount -t tmpfs -o size=64m,mode=1777  tmpfs /var/tmp      2>/dev/null || true
 mount -t tmpfs -o size=16m,mode=0755  tmpfs /sessions     2>/dev/null || true
+mount -t tmpfs -o size=16m,mode=0755  tmpfs /mnt          2>/dev/null || true
 mount -t tmpfs -o size=512m,mode=0700 tmpfs /home/atelier 2>/dev/null || true
 chown 1001:1001 /home/atelier 2>/dev/null || true
 

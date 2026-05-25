@@ -69,7 +69,8 @@ for (const a of process.argv.slice(2)) {
 }
 
 const config = flags.config;
-const ADDR = '/tmp/atelierd-e2e.sock';
+// Named pipe on Windows, unix socket elsewhere (matches the rpc.DefaultAddress scheme).
+const ADDR = isWin ? '\\\\.\\pipe\\atelierd-e2e' : '/tmp/atelierd-e2e.sock';
 // Both logs land in build/<config>/, sharing one filename-safe timestamp so a run's pair is obvious.
 const stamp = new Date().toISOString().replace(/:/g, '-').replace(/\..+$/, ''); // 2026-05-24T15-30-45
 const LOG_FILE = rel('build', config, `e2e-host-${stamp}.log`);
@@ -223,6 +224,33 @@ async function ensureBuild() {
   await run('node', [rel('scripts', 'build-all.mjs'), `--config=${config}`, '--only=host', '--no-verify']);
 
   if (flags.rebuildImage || !bundleComplete()) {
+    // Fast path: if kernel/initrd/rootfs are already present (in the build tree or in the legacy
+    // image/bundle/ staging location) and only the runner volume is missing, build just the runner.
+    // This avoids the full multi-minute rootfs rebuild on machines that have a prior --image build
+    // or the pre-staged files from image/bundle/.
+    if (!flags.rebuildImage) {
+      const baseFiles = ['vmlinuz', 'initrd', rootfsName];
+      const legacyBase = rel('image', 'bundle', target);
+      if (!baseFiles.every((f) => fs.existsSync(path.join(BUNDLE, f)))) {
+        if (baseFiles.every((f) => fs.existsSync(path.join(legacyBase, f)))) {
+          fs.mkdirSync(BUNDLE, { recursive: true });
+          for (const f of baseFiles) {
+            info(`seeding ${f} from image/bundle/ -> ${BUNDLE}`);
+            fs.copyFileSync(path.join(legacyBase, f), path.join(BUNDLE, f));
+          }
+        }
+      }
+      if (baseFiles.every((f) => fs.existsSync(path.join(BUNDLE, f))) &&
+          !fs.existsSync(path.join(BUNDLE, runnerName))) {
+        section(`Build runner volume only (${target})`);
+        const outBase = path.posix.join('..', 'build', config, 'image');
+        const runnerCmd = `cd image && TARGET=${target} ATELIER_OUT_BASE='${outBase}' ./build.sh runner`;
+        await (isWin
+          ? run('wsl', ['bash', '-lc', runnerCmd])
+          : run('bash', ['-c', runnerCmd]));
+        if (bundleComplete()) return;
+      }
+    }
     section(`Build VM image bundle (${target})`);
     await run('node', [rel('scripts', 'build-all.mjs'), `--config=${config}`, '--only=image', '--no-verify']);
   } else {
@@ -235,7 +263,7 @@ async function ensureBuild() {
 
 let broker = null;
 function startBroker() {
-  fs.rmSync(ADDR, { force: true });
+  if (!isWin) fs.rmSync(ADDR, { force: true }); // named pipes aren't files — only unix sockets need pre-cleanup
   const log = fs.openSync(BROKER_LOG, 'w');
   broker = spawn(HOST, ['-addr', ADDR], { cwd: repoRoot, stdio: ['ignore', log, log], env: process.env });
   broker.on('error', (e) => die(`could not launch host: ${e.message}`));
@@ -252,7 +280,7 @@ async function waitForBroker() {
 }
 function stopBroker() {
   atelierctl('stopVM', ['-id', 'vm0'], { timeout: 30000 });
-  if (broker && broker.exitCode === null) broker.kill('SIGTERM');
+  if (broker && broker.exitCode === null) broker.kill(); // SIGTERM on unix; TerminateProcess on windows
 }
 
 // The guest's serial console (kernel boot + init) is logged by both drivers as JSON `console` records
@@ -836,7 +864,7 @@ async function runBattery(work) {
 
 async function main() {
   if (!isMac && !isWin) die(`unsupported platform '${process.platform}' (darwin or win32 only)`);
-  if (isWin) warn('Windows path is unverified here; boot/exec go through HCS, not VZ.');
+  if (isWin) info('Windows: broker on named pipe, VM through HCS/Hyper-V (not VZ).');
 
   await ensureBuild();
 
@@ -848,7 +876,7 @@ async function main() {
     stopBroker();
     extractConsole();
     fs.rmSync(work, { recursive: true, force: true });
-    fs.rmSync(ADDR, { force: true });
+    if (!isWin) fs.rmSync(ADDR, { force: true }); // named pipes aren't files
   };
   process.on('SIGINT', () => {
     cleanup();

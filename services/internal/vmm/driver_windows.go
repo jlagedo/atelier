@@ -16,6 +16,8 @@ import (
 
 	"github.com/jlagedo/atelier/services/internal/hcs"
 	"github.com/jlagedo/atelier/services/internal/netjail"
+	"github.com/jlagedo/atelier/services/internal/rpc"
+	"github.com/jlagedo/atelier/services/internal/vsock"
 )
 
 // windowsDriver maps the platform-neutral VMM seam onto Windows HCS, hvsocket,
@@ -104,7 +106,51 @@ func (d *windowsDriver) Create(ctx context.Context, cfg VMConfig) error {
 }
 
 func (d *windowsDriver) Start(ctx context.Context, id string) error {
-	return d.raw.Start(ctx, id)
+	if err := d.raw.Start(ctx, id); err != nil {
+		return err
+	}
+	return d.waitForRunner(ctx, id)
+}
+
+// waitForRunner polls the guest vsock until runner is accepting and processing RPCs.
+// HCS Start() returns before the Linux guest boots; runner needs 30–90 s to come up.
+// We verify readiness by sending setTime (seeds the clock as a side effect) with a
+// per-attempt deadline so a queued-but-unprocessed connection does not block forever.
+func (d *windowsDriver) waitForRunner(ctx context.Context, id string) error {
+	const budget = 120 * time.Second
+	const attemptDeadline = 6 * time.Second
+	end := time.Now().Add(budget)
+	for {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if time.Now().After(end) {
+			return fmt.Errorf("vm: runner in %q did not respond within %v", id, budget)
+		}
+		conn, err := d.DialGuest(ctx, id, vsock.GuestRPCPort)
+		if err != nil {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(3 * time.Second):
+			}
+			continue
+		}
+		_ = conn.SetDeadline(time.Now().Add(attemptDeadline))
+		pingErr := rpc.NewClient(conn).Call(ctx, "setTime",
+			map[string]any{"unixMs": time.Now().UnixMilli()}, nil)
+		conn.Close()
+		if pingErr == nil {
+			d.log.Info("runner ready (clock seeded)", "vm", id)
+			return nil
+		}
+		d.log.Debug("waitForRunner: not yet ready, retrying", "vm", id, "err", pingErr)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(3 * time.Second):
+		}
+	}
 }
 
 func (d *windowsDriver) Stop(ctx context.Context, id string) error {

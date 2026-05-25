@@ -33,9 +33,9 @@ const (
 var (
 	modcomputecore = windows.NewLazySystemDLL("computecore.dll")
 
-	procHcsCreateOperation        = modcomputecore.NewProc("HcsCreateOperation")
-	procHcsCloseOperation         = modcomputecore.NewProc("HcsCloseOperation")
-	procHcsWaitForOperationResult = modcomputecore.NewProc("HcsWaitForOperationResult")
+	procHcsCreateOperation            = modcomputecore.NewProc("HcsCreateOperation")
+	procHcsCloseOperation             = modcomputecore.NewProc("HcsCloseOperation")
+	procHcsWaitForOperationResult     = modcomputecore.NewProc("HcsWaitForOperationResult")
 	procHcsCreateComputeSystem        = modcomputecore.NewProc("HcsCreateComputeSystem")
 	procHcsOpenComputeSystem          = modcomputecore.NewProc("HcsOpenComputeSystem")
 	procHcsStartComputeSystem         = modcomputecore.NewProc("HcsStartComputeSystem")

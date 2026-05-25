@@ -147,7 +147,8 @@ function preflight() {
   if (want('image')) {
     // Both the full image and the runner-only default run image/build.sh (bash + Docker; via wsl on
     // Windows) — runner's volume is mke2fs'd inside the imager container, so it needs Docker too.
-    required.push('docker');
+    // On Windows docker lives inside WSL, not the Windows PATH, so only require 'docker' on macOS.
+    if (!isWin) required.push('docker');
     required.push(isWin ? 'wsl' : 'bash'); // no make
   }
   if (isMac && want('host')) required.push('codesign'); // ad-hoc sign the broker for the VZ entitlement
@@ -160,9 +161,11 @@ function preflight() {
   info(`go      ${(tryCapture('go', ['version']) ?? '?').replace(/^go version /, '')}`);
   info(`git     ${(tryCapture('git', ['--version']) ?? '?').replace(/^git version /, '')}`);
   if (want('image')) {
-    info(`docker  ${tryCapture('docker', ['--version']) ?? '?'}`);
-    if (tryCapture('docker', ['info', '--format', '{{.ServerVersion}}']) === null)
-      die('docker daemon is not reachable (start OrbStack/Docker Desktop, or build host/desktop only with --only=)');
+    const dockerCmd = isWin ? ['wsl', ['docker', '--version']] : ['docker', ['--version']];
+    const daemonCmd = isWin ? ['wsl', ['docker', 'info', '--format', '{{.ServerVersion}}']] : ['docker', ['info', '--format', '{{.ServerVersion}}']];
+    info(`docker  ${tryCapture(...dockerCmd) ?? '?'}`);
+    if (tryCapture(...daemonCmd) === null)
+      die('docker daemon is not reachable (start Docker Desktop / WSL docker, or build host/desktop only with --only=)');
   }
   const imageMode = !want('image') ? 'none' : buildFullImage ? 'full' : 'runner-only';
   info(`platform ${process.platform} -> config=${flags.config}, target=${target}, ` +

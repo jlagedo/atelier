@@ -1,3 +1,4 @@
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { defaultHostAddress } from "../host-client";
 import { bundleTarget, resolveBundleDir, rootfsFileName } from "./bundle";
@@ -15,12 +16,12 @@ describe("bundle resolution", () => {
 
   it("resolves the macOS bundle dir under the base", () => {
     const dir = resolveBundleDir({ baseDir: "/b", platform: "darwin", arch: "arm64", env: {} });
-    expect(dir).toBe("/b/darwin-arm64-vz");
+    expect(dir).toBe(path.join("/b", "darwin-arm64-vz"));
   });
 
   it("keeps the Windows default intact", () => {
     const dir = resolveBundleDir({ baseDir: "/b", platform: "win32", arch: "x64", env: {} });
-    expect(dir).toBe("/b/windows-amd64-hyperv");
+    expect(dir).toBe(path.join("/b", "windows-amd64-hyperv"));
   });
 
   it("honours precedence: opts > ATELIER_BUNDLE_DIR > computed default", () => {
