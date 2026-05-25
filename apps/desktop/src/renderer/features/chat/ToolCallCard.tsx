@@ -21,7 +21,7 @@ function toolIcon(label: string): Icon {
 
 function StatusDot({ status }: { status: ToolCall["status"] }) {
   if (status === "running")
-    return <CircleNotch weight="bold" className="text-primary size-3.5 animate-spin" />;
+    return <CircleNotch weight="bold" className="text-signal size-3.5 animate-spin" />;
   if (status === "error") return <XCircle weight="fill" className="text-destructive size-3.5" />;
   return <CheckCircle weight="fill" className="text-muted-foreground size-3.5" />;
 }
@@ -35,7 +35,7 @@ export function ToolCallCard({ tool }: { tool: ToolCall }) {
     <div
       className={cn(
         "ml-msg-indent overflow-hidden rounded-xl border transition-colors",
-        running ? "border-primary/35 bg-primary/[0.045]" : "border-border bg-card/50",
+        running ? "border-signal/35 bg-signal/[0.045]" : "border-border bg-card/50",
       )}
     >
       <button

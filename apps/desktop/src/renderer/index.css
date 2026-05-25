@@ -5,105 +5,159 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
-  Atelier — "Warm workshop", espresso-ink dark + brass.
-  The brand is a craftsman's studio, so the palette is warm end to end: there are
-  no flat greys — every surface, border and muted text carries a trace of warm
-  chroma (hue ~64–84), the way premium tools tint their neutrals. Brass amber is
-  --primary: a confident accent (studio lamplight, brass tools) rather than a
-  whisper. Dark is the hero theme — warm near-black espresso; light is the
-  secondary — cream paper. shadcn's --accent stays the subtle hover surface.
+  Atelier — two themes derived from real references, not other UIs (so the
+  palette reads authored, not generated). See docs/color-system.md.
+
+    Light "Studio"      — a watercolour of a painter's atelier: warm parchment
+                          paper, oxblood-brown ink, delft-blue primary.
+    Dark  "Aegean Dusk" — a sunset over water: cool petrol-teal foundation,
+                          warm gold accent. (hero theme)
+
+  Two accents, one role-model shared across both themes (only the hue differs):
+    --primary  = the cool blue (delft in light, petrol-teal in dark) — the
+                 everyday interactive / ops / trust colour (file rows, focus,
+                 suggestion cards, the "Contained" mark).
+    --signal   = gold — RARE, reserved for the agent: the send CTA, the
+                 assistant's identity, and "live" states (running/active).
+  Reserved for DATA/STATUS meaning, never brand decoration:
+    --positive = green  (credit, reconciled, allowed)
+    --destructive = red (debit, break, denied, blocked)
+    --warning  = sienna/amber (awaiting attention)
+  shadcn's --accent stays the subtle hover surface.
 */
 
 :root {
   --radius: 0.625rem;
 
-  /* Light (secondary) — warm cream paper + bronze */
-  --background: oklch(0.985 0.007 84);
-  --foreground: oklch(0.26 0.02 58);
+  /* Light — "Studio": warm parchment + oxblood ink + delft blue */
+  --background: oklch(0.944 0.024 88.2);
+  --foreground: oklch(0.308 0.031 31.6);
 
-  --card: oklch(0.998 0.004 84);
-  --card-foreground: oklch(0.26 0.02 58);
-  --popover: oklch(0.998 0.004 84);
-  --popover-foreground: oklch(0.26 0.02 58);
+  --card: oklch(0.994 0.007 88.6);
+  --card-foreground: oklch(0.308 0.031 31.6);
+  --popover: oklch(0.971 0.015 86.4);
+  --popover-foreground: oklch(0.308 0.031 31.6);
 
-  --primary: oklch(0.58 0.115 66);
-  --primary-foreground: oklch(0.99 0.006 84);
+  --primary: oklch(0.482 0.076 253.9); /* delft blue */
+  --primary-foreground: oklch(0.974 0.017 88);
 
-  --secondary: oklch(0.955 0.01 82);
-  --secondary-foreground: oklch(0.32 0.02 60);
+  --secondary: oklch(0.915 0.031 86.5);
+  --secondary-foreground: oklch(0.346 0.035 35.2);
 
-  --muted: oklch(0.955 0.01 82);
-  --muted-foreground: oklch(0.52 0.018 62);
+  --muted: oklch(0.915 0.031 86.5);
+  --muted-foreground: oklch(0.514 0.038 47);
 
-  --accent: oklch(0.945 0.014 80);
-  --accent-foreground: oklch(0.32 0.02 60);
+  --accent: oklch(0.929 0.025 86.9);
+  --accent-foreground: oklch(0.346 0.035 35.2);
 
-  --destructive: oklch(0.55 0.19 30);
-  --destructive-foreground: oklch(0.99 0.006 84);
+  --destructive: oklch(0.521 0.158 29.2); /* brick — negative / denied */
+  --destructive-foreground: oklch(0.974 0.017 88);
 
-  --border: oklch(0.905 0.01 78);
-  --input: oklch(0.905 0.01 78);
-  --ring: oklch(0.58 0.115 66);
+  --signal: oklch(0.557 0.107 74.5); /* honey gold — agent / CTA / live */
+  --signal-foreground: oklch(0.968 0.025 89.2);
 
-  --chart-1: oklch(0.58 0.115 66);
-  --chart-2: oklch(0.6 0.14 40);
-  --chart-3: oklch(0.62 0.08 130);
-  --chart-4: oklch(0.58 0.18 30);
-  --chart-5: oklch(0.7 0.12 85);
+  --positive: oklch(0.543 0.089 130.3); /* ivy — credit / allowed */
+  --positive-foreground: oklch(0.974 0.017 88);
 
-  --sidebar: oklch(0.972 0.009 84);
-  --sidebar-foreground: oklch(0.32 0.02 60);
-  --sidebar-primary: oklch(0.58 0.115 66);
-  --sidebar-primary-foreground: oklch(0.99 0.006 84);
-  --sidebar-accent: oklch(0.945 0.012 82);
-  --sidebar-accent-foreground: oklch(0.32 0.02 60);
-  --sidebar-border: oklch(0.905 0.01 78);
-  --sidebar-ring: oklch(0.58 0.115 66);
+  --warning: oklch(0.601 0.14 47.7); /* sienna — awaiting attention */
+  --warning-foreground: oklch(0.968 0.025 89.2);
+
+  --tertiary: oklch(0.447 0.051 29.7); /* oxblood — brand / categories */
+
+  --border: oklch(0.872 0.04 87.6);
+  --input: oklch(0.872 0.04 87.6);
+  --ring: oklch(0.482 0.076 253.9);
+
+  --chart-1: oklch(0.482 0.076 253.9); /* delft  */
+  --chart-2: oklch(0.557 0.107 74.5); /* gold   */
+  --chart-3: oklch(0.543 0.089 130.3); /* ivy    */
+  --chart-4: oklch(0.521 0.158 29.2); /* brick  */
+  --chart-5: oklch(0.447 0.051 29.7); /* oxblood*/
+
+  --sidebar: oklch(0.971 0.015 86.4);
+  --sidebar-foreground: oklch(0.346 0.035 35.2);
+  --sidebar-primary: oklch(0.482 0.076 253.9);
+  --sidebar-primary-foreground: oklch(0.974 0.017 88);
+  --sidebar-accent: oklch(0.929 0.025 86.9);
+  --sidebar-accent-foreground: oklch(0.346 0.035 35.2);
+  --sidebar-border: oklch(0.872 0.04 87.6);
+  --sidebar-ring: oklch(0.482 0.076 253.9);
+
+  /* atmosphere — warm, paper-soft (referenced by @theme inline) */
+  --shadow-lamp-raw: 0 1px 2px -1px oklch(0.31 0.03 32 / 0.16),
+    0 12px 32px -12px oklch(0.31 0.03 32 / 0.2);
+  --shadow-signal-raw: 0 0 0 1px oklch(0.557 0.107 74.5 / 0.22),
+    0 6px 22px -8px oklch(0.557 0.107 74.5 / 0.34);
+  /* hero mesh — honey overhead, oxblood to the side, ivy low-left */
+  --hero-1: oklch(0.557 0.107 74.5 / 0.12);
+  --hero-2: oklch(0.447 0.051 29.7 / 0.07);
+  --hero-3: oklch(0.543 0.089 130.3 / 0.05);
 }
 
 .dark {
-  /* Dark (hero) — warm espresso-ink + brass */
-  --background: oklch(0.175 0.012 66);
-  --foreground: oklch(0.925 0.014 84);
+  /* Dark — "Aegean Dusk": cool petrol-teal foundation + gold */
+  --background: oklch(0.206 0.02 232.9);
+  --foreground: oklch(0.944 0.003 174.5);
 
-  --card: oklch(0.222 0.014 64);
-  --card-foreground: oklch(0.925 0.014 84);
-  --popover: oklch(0.2 0.013 64);
-  --popover-foreground: oklch(0.925 0.014 84);
+  --card: oklch(0.282 0.029 230.8);
+  --card-foreground: oklch(0.944 0.003 174.5);
+  --popover: oklch(0.246 0.025 232.5);
+  --popover-foreground: oklch(0.944 0.003 174.5);
 
-  --primary: oklch(0.785 0.13 77);
-  --primary-foreground: oklch(0.22 0.03 70);
+  --primary: oklch(0.685 0.068 225.4); /* petrol-teal */
+  --primary-foreground: oklch(0.191 0.023 227.4);
 
-  --secondary: oklch(0.262 0.014 64);
-  --secondary-foreground: oklch(0.925 0.014 84);
+  --secondary: oklch(0.321 0.034 234.4);
+  --secondary-foreground: oklch(0.944 0.003 174.5);
 
-  --muted: oklch(0.25 0.012 64);
-  --muted-foreground: oklch(0.705 0.02 80);
+  --muted: oklch(0.302 0.03 233.4);
+  --muted-foreground: oklch(0.744 0.024 217.7);
 
-  --accent: oklch(0.285 0.016 66);
-  --accent-foreground: oklch(0.94 0.014 84);
+  --accent: oklch(0.332 0.034 234.3);
+  --accent-foreground: oklch(0.944 0.003 174.5);
 
-  --destructive: oklch(0.62 0.17 30);
-  --destructive-foreground: oklch(0.96 0.014 84);
+  --destructive: oklch(0.69 0.147 26.1); /* coral — negative / denied */
+  --destructive-foreground: oklch(0.167 0.021 24.8);
 
-  --border: oklch(0.3 0.013 66);
-  --input: oklch(0.33 0.014 66);
-  --ring: oklch(0.785 0.13 77);
+  --signal: oklch(0.808 0.127 75.3); /* sun gold — agent / CTA / live */
+  --signal-foreground: oklch(0.215 0.028 80.5);
 
-  --chart-1: oklch(0.785 0.13 77);
-  --chart-2: oklch(0.66 0.13 45);
-  --chart-3: oklch(0.72 0.07 130);
-  --chart-4: oklch(0.64 0.16 30);
-  --chart-5: oklch(0.84 0.11 88);
+  --positive: oklch(0.7 0.113 161.5); /* sage — credit / allowed */
+  --positive-foreground: oklch(0.191 0.023 227.4);
 
-  --sidebar: oklch(0.155 0.011 64);
-  --sidebar-foreground: oklch(0.9 0.013 84);
-  --sidebar-primary: oklch(0.785 0.13 77);
-  --sidebar-primary-foreground: oklch(0.22 0.03 70);
-  --sidebar-accent: oklch(0.232 0.014 64);
-  --sidebar-accent-foreground: oklch(0.93 0.014 84);
-  --sidebar-border: oklch(0.262 0.013 66);
-  --sidebar-ring: oklch(0.785 0.13 77);
+  --warning: oklch(0.721 0.138 63.9); /* amber — awaiting attention */
+  --warning-foreground: oklch(0.215 0.028 80.5);
+
+  --tertiary: oklch(0.692 0.057 307); /* mauve — brand / categories */
+
+  --border: oklch(0.359 0.033 231.7);
+  --input: oklch(0.385 0.034 232.7);
+  --ring: oklch(0.685 0.068 225.4);
+
+  --chart-1: oklch(0.685 0.068 225.4); /* teal  */
+  --chart-2: oklch(0.808 0.127 75.3); /* gold  */
+  --chart-3: oklch(0.7 0.113 161.5); /* sage  */
+  --chart-4: oklch(0.69 0.147 26.1); /* coral */
+  --chart-5: oklch(0.692 0.057 307); /* mauve */
+
+  --sidebar: oklch(0.189 0.018 230.6);
+  --sidebar-foreground: oklch(0.902 0.008 207.1);
+  --sidebar-primary: oklch(0.685 0.068 225.4);
+  --sidebar-primary-foreground: oklch(0.191 0.023 227.4);
+  --sidebar-accent: oklch(0.29 0.03 233.5);
+  --sidebar-accent-foreground: oklch(0.944 0.003 174.5);
+  --sidebar-border: oklch(0.332 0.034 234.3);
+  --sidebar-ring: oklch(0.685 0.068 225.4);
+
+  /* atmosphere — cool dusk shadow, gold glow (referenced by @theme inline) */
+  --shadow-lamp-raw: 0 1px 2px -1px oklch(0.1 0.02 233 / 0.5),
+    0 12px 32px -12px oklch(0.08 0.02 233 / 0.6);
+  --shadow-signal-raw: 0 0 0 1px oklch(0.808 0.127 75.3 / 0.18),
+    0 6px 22px -8px oklch(0.808 0.127 75.3 / 0.4);
+  /* hero mesh — gold overhead, teal to the side, mauve low-left */
+  --hero-1: oklch(0.808 0.127 75.3 / 0.13);
+  --hero-2: oklch(0.685 0.068 225.4 / 0.08);
+  --hero-3: oklch(0.692 0.057 307 / 0.06);
 }
 
 @theme inline {
@@ -123,6 +177,13 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-signal: var(--signal);
+  --color-signal-foreground: var(--signal-foreground);
+  --color-positive: var(--positive);
+  --color-positive-foreground: var(--positive-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-tertiary: var(--tertiary);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -152,10 +213,12 @@
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
 
-  /* Atmosphere — shadows leaning warm (brass-tinted), the way a lamplit room
-     casts colour into its shadows. Generates shadow-lamp / shadow-brass. */
-  --shadow-lamp: 0 1px 2px -1px oklch(0.12 0.02 60 / 0.5), 0 12px 32px -12px oklch(0.12 0.02 60 / 0.55);
-  --shadow-brass: 0 0 0 1px oklch(0.785 0.13 77 / 0.18), 0 6px 22px -8px oklch(0.785 0.13 77 / 0.4);
+  /* Atmosphere — theme-scoped (warm paper for Studio, cool dusk for Aegean),
+     the way a lit room casts colour into its shadows. The raw values live per
+     theme in :root/.dark; here we only name the utilities (shadow-lamp /
+     shadow-signal) so they resolve per theme at use-time. */
+  --shadow-lamp: var(--shadow-lamp-raw);
+  --shadow-signal: var(--shadow-signal-raw);
 }
 
 /*
@@ -236,13 +299,13 @@
 }
 
 @layer utilities {
-  /* Lamplit gradient-mesh — brass overhead, a clay glow to the side, a cool
-     sage counterpoint low-left. Translucent, so it works over either canvas.
-     Used behind the empty-state hero. */
+  /* Lamplit gradient-mesh behind the empty-state hero. Colours are theme-scoped
+     (--hero-1/2/3): Studio = honey / oxblood / ivy; Aegean = gold / teal / mauve.
+     Translucent, so it works over either canvas. */
   .hero-lamp {
     background:
-      radial-gradient(56% 44% at 50% 6%, oklch(0.785 0.13 77 / 0.13), transparent 72%),
-      radial-gradient(42% 38% at 84% 26%, oklch(0.66 0.13 45 / 0.08), transparent 72%),
-      radial-gradient(48% 42% at 12% 88%, oklch(0.72 0.07 130 / 0.05), transparent 74%);
+      radial-gradient(56% 44% at 50% 6%, var(--hero-1), transparent 72%),
+      radial-gradient(42% 38% at 84% 26%, var(--hero-2), transparent 72%),
+      radial-gradient(48% 42% at 12% 88%, var(--hero-3), transparent 74%);
   }
 }

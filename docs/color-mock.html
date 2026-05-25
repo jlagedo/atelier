@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Atelier — “Aegean Dusk” (derived from photo)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,500;1,400;1,500&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  /* ============================================================
+     AEGEAN DUSK — derived from a sunset-over-water photo
+       sun glow      -> gold        (accent / "signal": the agent, live state)
+       cool water    -> petrol-teal (primary: ops / interactive)
+       deep water +
+         silhouette  -> dusk teal   (foundation neutrals, warm-cool)
+       clouds        -> mauve       (tertiary / categories)
+     Reserved for DATA meaning: green = credit/reconciled, red = debit/break.
+     ============================================================ */
+
+  .theme-dark {
+    --bg:           #0E191F;  /* deep dusk water / silhouette */
+    --surface:      #14232B;
+    --card:         #1A2C35;
+    --elevated:     #213642;
+    --border:       #2B404B;
+    --border-soft:  #1E303A;
+
+    --text:         #EAEDEC;  /* faintly warm white */
+    --text-2:       #9CB0B6;
+    --text-muted:   #5F757F;
+
+    --primary:      #6AA3BA;  /* petrol-teal, lifted for dark */
+    --primary-soft: #213A45;
+    --primary-fg:   #08161C;
+
+    --signal:       #F0B45A;  /* sun gold — the accent/agent */
+    --signal-soft:  #2C2415;  /* gold-tinted dark surface */
+    --signal-fg:    #20180A;  /* ink for text on gold fills */
+
+    --mauve:        #A593B8;  /* dusty cloud — tertiary */
+
+    --positive:     #54B488;  /* credit / allowed / reconciled (sage) */
+    --negative:     #E8736A;  /* debit / denied / break (warm coral) */
+    --warning:      #E0903A;  /* awaiting / attention (burnt amber) */
+
+    --shadow: 0 24px 56px -22px rgba(0,0,0,.66), 0 0 0 1px rgba(255,255,255,.02);
+    --glow: 0 6px 20px -8px rgba(240,180,90,.45);
+  }
+
+  /* LIGHT = "Studio" — from a watercolor of a painter's atelier:
+       cream curtains/ceiling -> paper · oxblood walls -> ink · honey wood floor
+       -> gold signal · delft-blue porcelain -> primary · ivy -> positive green */
+  .theme-light {
+    --bg:           #F3ECDB;  /* warm parchment (curtains / ceiling) */
+    --surface:      #FAF5EA;  /* cream pane */
+    --card:         #FFFDF8;  /* near-white warm card (keeps data legible) */
+    --elevated:     #ECE2CC;
+    --border:       #E0D4B8;  /* warm tan */
+    --border-soft:  #EBE2CE;
+
+    --text:         #3E2A26;  /* deep oxblood-brown ink (the walls) */
+    --text-2:       #74564C;
+    --text-muted:   #A28C7B;
+
+    --primary:      #3F6088;  /* delft blue (the porcelain) */
+    --primary-soft: #E5EAF1;
+    --primary-fg:   #FFFFFF;
+
+    --signal:       #B07D2E;  /* honey-ochre (wood floor) — the gold signal */
+    --signal-soft:  #F4E9CF;
+    --signal-fg:    #2A1E08;
+
+    --mauve:        #6E4A44;  /* oxblood wall — tertiary */
+
+    --positive:     #5E7A41;  /* ivy olive (antique green, not neon) */
+    --negative:     #B23A2E;  /* warm brick red */
+    --warning:      #C2622A;  /* burnt sienna */
+
+    --shadow: 0 24px 56px -26px rgba(62,42,38,.22), 0 0 0 1px rgba(62,42,38,.05);
+    --glow: 0 6px 16px -8px rgba(176,125,46,.34);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { color-scheme: dark; }
+  body {
+    font-family: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    background: #080c0f;
+    color: #c5cfd2;
+    -webkit-font-smoothing: antialiased;
+    padding: 40px 24px 72px;
+  }
+  .page-head { max-width: 940px; margin: 0 auto 22px; }
+  .page-head h1 { font-size: 22px; font-weight: 600; color: #eef2f2; letter-spacing: -.01em; }
+  .page-head p { font-size: 13.5px; color: #8a958f; margin-top: 6px; line-height: 1.55; }
+
+  /* derivation legend: source region -> token */
+  .derive { max-width:940px; margin:14px auto 0; display:flex; gap:10px; flex-wrap:wrap; }
+  .derive .d {
+    display:flex; align-items:center; gap:9px; padding:7px 11px 7px 8px;
+    background:#10161a; border:1px solid #1b2127; border-radius:10px; font-size:11.5px; color:#aab4b3;
+  }
+  .derive .d i { width:22px; height:22px; border-radius:6px; display:block; flex:none; box-shadow:0 0 0 1px rgba(255,255,255,.06) inset; }
+  .derive .d b { color:#e7ecec; font-weight:500; }
+
+  .section-label {
+    max-width: 940px; margin: 44px auto 14px; font-size: 11px; font-weight: 600;
+    letter-spacing: .16em; text-transform: uppercase; color: #6b7480;
+    display:flex; align-items:center; gap:10px;
+  }
+  .section-label::after { content:""; flex:1; height:1px; background:#1b2127; }
+
+  .swatches { max-width:940px; margin:0 auto 20px; display:grid; grid-template-columns:repeat(auto-fill,minmax(112px,1fr)); gap:8px; }
+  .sw { border-radius:10px; overflow:hidden; border:1px solid rgba(255,255,255,.06); background:#10141a; }
+  .sw .chip { height:44px; }
+  .sw .meta { padding:7px 9px; }
+  .sw .meta .n { font-size:11px; color:#cfd6d4; font-weight:500; }
+  .sw .meta .h { font-size:10.5px; color:#7c867f; font-family:"IBM Plex Mono",monospace; margin-top:1px; }
+
+  /* ===================== APP WINDOW ===================== */
+  .window {
+    max-width:940px; margin:0 auto; border-radius:14px; overflow:hidden; box-shadow:var(--shadow);
+    border:1px solid var(--border); background:var(--bg); color:var(--text); font-size:13px;
+  }
+  .titlebar { height:38px; display:flex; align-items:center; padding:0 14px; background:var(--surface); border-bottom:1px solid var(--border-soft); position:relative; }
+  .lights { display:flex; gap:8px; }
+  .lights i { width:12px; height:12px; border-radius:50%; display:block; }
+  .lights .r{background:#ff5f57} .lights .y{background:#febc2e} .lights .g{background:#28c840}
+  .titlebar .t { position:absolute; left:0; right:0; text-align:center; font-size:12.5px; color:var(--text-2); font-weight:500; pointer-events:none; }
+
+  .app { display:grid; grid-template-columns:204px 1fr 250px; height:580px; }
+
+  .side { background:var(--surface); border-right:1px solid var(--border-soft); display:flex; flex-direction:column; padding:14px 12px; }
+  .brand { display:flex; align-items:center; gap:10px; padding:2px 4px 14px; }
+  .brand .mark {
+    width:30px; height:30px; border-radius:8px; flex:none;
+    /* the photo itself: water-teal -> gold -> mauve */
+    background:linear-gradient(150deg, var(--primary) 0%, var(--signal) 55%, var(--mauve) 100%);
+    display:flex; align-items:center; justify-content:center; color:#fff; font-weight:600; font-size:14px;
+    box-shadow:0 0 0 1px rgba(255,255,255,.10) inset;
+  }
+  .brand .nm { font-size:14px; font-weight:600; letter-spacing:-.01em; }
+  .brand .sub { font-size:11px; color:var(--text-muted); }
+
+  .seg { display:flex; background:var(--elevated); border-radius:9px; padding:3px; gap:3px; margin-bottom:14px; }
+  .seg button { flex:1; border:0; background:transparent; color:var(--text-2); font:inherit; font-size:12px; padding:6px 0; border-radius:6px; cursor:default; }
+  .seg button.on { background:var(--card); color:var(--text); box-shadow:0 1px 2px rgba(0,0,0,.22); font-weight:500; }
+
+  .newwork { display:flex; align-items:center; gap:8px; width:100%; padding:9px 12px; margin-bottom:18px; border:1px dashed var(--border); border-radius:9px; background:transparent; color:var(--text-2); font:inherit; font-size:12.5px; cursor:default; }
+  .grp { font-size:10.5px; font-weight:600; letter-spacing:.14em; text-transform:uppercase; color:var(--text-muted); padding:0 4px 8px; }
+
+  .sess { display:flex; align-items:center; gap:9px; padding:9px 10px; border-radius:9px; margin-bottom:4px; background:var(--signal-soft); border:1px solid color-mix(in srgb, var(--signal) 30%, transparent); }
+  .sess .dot { width:7px; height:7px; border-radius:50%; background:var(--signal); flex:none; }
+  .sess .nm { font-size:12.5px; font-weight:500; flex:1; }
+  .pill { font-size:9.5px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; padding:2px 7px; border-radius:99px; }
+  .pill.signal { color:var(--signal); background:color-mix(in srgb, var(--signal) 18%, transparent); }
+
+  .side .foot { margin-top:auto; display:flex; align-items:center; gap:10px; padding-top:14px; border-top:1px solid var(--border-soft); }
+  .avatar { width:30px; height:30px; border-radius:50%; background:var(--elevated); display:flex; align-items:center; justify-content:center; color:var(--text-2); font-size:12px; font-weight:600; flex:none; }
+  .side .foot .nm { font-size:12px; font-weight:500; }
+  .side .foot .sub { font-size:10.5px; color:var(--text-muted); }
+
+  .center { display:flex; flex-direction:column; background:var(--bg); min-width:0; }
+  .topbar { display:flex; align-items:center; gap:10px; padding:12px 18px; border-bottom:1px solid var(--border-soft); }
+  .topbar .title { font-size:13.5px; font-weight:600; }
+  .topbar .path { font-size:11.5px; color:var(--text-muted); font-family:"IBM Plex Mono",monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .badge { display:inline-flex; align-items:center; gap:6px; font-size:11px; font-weight:500; padding:4px 10px; border-radius:99px; border:1px solid color-mix(in srgb, var(--primary) 35%, transparent); color:var(--primary); background:var(--primary-soft); white-space:nowrap; }
+  .badge svg { width:12px; height:12px; }
+
+  .hero { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:24px 40px; text-align:center; position:relative; }
+  /* faint dusk wash behind the hero, echoing the photo */
+  .hero::before { content:""; position:absolute; inset:0; pointer-events:none;
+    background:radial-gradient(120% 80% at 50% 18%, color-mix(in srgb, var(--signal) 9%, transparent), transparent 60%); }
+  .hero > * { position:relative; }
+  .eyebrow { font-size:10.5px; letter-spacing:.32em; text-transform:uppercase; color:var(--text-muted); display:flex; align-items:center; gap:12px; margin-bottom:18px; }
+  .eyebrow::before, .eyebrow::after { content:""; width:26px; height:1px; background:var(--border); }
+  .hero h2 { font-family:"IBM Plex Serif", Georgia, serif; font-weight:400; font-size:34px; line-height:1.15; letter-spacing:-.01em; color:var(--text); max-width:520px; }
+  .hero h2 em { font-style:italic; color:var(--signal); }
+  .hero .lede { font-size:13.5px; color:var(--text-2); line-height:1.6; max-width:430px; margin:16px 0 26px; }
+
+  .cards { display:flex; flex-direction:column; gap:9px; width:100%; max-width:430px; }
+  .card { display:flex; align-items:center; gap:12px; padding:13px 14px; text-align:left; background:var(--card); border:1px solid var(--border); border-radius:11px; }
+  .card .ic { width:30px; height:30px; border-radius:8px; flex:none; display:flex; align-items:center; justify-content:center; color:var(--primary); background:var(--primary-soft); }
+  .card .ic svg { width:15px; height:15px; }
+  .card .tx { font-size:13px; color:var(--text); }
+
+  .composer-wrap { padding:14px 18px 8px; }
+  .composer { display:flex; align-items:center; gap:10px; padding:7px 8px 7px 16px; background:var(--card); border:1px solid var(--border); border-radius:13px; }
+  .composer .ph { flex:1; font-size:13px; color:var(--text-muted); }
+  .send { width:34px; height:34px; border-radius:9px; flex:none; display:flex; align-items:center; justify-content:center; background:var(--signal); color:var(--signal-fg); box-shadow:var(--glow); }
+  .send svg { width:16px; height:16px; }
+  /* light mode: medium honey is too pale for a dark glyph -> deepen + cream arrow */
+  .theme-light .send { background:#946518; color:#FBF4E2; }
+
+  .statusbar { display:flex; align-items:center; justify-content:center; gap:8px; padding:8px 18px 14px; font-size:11px; color:var(--text-muted); }
+  .statusbar .dot { width:6px; height:6px; border-radius:50%; background:var(--positive); }
+
+  .ctx { background:var(--surface); border-left:1px solid var(--border-soft); padding:16px 14px; display:flex; flex-direction:column; overflow:hidden; }
+  .ctx h3 { font-size:13px; font-weight:600; }
+  .ctx .path { font-size:10.5px; color:var(--text-muted); font-family:"IBM Plex Mono",monospace; margin:3px 0 16px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ctx .lbl { font-size:10px; font-weight:600; letter-spacing:.14em; text-transform:uppercase; color:var(--text-muted); margin:16px 0 8px; }
+  .ctx .lbl:first-of-type { margin-top:0; }
+  .access { display:flex; flex-direction:column; gap:2px; }
+  .arow { display:flex; align-items:center; justify-content:space-between; padding:6px 4px; }
+  .arow .k { font-size:12.5px; color:var(--text-2); }
+  .stat { display:inline-flex; align-items:center; gap:6px; font-size:11px; font-weight:500; }
+  .stat .d { width:6px; height:6px; border-radius:50%; }
+  .stat.ok { color:var(--positive); } .stat.ok .d{ background:var(--positive); }
+  .stat.no { color:var(--negative); } .stat.no .d{ background:var(--negative); }
+  .empty { font-size:12px; color:var(--text-muted); padding:2px 4px; }
+  .files { display:flex; flex-direction:column; gap:1px; margin-top:2px; }
+  .frow { display:flex; align-items:center; gap:9px; padding:6px 6px; border-radius:7px; }
+  .frow svg { width:15px; height:15px; flex:none; color:var(--text-muted); }
+  .frow .fn { font-size:12px; color:var(--text); flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .frow .fz { font-size:10.5px; color:var(--text-muted); font-family:"IBM Plex Mono",monospace; }
+  .frow.dir svg { color:var(--primary); }
+  .ctx .cfoot { margin-top:auto; display:flex; align-items:center; gap:8px; padding-top:12px; border-top:1px solid var(--border-soft); font-size:10.5px; color:var(--text-muted); }
+  .ctx .cfoot .d { width:6px; height:6px; border-radius:50%; background:var(--signal); flex:none; }
+</style>
+</head>
+<body>
+
+  <div class="page-head">
+    <h1>Atelier · palettes pulled from references, not other UIs</h1>
+    <p><b>Dark</b> is “Aegean Dusk” — a cool petrol-teal foundation with the sun's gold accent, sampled from
+       a sunset over water. <b>Light</b> is “Studio” — sampled from a watercolor of a painter's atelier:
+       warm parchment paper, oxblood-brown ink, delft-blue primary, honey-gold signal, ivy green. Across
+       both, gold stays the rare “agent / live” accent and green &amp; red stay reserved for data
+       (credit/debit, reconciled/break).</p>
+    <div class="derive">
+      <span class="d"><i style="background:#F3ECDB"></i> cream curtains → <b>paper</b></span>
+      <span class="d"><i style="background:#3E2A26"></i> oxblood walls → <b>ink</b></span>
+      <span class="d"><i style="background:#3F6088"></i> delft porcelain → <b>primary</b></span>
+      <span class="d"><i style="background:#B07D2E"></i> honey floor → <b>signal (gold)</b></span>
+      <span class="d"><i style="background:#5E7A41"></i> ivy → <b>positive green</b></span>
+    </div>
+  </div>
+
+  <!-- ================= DARK ================= -->
+  <div class="section-label">Dark · Aegean Dusk (sunset over water)</div>
+  <div class="theme-dark">
+    <div class="swatches" id="sw-dark"></div>
+    <div class="window">
+      <div class="titlebar"><div class="lights"><i class="r"></i><i class="y"></i><i class="g"></i></div><div class="t">Atelier</div></div>
+      <div class="app">
+        <aside class="side">
+          <div class="brand"><div class="mark">A</div><div><div class="nm">Atelier</div><div class="sub">workspace</div></div></div>
+          <div class="seg"><button>Chat</button><button class="on">Work</button></div>
+          <button class="newwork"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg> New work</button>
+          <div class="grp">Work history</div>
+          <div class="sess"><span class="dot"></span><span class="nm">bluesky api</span><span class="pill signal">active</span></div>
+          <div class="foot"><div class="avatar">JL</div><div><div class="nm">João Lagedo</div><div class="sub">v0.0.0</div></div></div>
+        </aside>
+        <section class="center">
+          <div class="topbar">
+            <span class="title">bluesky api</span>
+            <span class="path">~/Developer/blueskyapi · Sandbox VM</span>
+            <span style="flex:1"></span>
+            <span class="badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 2l8 3v6c0 5-3.5 8-8 11-4.5-3-8-6-8-11V5z"/></svg> Contained</span>
+          </div>
+          <div class="hero">
+            <div class="eyebrow">Atelier</div>
+            <h2>A quiet <em>workshop</em> for your files</h2>
+            <p class="lede">Ask in plain language. Atelier reads and edits files in a contained sandbox — every change gated and audited.</p>
+            <div class="cards">
+              <div class="card"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M9 4v16"/></svg></span><span class="tx">Summarise a CSV and flag anomalies</span></div>
+              <div class="card"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 19V5M4 19h16M8 16v-5M13 16V8M18 16v-3"/></svg></span><span class="tx">Compare actuals vs budget in a workbook</span></div>
+              <div class="card"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg></span><span class="tx">Find duplicate records across two files</span></div>
+            </div>
+          </div>
+          <div class="composer-wrap"><div class="composer"><span class="ph">Ask Atelier to work in this folder…</span><span class="send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></div></div>
+          <div class="statusbar"><span class="dot"></span> Connected to the in-guest agent — file + shell allowed, network denied by policy</div>
+        </section>
+        <aside class="ctx">
+          <h3>Work context</h3>
+          <div class="path">~/Developer/blueskyapi</div>
+          <div class="lbl">Access</div>
+          <div class="access">
+            <div class="arow"><span class="k">Files</span><span class="stat ok"><span class="d"></span>allowed</span></div>
+            <div class="arow"><span class="k">Shell</span><span class="stat ok"><span class="d"></span>allowed</span></div>
+            <div class="arow"><span class="k">Network</span><span class="stat no"><span class="d"></span>denied</span></div>
+          </div>
+          <div class="lbl">Running tasks</div>
+          <div class="empty">None</div>
+          <div class="lbl">Changed files</div>
+          <div class="files">
+            <div class="frow dir"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span class="fn">node_modules</span><span class="fz">—</span></div>
+            <div class="frow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2h8l4 4v16H6z"/><path d="M14 2v4h4"/></svg><span class="fn">muted-words.json</span><span class="fz">1.2k</span></div>
+            <div class="frow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2h8l4 4v16H6z"/><path d="M14 2v4h4"/></svg><span class="fn">package-lock.json</span><span class="fz">88k</span></div>
+            <div class="frow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2h8l4 4v16H6z"/><path d="M14 2v4h4"/></svg><span class="fn">packages.json</span><span class="fz">740</span></div>
+            <div class="frow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2h8l4 4v16H6z"/><path d="M14 2v4h4"/></svg><span class="fn">README.md</span><span class="fz">2.1k</span></div>
+            <div class="frow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2h8l4 4v16H6z"/><path d="M14 2v4h4"/></svg><span class="fn">sync-muted-words.js</span><span class="fz">3.4k</span></div>
+            <div class="frow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2h8l4 4v16H6z"/><path d="M14 2v4h4"/></svg><span class="fn">theater.py</span><span class="fz">5.0k</span></div>
+          </div>
+          <div class="cfoot"><span class="d"></span> Shared host → VM · gated</div>
+        </aside>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= LIGHT ================= -->
+  <div class="section-label">Light · Studio (watercolor atelier)</div>
+  <div class="theme-light">
+    <div class="swatches" id="sw-light"></div>
+    <div class="window">
+      <div class="titlebar"><div class="lights"><i class="r"></i><i class="y"></i><i class="g"></i></div><div class="t">Atelier</div></div>
+      <div class="app">
+        <aside class="side">
+          <div class="brand"><div class="mark">A</div><div><div class="nm">Atelier</div><div class="sub">workspace</div></div></div>
+          <div class="seg"><button>Chat</button><button class="on">Work</button></div>
+          <button class="newwork"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg> New work</button>
+          <div class="grp">Work history</div>
+          <div class="sess"><span class="dot"></span><span class="nm">bluesky api</span><span class="pill signal">active</span></div>
+          <div class="foot"><div class="avatar">JL</div><div><div class="nm">João Lagedo</div><div class="sub">v0.0.0</div></div></div>
+        </aside>
+        <section class="center">
+          <div class="topbar">
+            <span class="title">bluesky api</span>
+            <span class="path">~/Developer/blueskyapi · Sandbox VM</span>
+            <span style="flex:1"></span>
+            <span class="badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 2l8 3v6c0 5-3.5 8-8 11-4.5-3-8-6-8-11V5z"/></svg> Contained</span>
+          </div>
+          <div class="hero">
+            <div class="eyebrow">Atelier</div>
+            <h2>A quiet <em>workshop</em> for your files</h2>
+            <p class="lede">Ask in plain language. Atelier reads and edits files in a contained sandbox — every change gated and audited.</p>
+            <div class="cards">
+              <div class="card"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M9 4v16"/></svg></span><span class="tx">Summarise a CSV and flag anomalies</span></div>
+              <div class="card"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 19V5M4 19h16M8 16v-5M13 16V8M18 16v-3"/></svg></span><span class="tx">Compare actuals vs budget in a workbook</span></div>
+              <div class="card"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg></span><span class="tx">Find duplicate records across two files</span></div>
+            </div>
+          </div>
+          <div class="composer-wrap"><div class="composer"><span class="ph">Ask Atelier to work in this folder…</span><span class="send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></div></div>
+          <div class="statusbar"><span class="dot"></span> Connected to the in-guest agent — file + shell allowed, network denied by policy</div>
+        </section>
+        <aside class="ctx">
+          <h3>Work context</h3>
+          <div class="path">~/Developer/blueskyapi</div>
+          <div class="lbl">Access</div>
+          <div class="access">
+            <div class="arow"><span class="k">Files</span><span class="stat ok"><span class="d"></span>allowed</span></div>
+            <div class="arow"><span class="k">Shell</span><span class="stat ok"><span class="d"></span>allowed</span></div>
+            <div class="arow"><span class="k">Network</span><span class="stat no"><span class="d"></span>denied</span></div>
+          </div>
+          <div class="lbl">Running tasks</div>
+          <div class="empty">None</div>
+          <div class="lbl">Changed files</div>
+          <div class="files">
+            <div class="frow dir"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span class="fn">node_modules</span><span class="fz">—</span></div>
+            <div class="frow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2h8l4 4v16H6z"/><path d="M14 2v4h4"/></svg><span class="fn">muted-words.json</span><span class="fz">1.2k</span></div>
+            <div class="frow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2h8l4 4v16H6z"/><path d="M14 2v4h4"/></svg><span class="fn">package-lock.json</span><span class="fz">88k</span></div>
+            <div class="frow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2h8l4 4v16H6z"/><path d="M14 2v4h4"/></svg><span class="fn">packages.json</span><span class="fz">740</span></div>
+            <div class="frow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2h8l4 4v16H6z"/><path d="M14 2v4h4"/></svg><span class="fn">README.md</span><span class="fz">2.1k</span></div>
+            <div class="frow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2h8l4 4v16H6z"/><path d="M14 2v4h4"/></svg><span class="fn">sync-muted-words.js</span><span class="fz">3.4k</span></div>
+            <div class="frow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2h8l4 4v16H6z"/><path d="M14 2v4h4"/></svg><span class="fn">theater.py</span><span class="fz">5.0k</span></div>
+          </div>
+          <div class="cfoot"><span class="d"></span> Shared host → VM · gated</div>
+        </aside>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const TOKENS = [
+      ["bg","--bg"],["surface","--surface"],["card","--card"],["elevated","--elevated"],
+      ["border","--border"],["text","--text"],["text-2","--text-2"],["muted","--text-muted"],
+      ["primary","--primary"],["primary-soft","--primary-soft"],
+      ["signal","--signal"],["mauve","--mauve"],
+      ["positive","--positive"],["negative","--negative"],["warning","--warning"],
+    ];
+    function fill(id, scope) {
+      const cs = getComputedStyle(document.querySelector(scope));
+      const host = document.getElementById(id);
+      TOKENS.forEach(([name,varname]) => {
+        const val = cs.getPropertyValue(varname).trim();
+        const el = document.createElement("div");
+        el.className = "sw";
+        el.innerHTML = `<div class="chip" style="background:${val}"></div><div class="meta"><div class="n">${name}</div><div class="h">${val}</div></div>`;
+        host.appendChild(el);
+      });
+    }
+    fill("sw-dark", ".theme-dark");
+    fill("sw-light", ".theme-light");
+  </script>
+</body>
+</html>

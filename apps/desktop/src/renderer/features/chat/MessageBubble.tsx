@@ -21,9 +21,9 @@ export function MessageBubble({ role, content }: { role: Role; content: string }
 
   return (
     <div className="flex gap-msg-gap">
-      <Avatar className="bg-primary/12 ring-primary/25 mt-0.5 size-avatar ring-1">
+      <Avatar className="bg-signal/12 ring-signal/25 mt-0.5 size-avatar ring-1">
         <AvatarFallback className="bg-transparent">
-          <span className="text-primary font-display text-sm font-semibold">A</span>
+          <span className="text-signal font-display text-sm font-semibold">A</span>
         </AvatarFallback>
       </Avatar>
       <div className="min-w-0 flex-1 pt-0.5">

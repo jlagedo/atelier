@@ -22,13 +22,13 @@ type BadgeTone = NonNullable<VariantProps<typeof badgeVariants>["tone"]>;
 
 const toneByStatus: Record<SessionStatus, BadgeTone> = {
   idle: "plain",
-  running: "accent",
+  running: "signal",
   waiting: "muted",
-  done: "subtle",
+  done: "positive",
   error: "destructive",
-  starting: "accent",
-  active: "accent",
-  resuming: "accent",
+  starting: "signal",
+  active: "signal",
+  resuming: "signal",
   hibernating: "muted",
   inactive: "plain",
 };

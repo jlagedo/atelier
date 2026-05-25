@@ -52,7 +52,7 @@ export function AppSidebar({
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" className="hover:bg-transparent active:bg-transparent">
-              <div className="bg-primary text-primary-foreground shadow-brass flex aspect-square size-8 items-center justify-center rounded-md">
+              <div className="bg-signal text-signal-foreground shadow-signal flex aspect-square size-8 items-center justify-center rounded-md">
                 <span className="font-display text-lg leading-none font-semibold">A</span>
               </div>
               <div className="flex flex-col gap-0.5 leading-none">

@@ -11,7 +11,7 @@ export function PolicyDecisionCard({ policy }: { policy: PolicyDecision }) {
   if (!denied) {
     return (
       <div className="text-muted-foreground ml-msg-indent flex items-center gap-1.5 px-1 text-[11px]">
-        <ShieldCheck weight="bold" className="text-primary/70 size-3.5 shrink-0" />
+        <ShieldCheck weight="bold" className="text-positive size-3.5 shrink-0" />
         <span className="font-medium">{policy.action}</span>
         {policy.target && (
           <code className="bg-muted/60 truncate rounded px-1 py-0.5 font-mono text-[10px]">{policy.target}</code>

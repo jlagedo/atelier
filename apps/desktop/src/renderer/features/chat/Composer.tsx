@@ -60,8 +60,9 @@ export function Composer({
         />
         <Button
           type="button"
+          variant="signal"
           size="icon"
-          className="enabled:shadow-brass size-8 shrink-0 rounded-xl transition-all enabled:hover:brightness-105"
+          className="enabled:shadow-signal size-8 shrink-0 rounded-xl transition-all enabled:hover:brightness-105"
           aria-label="Send message"
           disabled={value.trim().length === 0 || disabled}
           onClick={submit}

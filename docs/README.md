@@ -5,6 +5,7 @@ Start here when the repo shape or history feels fuzzy. Each document has one job
 | Document | Purpose |
 |---|---|
 | [`design.md`](design.md) | Product/architecture rationale, major decisions, glossary. Mostly historical, but kept current where decisions changed. |
+| [`color-system.md`](color-system.md) | The desktop color system: two reference-derived themes (Studio / Aegean Dusk), semantic tokens, and usage rules. Interactive preview: [`color-mock.html`](color-mock.html). |
 | [`runtime-architecture.md`](runtime-architecture.md) | Concrete process, protocol, port, and source-file map from renderer to in-guest agent. |
 | [`implementation-status.md`](implementation-status.md) | Slice-by-slice implementation history and current milestone status. |
 | [`macos-port-plan.md`](macos-port-plan.md) | Planning notes and proposed structure for adding a macOS Virtualization.framework backend. |

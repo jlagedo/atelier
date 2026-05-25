@@ -5,8 +5,8 @@ import { cn } from "@/lib/utils";
 import { Button } from "./button";
 
 // A small, focused confirm modal for irreversible actions (built on Radix Dialog —
-// the repo has no AlertDialog primitive). Warm-workshop styling: brass/lamp shadow,
-// Fraunces display title, a tinted glyph that takes the action's tone.
+// the repo has no AlertDialog primitive). Themed styling: lamp shadow, Fraunces
+// display title, a tinted glyph that takes the action's tone.
 export function ConfirmDialog({
   open,
   onOpenChange,

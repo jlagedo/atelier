@@ -69,8 +69,8 @@ function FileList({ files }: { files: WorkspaceFile[] }) {
 }
 
 function TaskIcon({ status }: { status: BackgroundTask["status"] }) {
-  if (status === "running") return <CircleNotch className="text-primary size-3.5 animate-spin" />;
-  return <CheckCircle weight="fill" className="text-muted-foreground size-3.5" />;
+  if (status === "running") return <CircleNotch className="text-signal size-3.5 animate-spin" />;
+  return <CheckCircle weight="fill" className="text-positive size-3.5" />;
 }
 
 function AccessRow({ label, value, icon }: { label: string; value: "allowed" | "denied"; icon?: boolean }) {
@@ -80,7 +80,15 @@ function AccessRow({ label, value, icon }: { label: string; value: "allowed" | "
       <span className="text-muted-foreground flex items-center gap-1.5">
         {icon && <LockKey className="size-3.5" />} {label}
       </span>
-      <span className={cn("font-medium", denied ? "text-muted-foreground/70" : "text-primary")}>{value}</span>
+      <span
+        className={cn(
+          "flex items-center gap-1.5 font-medium",
+          denied ? "text-destructive" : "text-positive",
+        )}
+      >
+        <span className={cn("size-1.5 rounded-full", denied ? "bg-destructive" : "bg-positive")} />
+        {value}
+      </span>
     </div>
   );
 }

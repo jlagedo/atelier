@@ -1,5 +1,6 @@
 import { app, BrowserWindow } from "electron";
 import path from "node:path";
+import { existsSync } from "node:fs";
 import { installCsp } from "./security";
 import { registerIpcHandlers, type IpcBackend } from "./ipc/handlers";
 
@@ -8,7 +9,15 @@ let backend: IpcBackend | undefined;
 function installDevDockIcon(): void {
   if (process.platform !== "darwin" || app.isPackaged) return;
 
-  app.dock?.setIcon(path.join(app.getAppPath(), "assets", "icon.png"));
+  // Cosmetic dev-only nicety: never let a missing/unloadable icon abort startup
+  // (the asset isn't bundled in the e2e build, and setIcon throws on a bad path).
+  const icon = path.join(app.getAppPath(), "assets", "icon.png");
+  if (!existsSync(icon)) return;
+  try {
+    app.dock?.setIcon(icon);
+  } catch {
+    /* ignore — the dock icon is not load-bearing */
+  }
 }
 
 function createWindow(): void {
@@ -16,7 +25,9 @@ function createWindow(): void {
     width: 1200,
     height: 800,
     title: "Atelier",
-    backgroundColor: "#0A0F1E",
+    // Pre-paint flash colour for the native window; can't read a CSS var, so it
+    // mirrors --background of the default (.dark / "Aegean Dusk") theme.
+    backgroundColor: "#0E191F",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       sandbox: true,

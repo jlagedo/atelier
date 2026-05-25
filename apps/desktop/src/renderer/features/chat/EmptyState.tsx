@@ -10,15 +10,15 @@ export function EmptyState() {
   return (
     <div className="hero-lamp relative flex h-full flex-col items-center justify-center px-6 text-center">
       <div className="animate-in fade-in slide-in-from-bottom-3 flex flex-col items-center duration-700">
-        {/* Brass eyebrow — a small rule, the wordmark, a small rule */}
-        <div className="text-primary flex items-center gap-2.5">
-          <span className="from-primary/0 to-primary/70 h-px w-8 bg-gradient-to-r" />
+        {/* Gold eyebrow (signal) — a small rule, the wordmark, a small rule */}
+        <div className="text-signal flex items-center gap-2.5">
+          <span className="from-signal/0 to-signal/70 h-px w-8 bg-gradient-to-r" />
           <span className="font-mono text-[11px] tracking-[0.34em] uppercase">Atelier</span>
-          <span className="from-primary/70 to-primary/0 h-px w-8 bg-gradient-to-r" />
+          <span className="from-signal/70 to-signal/0 h-px w-8 bg-gradient-to-r" />
         </div>
 
         <h2 className="text-foreground font-display mt-5 text-4xl font-semibold tracking-tight">
-          A quiet <span className="text-primary italic">workshop</span> for your files
+          A quiet <span className="text-signal italic">workshop</span> for your files
         </h2>
         <p className="text-muted-foreground mt-4 max-w-md text-sm leading-relaxed">
           Ask in plain language. Atelier reads and edits files in your workspace and runs Python
