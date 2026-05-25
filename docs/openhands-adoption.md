@@ -2,7 +2,7 @@
 
 | Field | Detail |
 |---|---|
-| Status | Plan locked; validated against source (`main` @ v1.23.0); Phase 1 ready |
+| Status | **Phase 1 done** (commit `28df76c`) — one-shot `--task` over NDJSON, verified live on a real model call. Phase 2 (serve/resume) next. |
 | Project | **partisan** — Python (OpenHands SDK) successor to artisan, behind the same NDJSON wire |
 | Goal | Replace the Anthropic-locked in-guest agent with a provider-agnostic one (LiteLLM) |
 | Approach | Embed the SDK **in-process** (`LocalConversation` + `callbacks`); NDJSON only at the host↔guest edge |
@@ -123,16 +123,17 @@ keep OpenHands names; derive `door` (`terminal`→compute, others→files); mark
 `packages/partisan/cli_guest.py`, `process.title="atelier-partisan"`. Key handling (D7) is woven through.
 Phases are strictly sequential; Phase 1 de-risks the core.
 
-### Phase 1 — one-shot (`--task`)
-*Exit:* `python cli_guest.py --task "create hello.txt" --workspace /tmp/ws` emits a well-formed NDJSON
-stream and creates the file.
+### Phase 1 — one-shot (`--task`) ✅ DONE (commit `28df76c`)
+*Exit (met):* `uv run cli_guest.py --task "create hello.txt" --workspace /tmp/ws` emits a well-formed
+NDJSON stream (`init`→`tool_use`→`policy`→`tool_result`→`text`→`result`, id-paired) and creates the file.
 
-- Scaffold `pyproject.toml` (pinned `openhands-sdk`/`openhands-tools` 1.23.*); `argparse` mirroring artisan flags.
-- **Provider/key resolver:** model `--model`→`LLM_MODEL`→`ATELIER_MODEL`→`anthropic/claude-sonnet-4-6`, add `anthropic/` when unprefixed, never `openhands/`; key `LLM_API_KEY`→`ANTHROPIC_API_KEY` (`SecretStr`, fail-fast); base_url `LLM_BASE_URL`→`ANTHROPIC_BASE_URL`.
-- `Agent(tools=[Terminal, FileEditor, Grep])` (deny-by-omission); imports `openhands.tools.{terminal,file_editor,grep}`.
-- **Emitter** (`on_event`): the §4 mapping; `action.model_dump()` for input; flatten observation content; `policy{}` per `ActionEvent`.
-- `conversation_id=uuid4()`; emit `init`; build `Conversation(...)`; `send_message`+`run`; emit `result`; exit.
-- *Verify:* run-complete + final-answer signal (drives `result`); `ObservationEvent` content/`isError` fields; `run()` blocks on the calling thread (⇒ no stdout lock yet).
+Built (`packages/partisan/`, uv + Python 3.14):
+- `pyproject.toml` (`openhands-sdk`/`openhands-tools` 1.23.*) via `uv add`; `argparse` mirrors artisan flags (`--serve`/`--resume` stubbed → Phase 2).
+- **Provider/key resolver:** model `--model`→`LLM_MODEL`→`ATELIER_MODEL`→`anthropic/claude-sonnet-4-6`, add `anthropic/` when unprefixed, reject `openhands/`; key `LLM_API_KEY`→`ANTHROPIC_API_KEY` (`SecretStr`, fail-fast); base_url `LLM_BASE_URL`→`ANTHROPIC_BASE_URL`.
+- `Agent(tools=[Terminal, FileEditor, Grep])` (deny-by-omission); `conversation_id=uuid4()`, `persistence_dir` omitted (optional → Phase 2).
+- **Emitter** (`on_event`): the §4 mapping; `action.model_dump(mode="json")`; observation flattened via `content_to_str(observation.to_llm_content)`; `policy{}` per `ActionEvent`. **stdout = NDJSON only** (banner suppressed via `OPENHANDS_SUPPRESS_BANNER`, stray prints redirected to stderr).
+
+Resolved from source: `ObservationEvent` has **no** `is_error` (errors are distinct event types ⇒ `isError:false`); `result` = last assistant `MessageEvent` text after `run()` returns; `run()` blocks (no stdout lock needed yet).
 
 ### Phase 2 — serve (`--serve`, `--resume`)
 *Exit:* multi-turn over NDJSON; `export_context`→`context{}`; relaunch `--resume <id>` continues.
