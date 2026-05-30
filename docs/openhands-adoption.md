@@ -2,7 +2,7 @@
 
 | Field | Detail |
 |---|---|
-| Status | **Phase 2 done** — `--serve`/`--resume` live-verified (streaming, mid-LLM interrupt, kill-and-resume persistence recovery). Phase 1 done (commit `28df76c`). |
+| Status | **Phase 3 done** — packaged into the VM image + launch site flipped to partisan; `e2e:host` green (43/43), partisan reaches the model in-cage (one-shot + serve). Phases 1–2 done. Remaining: Phase 4 (conformance suite + Node removal). |
 | Project | **partisan** — Python (OpenHands SDK) successor to artisan, behind the same NDJSON wire |
 | Goal | Replace the Anthropic-locked in-guest agent with a provider-agnostic one (LiteLLM) |
 | Approach | Embed the SDK **in-process** (`LocalConversation` + `callbacks`); NDJSON only at the host↔guest edge |
@@ -149,14 +149,16 @@ mid-completion; **all stdout under one `_emit_lock`**. This is what enables Phas
 - `transcript[]` from callbacks (RENDERABLE subset, mirror `cli-guest.ts:140`); `export_context`→`context{sessionId,transcript}`→shutdown.
 - *Verified:* 26 pytest (mapper + in-process serve, fake model) + cross-language wire (real partisan ↔ shipped `PartisanClient`); `--live` smoke (real model): streaming turn, interrupt mid-stream, and **kill-and-resume persistence recovery** (`scripts/test-partisan.mjs --live`).
 
-### Phase 3 — packaging + the hardwired switch
-*Exit:* a full WORK session driven by partisan on a booted VM.
+### Phase 3 — packaging + the hardwired switch ✅ DONE
+*Exit (met):* a full WORK session driven by partisan on a booted VM — `e2e:host` green (43/43), one-shot
+**and** serve-mode partisan reach the model through the egress jail in-guest.
 
-- `Dockerfile`: `apt install python3-venv python3-pip tmux`; stage `packages/partisan`; build a venv at `/opt/atelier/partisan/.venv` (target-arch wheels). Keep Node+artisan (coexist).
-- `build.sh`: `stage_agent_ctx` + runner volume carry the partisan venv; `persistence_dir`→`HOME`.
-- **Egress per-provider:** replace hardcoded `api.anthropic.com` (`manager.ts:107`, `atelierctl:183-197`) with a model/`base_url`→host resolver.
-- **The switch:** `manager.ts:51-53` → python constants; launch `:358-360`→`python cli_guest.py --serve`; env `:361-377`→`LLM_*` (+ suppress banner, lmnr off), drop `CLAUDE_CODE_*`; ready `:340-354` `node`→`python3`; same for `atelierctl:208-238`.
-- *Verify:* venv path-portability (same mount path); `tmux`+TerminalTool in-guest; per-arch wheels present.
+- **Packaging (extend the agent Dockerfile, not a separate one):** `image/agent/Dockerfile` installs `python3-venv` + `uv` and builds the venv at `/opt/atelier/packages/partisan/.venv` (mirrors artisan's `packages/` layout, not the originally-planned `/opt/atelier/partisan`). `UV_PYTHON_DOWNLOADS=never` + `--python /usr/bin/python3` pin it to the rootfs's system 3.12 so the venv symlink resolves under the ro `/opt`; the build drops the repo's dev `.python-version` (pins 3.14) since the uv.lock is universal (`requires-python >=3.12`). `image/build.sh` `stage_agent_ctx` stages `packages/partisan` into the shared context; the single `docker cp /opt/atelier` + runner-volume pack carry both agents (no `cmd_runner` change). `tmux` added to `image/rootfs/Dockerfile` (TerminalTool/libtmux).
+- **The agent user needs a real login shell:** `image/rootfs/Dockerfile` now creates `atelier` with `-s /bin/bash`, not `/usr/sbin/nologin` — tmux derives `default-shell` from the passwd entry, so nologin made every OpenHands terminal pane exit 1 (server never starts). No login service runs (openssh absent), so nologin bought no hardening. *This was the one real surprise; artisan never hit it (its Bash tool doesn't use tmux).*
+- **Persistence:** `PARTISAN_PERSIST=/home/atelier/.partisan` (writable tmpfs), set in both launch envs.
+- **Egress (base_url hostname only, full provider map deferred):** the anthropic default stays; `manager.ts` `baseUrlEgressHosts()` + `atelierctl` `egressHostFromURL()` append `new URL(base_url).hostname` (skipping loopback) when `ANTHROPIC_BASE_URL`/`LLM_BASE_URL` is set. `LITELLM_LOCAL_MODEL_COST_MAP=True` is injected so LiteLLM uses its bundled cost map instead of the jail-blocked GitHub fetch.
+- **The switch (flipped, artisan coexists):** `manager.ts` launch constants → `…/partisan/.venv/bin/python cli_guest.py`; env drops `CLAUDE_CODE_*`, adds `OPENHANDS_SUPPRESS_BANNER`; `waitForGuest` probes the venv python. Same flip in `atelierctl agent` (`cmd`/`args`/`cwd`/env). `scripts/e2e-host.mjs`'s serve test drives partisan too.
+- *Verified:* `build:all --image` (venv: 177 pkgs, runner.raw ~828 MB) + `e2e:host` 43/43 on macOS/VZ; partisan launches in-cage (Landlock + seccomp + bwrap), runs tmux/TerminalTool, and completes a full serve turn (init → token → clean close).
 
 ### Phase 4 — conformance + cutover
 *Exit:* conformance suite + `e2e:host` (Python path) green ⇒ Node removed, artisan = reference source.

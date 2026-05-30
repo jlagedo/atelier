@@ -28,6 +28,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"strings"
 
@@ -46,6 +47,24 @@ func (e envFlag) Set(kv string) error {
 	}
 	e[kv[:i]] = kv[i+1:]
 	return nil
+}
+
+// egressHostFromURL returns the hostname of a provider base_url to add to the egress
+// allowlist, or "" when unset, unparseable, or loopback (loopback isn't reachable or
+// DNS-pinnable from the isolated guest). Mirrors manager.ts baseUrlEgressHosts.
+func egressHostFromURL(raw string) string {
+	if strings.TrimSpace(raw) == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	h := u.Hostname()
+	if h == "" || h == "localhost" || h == "127.0.0.1" || h == "::1" {
+		return ""
+	}
+	return h
 }
 
 // execStream runs a guest `exec` over the broker, relaying the streamed
@@ -181,6 +200,16 @@ func main() {
 		}
 
 		allowList := []string{"api.anthropic.com", "pypi.org", "files.pythonhosted.org", "registry.npmjs.org"}
+		// partisan may target a non-anthropic provider via a custom base_url; allow its
+		// hostname so the default-deny jail still reaches the model (loopback skipped — not
+		// reachable/DNS-pinnable from the guest). Mirrors manager.ts baseUrlEgressHosts.
+		base := os.Getenv("ANTHROPIC_BASE_URL")
+		if base == "" {
+			base = os.Getenv("LLM_BASE_URL")
+		}
+		if h := egressHostFromURL(base); h != "" {
+			allowList = append(allowList, h)
+		}
 		if strings.TrimSpace(*allow) != "" {
 			allowList = nil
 			for _, h := range strings.Split(*allow, ",") {
@@ -206,17 +235,23 @@ func main() {
 		}
 
 		genv := map[string]string{
-			"ANTHROPIC_API_KEY":                        apiKey,
-			"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
-			"DISABLE_AUTOUPDATER":                      "1",
-			"DISABLE_TELEMETRY":                        "1",
-			"DISABLE_ERROR_REPORTING":                  "1",
+			"ANTHROPIC_API_KEY":       apiKey,
+			"DISABLE_AUTOUPDATER":     "1",
+			"DISABLE_TELEMETRY":       "1",
+			"DISABLE_ERROR_REPORTING": "1",
+			// partisan keeps stdout NDJSON-only by suppressing the OpenHands SDK banner.
+			"OPENHANDS_SUPPRESS_BANNER": "1",
+			// Use LiteLLM's bundled cost map; the egress jail blocks its GitHub fetch (metadata
+			// only — the call routes by the explicit anthropic/ provider regardless).
+			"LITELLM_LOCAL_MODEL_COST_MAP": "True",
 			// Non-root agent (CRIT-01): HOME/TMPDIR/cache must point at writable tmpfs
 			// paths — the agent runs as uid 1001 and /opt is read-only. /home/atelier is a
-			// tmpfs owned by 1001 and /tmp is a tmpfs (image/guest/init.sh).
-			"HOME":           "/home/atelier",
-			"TMPDIR":         "/tmp",
-			"XDG_CACHE_HOME": "/home/atelier/.cache",
+			// tmpfs owned by 1001 and /tmp is a tmpfs (image/guest/init.sh). PARTISAN_PERSIST
+			// (writable too) holds the OpenHands conversation store for --resume.
+			"HOME":             "/home/atelier",
+			"TMPDIR":           "/tmp",
+			"XDG_CACHE_HOME":   "/home/atelier/.cache",
+			"PARTISAN_PERSIST": "/home/atelier/.partisan",
 		}
 		// Forward provider knobs if set (model override, base URL).
 		for _, k := range []string{"ATELIER_MODEL", "ANTHROPIC_BASE_URL"} {
@@ -231,9 +266,9 @@ func main() {
 
 		params := map[string]any{
 			"id":   *id,
-			"cmd":  "/opt/atelier/packages/artisan/node_modules/.bin/tsx",
-			"args": []string{"src/cli-guest.ts", "--task", task},
-			"cwd":  "/opt/atelier/packages/artisan",
+			"cmd":  "/opt/atelier/packages/partisan/.venv/bin/python",
+			"args": []string{"cli_guest.py", "--task", task},
+			"cwd":  "/opt/atelier/packages/partisan",
 			"env":  genv,
 		}
 		os.Exit(execStream(client, params))

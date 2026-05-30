@@ -45,7 +45,8 @@ have() { command -v "$1" >/dev/null 2>&1; }
 stage_pkg() {
   local dest="$1" p="$2"
   mkdir -p "$dest/packages/$p"
-  ( cd "../packages/$p" && tar --exclude=node_modules --exclude=dist --exclude=.git -cf - . ) \
+  ( cd "../packages/$p" && tar --exclude=node_modules --exclude=dist --exclude=.git \
+                               --exclude=.venv --exclude=__pycache__ --exclude=.pytest_cache -cf - . ) \
     | ( cd "$dest/packages/$p" && tar -xf - )
 }
 
@@ -65,6 +66,9 @@ stage_agent_ctx() {
   stage_pkg "$WORK/agentctx" artisan
   stage_pkg "$WORK/agentctx" provider
   stage_pkg "$WORK/agentctx" protocol
+  # partisan (Python/OpenHands successor) ships alongside artisan on the same volume; its
+  # venv is built target-arch in agent/Dockerfile (uv) and exported with /opt/atelier.
+  stage_pkg "$WORK/agentctx" partisan
 }
 
 cmd_check() {

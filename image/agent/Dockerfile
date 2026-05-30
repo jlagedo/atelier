@@ -16,13 +16,14 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # gnupg + curl are what the NodeSource setup script needs to add its apt repo; ca-certificates
 # for TLS to deb.nodesource.com and (later) npm registry. python3 + python3-seccomp compile the
-# sandbox seccomp filter below (F-13) for this image's native arch.
+# sandbox seccomp filter below (F-13) for this image's native arch. python3-venv lets uv build
+# partisan's venv against the system interpreter (the one that ships in the rootfs).
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates \
       gnupg \
       curl \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-    && apt-get install -y --no-install-recommends nodejs python3 python3-seccomp \
+    && apt-get install -y --no-install-recommends nodejs python3 python3-venv python3-seccomp \
     && rm -rf /var/lib/apt/lists/*
 
 # Source only (no node_modules/dist — image/build.sh stages it that way); install the agent's
@@ -31,6 +32,24 @@ COPY packages /opt/atelier/packages
 RUN cd /opt/atelier/packages/artisan \
     && npm ci --omit=dev \
     && npm cache clean --force
+
+# partisan (Topology B successor, docs/openhands-adoption.md): build its Python venv here so the
+# native wheels (pillow, tree-sitter, fakeredis) are baked for the target arch — the same
+# guarantee --platform gives artisan's node_modules. uv installs to /usr/local/bin;
+# UV_PYTHON_DOWNLOADS=never + --python /usr/bin/python3 force the venv onto the SYSTEM interpreter
+# that also ships in the rootfs (same ubuntu:24.04 3.12), so the venv's python symlink resolves at
+# runtime under /opt (read-only). --no-dev drops pytest; --frozen honors the committed uv.lock.
+ENV UV_INSTALL_DIR=/usr/local/bin
+# Drop the repo's dev .python-version (pins 3.14, the contributor's machine): the guest
+# interpreter is whatever the rootfs ships (3.12), and the uv.lock is universal (requires-python
+# >=3.12), so 3.12 is a supported resolution. --python pins both venv + sync to the system 3.12
+# so uv never tries (and fails, downloads-off) to fetch the dev's pinned version.
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
+    && cd /opt/atelier/packages/partisan \
+    && rm -f .python-version \
+    && UV_PYTHON_DOWNLOADS=never uv venv .venv --python /usr/bin/python3 \
+    && UV_PYTHON_DOWNLOADS=never uv sync --frozen --no-dev --python /usr/bin/python3 \
+    && uv cache clean
 
 # Compile the agent sandbox's seccomp filter (docs/security.md F-13, closing F-01) from Docker's
 # vendored default profile, evaluated as a no-capability process. Runs in this --platform

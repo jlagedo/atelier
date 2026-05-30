@@ -27,11 +27,13 @@ ENV DEBIAN_FRONTEND=noninteractive
 # exercises it. bubblewrap (bwrap) sandboxes the in-guest agent as a non-root user
 # (CRIT-01). openssh-server is intentionally NOT installed (no inbound service runs;
 # it only left world-readable host keys behind). gnupg + curl are also what the
-# NodeSource setup script needs to add its apt repo.
+# NodeSource setup script needs to add its apt repo. tmux backs partisan's OpenHands
+# TerminalTool (libtmux) — its venv ships on the runner volume but needs a tmux binary here.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       busybox-static \
       python3 \
       python3-pip \
+      tmux \
       git \
       ripgrep \
       ca-certificates \
@@ -64,7 +66,11 @@ RUN mkdir -p /workspace
 # writable HOME is /home/atelier (a tmpfs at boot — see image/guest/init.sh). /sessions is the
 # parent of per-session 9p mount points (also a tmpfs at boot), so runner can mkdir under it on
 # the read-only root.
-RUN useradd -u 1001 -m -d /home/atelier -s /usr/sbin/nologin atelier \
+# Login shell is /bin/bash, not nologin: partisan's OpenHands TerminalTool runs tmux, whose
+# default-shell is derived from this passwd entry — nologin makes every pane exit 1 (no shell),
+# so the agent's terminal turns fail. No login service runs (openssh is intentionally absent),
+# so nologin bought no hardening here.
+RUN useradd -u 1001 -m -d /home/atelier -s /bin/bash atelier \
     && mkdir -p /sessions
 
 # init + guest config are installed by image/build.sh from image/guest/.

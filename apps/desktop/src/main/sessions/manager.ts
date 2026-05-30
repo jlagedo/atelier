@@ -50,14 +50,33 @@ export interface ManagerOptions {
   maxActive?: number;
 }
 
-const GUEST_TSX = "/opt/atelier/packages/artisan/node_modules/.bin/tsx";
-const GUEST_CWD = "/opt/atelier/packages/artisan";
-const GUEST_AGENT = "src/cli-guest.ts";
+// The in-guest agent is partisan (Python/OpenHands), launched from its baked venv on the
+// runner volume. artisan (TS) still ships alongside it; reverting is a constants edit +
+// rebuild, not a runtime switch (docs/openhands-adoption.md D4).
+const GUEST_PY = "/opt/atelier/packages/partisan/.venv/bin/python";
+const GUEST_CWD = "/opt/atelier/packages/partisan";
+const GUEST_AGENT = "cli_guest.py";
 
 // Events worth persisting as the rebuildable chat transcript.
 const RENDERABLE = new Set(["text", "tool_use", "tool_result", "policy", "result"]);
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+// partisan can target any LiteLLM provider via a custom base_url; the egress jail is
+// default-deny, so the configured endpoint's hostname must be allowed alongside the
+// anthropic default. Loopback endpoints aren't reachable from the isolated guest (and
+// aren't DNS-pinnable), so they're skipped — deferred to a later phase.
+function baseUrlEgressHosts(): string[] {
+  const raw = process.env.ANTHROPIC_BASE_URL ?? process.env.LLM_BASE_URL;
+  if (!raw) return [];
+  try {
+    const host = new URL(raw).hostname;
+    if (!host || host === "localhost" || host === "127.0.0.1" || host === "::1") return [];
+    return [host];
+  } catch {
+    return [];
+  }
+}
 
 interface LiveSession {
   appId: string;
@@ -108,6 +127,7 @@ export class SessionManager {
       "pypi.org",
       "files.pythonhosted.org",
       "registry.npmjs.org",
+      ...baseUrlEgressHosts(),
     ];
     this.bootTimeoutMs = opts.bootTimeoutMs ?? (Number(process.env.ATELIER_BOOT_TIMEOUT_MS) || 120_000);
     this.idleMs = opts.idleMs ?? (Number(process.env.ATELIER_IDLE_MS) || 10 * 60_000);
@@ -377,7 +397,7 @@ export class SessionManager {
     const deadline = Date.now() + this.bootTimeoutMs;
     for (;;) {
       try {
-        const run = this.host.execStream({ id: this.vmId, cmd: "node", args: ["--version"] }, () => {});
+        const run = this.host.execStream({ id: this.vmId, cmd: GUEST_PY, args: ["--version"] }, () => {});
         const r = await Promise.race([run.result, sleep(5000).then(() => null)]);
         if (r && r.exitCode === 0) return;
         run.close();
@@ -396,24 +416,30 @@ export class SessionManager {
     if (resume) args.push("--resume", resume);
     const env: Record<string, string> = {
       ANTHROPIC_API_KEY: apiKey,
-      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
       DISABLE_AUTOUPDATER: "1",
       DISABLE_TELEMETRY: "1",
       DISABLE_ERROR_REPORTING: "1",
+      // partisan keeps stdout NDJSON-only by suppressing the OpenHands SDK banner at import.
+      OPENHANDS_SUPPRESS_BANNER: "1",
+      // Use LiteLLM's bundled cost map; the egress jail (correctly) blocks its GitHub fetch,
+      // which would otherwise warn + fail DNS on every turn. Cost map is metadata only — the
+      // model call routes by the explicit anthropic/ provider regardless.
+      LITELLM_LOCAL_MODEL_COST_MAP: "True",
       // Non-root agent (CRIT-01): the loop runs as uid 1001 with /opt read-only, so
-      // HOME/TMPDIR/cache must be writable tmpfs paths or the SDK's native `claude`
-      // binary can't launch ("exists but failed to launch"). Mirror atelierctl agent's
-      // genv (services/cmd/atelierctl/main.go) — /home/atelier + /tmp are tmpfs (init.sh).
+      // HOME/TMPDIR/cache must be writable tmpfs paths. /home/atelier + /tmp are tmpfs
+      // (image/guest/init.sh). PARTISAN_PERSIST holds the OpenHands conversation store so
+      // --resume works across hibernate→resume within a VM lifetime; it must be writable too.
       HOME: "/home/atelier",
       TMPDIR: "/tmp",
       XDG_CACHE_HOME: "/home/atelier/.cache",
+      PARTISAN_PERSIST: "/home/atelier/.partisan",
     };
     for (const k of ["ATELIER_MODEL", "ANTHROPIC_BASE_URL"]) {
       const v = process.env[k];
       if (v) env[k] = v;
     }
     const client = new PartisanClient(
-      brokerTransport(this.host, { id: this.vmId, cmd: GUEST_TSX, args, cwd: GUEST_CWD, env, sessionId: s.appId }),
+      brokerTransport(this.host, { id: this.vmId, cmd: GUEST_PY, args, cwd: GUEST_CWD, env, sessionId: s.appId }),
       {
         onEvent: (ev) => this.handleEvent(s, ev),
         // Not part of the JSON wire, but where the in-guest loop's crashes and stack

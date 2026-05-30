@@ -27,8 +27,8 @@ This repo is small (~210 files) but its docs are large. Keep the main context le
 |---|---|---|
 | `apps/desktop` | Electron/React desktop UI (the shell) | WORK mode wired to the broker; chat mode mock |
 | `services` | One Go module — host broker (`atelierd`), in-VM daemon (`runner`), dev CLI (`atelierctl`) | full substrate (boot/exec/files/net) |
-| `packages/artisan` | TS Claude-Agent-SDK loop — host (`cli.ts`) + in-guest (`cli-guest.ts`) | both topologies; in-guest is the **live** path |
-| `packages/partisan` | Python/OpenHands successor to artisan's in-guest loop (`cli_guest.py`) | Phase 1+2 done (live-verified); coexists, not yet cut over — `docs/openhands-adoption.md` |
+| `packages/artisan` | TS Claude-Agent-SDK loop — host (`cli.ts`) + in-guest (`cli-guest.ts`) | both topologies; in-guest is the **TS reference** (partisan is now launched) |
+| `packages/partisan` | Python/OpenHands successor to artisan's in-guest loop (`cli_guest.py`) | Phase 1–3 done — packaged in the image + **live launch site** (`e2e:host` green); artisan coexists; Phase 4 (conformance + Node removal) pending — `docs/openhands-adoption.md` |
 | `packages/provider` | Provider seam — resolves model + env for the loop | Anthropic API now, Eliza later |
 | `packages/protocol` | Generated Hop-2 protocol bindings (schema is canonical) | generated, gitignored |
 | `image` | VM image build — kernel + initrd + rootfs bundle; bakes in the agent | build pipeline |
@@ -51,8 +51,8 @@ Generated/build output is gitignored: `build/` (the orchestrator's staged artifa
 | Windows HCS bindings | `services/internal/hcs/computecore_windows.go` |
 | Session Manager (host state machine) | `apps/desktop/src/main/sessions/manager.ts` |
 | Hop-2 named-pipe JSON-RPC client | `apps/desktop/src/main/host-client/client.ts` |
-| In-guest agent loop (live path) | `packages/artisan/src/cli-guest.ts` |
-| In-guest agent loop (Python successor) | `packages/partisan/cli_guest.py` |
+| In-guest agent loop (launched/live path) | `packages/partisan/cli_guest.py` |
+| In-guest agent loop (TS reference, still shipped) | `packages/artisan/src/cli-guest.ts` |
 | In-guest agent wire client (NDJSON codec + transport seam) | `apps/desktop/src/main/sessions/client.ts` (`PartisanClient`), `transport.ts` |
 | Host agent loop + broker tools | `packages/artisan/src/cli.ts`, `packages/artisan/src/broker/client.ts` |
 | Protocol (canonical schema) | `packages/protocol/schema/protocol.json` |
@@ -218,17 +218,19 @@ Conventions:
 
 ## Agent loop — `packages/artisan` (TypeScript) + `packages/partisan` (Python)
 
-Two implementations of the in-guest agent behind the **same NDJSON serve wire**: `artisan` (TS,
-`@anthropic-ai/claude-agent-sdk`) is the **live** path; `partisan` (Python, OpenHands SDK) is its
-provider-agnostic successor, coded through Phase 2 but not yet cut over. The host (Session Manager,
-`atelierctl`) is identical for both. Full plan + decisions + cutover gate: `docs/openhands-adoption.md`.
+Two implementations of the in-guest agent behind the **same NDJSON serve wire**: `partisan` (Python,
+OpenHands SDK) is now the **launched** in-guest agent (Phase 3 flipped the Session Manager +
+`atelierctl agent` launch site to it); `artisan` (TS, `@anthropic-ai/claude-agent-sdk`) still ships on
+the runner volume and stays the reference implementation (revert = edit the launch constants + rebuild).
+The host (Session Manager, `atelierctl`) is identical for both. Phase 4 (conformance + Node removal) is
+the remaining gate. Full plan + decisions + cutover gate: `docs/openhands-adoption.md`.
 
-### artisan — TS, the live path
+### artisan — TS, the reference path (still shipped; partisan is launched)
 
 Hosts `@anthropic-ai/claude-agent-sdk`. Two entry points sharing the same provider + policy seams:
 - `cli.ts` — **Topology A** (host loop): the SDK's "hands" are an in-process MCP server whose tools
   route to the broker over Hop 2→3 (`seams/tools.ts`, `broker/client.ts`).
-- `cli-guest.ts` — **Topology B** (in-guest loop, the live path): the loop runs *in the cage*, so its
+- `cli-guest.ts` — **Topology B** (in-guest loop; partisan's `cli_guest.py` is the launched equivalent): the loop runs *in the cage*, so its
   hands are the SDK's built-in coding tools (Bash/Read/Write/Edit/Glob/Grep) acting directly on the
   guest fs — no broker round-trip for tools; only the model call escapes via the egress jail. Has a
   one-shot mode (`--task`, drives `atelierctl agent`) and a persistent `--serve` mode (NDJSON over
@@ -264,16 +266,21 @@ uv run cli_guest.py --task "create hello.txt" --workspace /tmp/ws   # Phase 1 on
 npm run test:partisan        # from repo root: pytest + cross-language wire (scripts/test-partisan.mjs)
 ```
 
-Status: Phase 1 (one-shot) + Phase 2 (serve/resume) done and live-verified (`npm run test:partisan`;
-`--live` adds streaming/interrupt/kill-and-resume). Not yet built into the image or launched by the
-Session Manager — coexists with artisan until the Phase 4 conformance + `e2e:host` gate is green, then
-the launch site flips and Node/artisan become reference source (`docs/openhands-adoption.md` §5).
+Status: Phases 1–3 done. Phase 1 (one-shot) + Phase 2 (serve/resume) are live-verified off-VM
+(`npm run test:partisan`; `--live` adds streaming/interrupt/kill-and-resume). **Phase 3** packaged
+partisan into the VM image (target-arch venv on the runner volume) and **flipped the live launch site**
+(Session Manager + `atelierctl agent`) from artisan to partisan — verified in-cage by `npm run e2e:host`
+(43/43; partisan reaches the model through the egress jail, one-shot + serve). artisan still ships on the
+volume (coexist; revert = edit launch constants + rebuild). Phase 4 (conformance suite + dropping
+Node/artisan) remains the gate before artisan becomes pure reference source (`docs/openhands-adoption.md` §5).
 
-The in-guest agent (with its `node_modules` for the target arch — `linux/amd64` on Windows,
-`linux/arm64` on macOS) ships on the runner volume (`image/build.sh runner` builds it via
-`image/agent/Dockerfile` and packs it at `/opt/atelier`; mounted at `/opt`), **not** baked into the
-rootfs — so the desktop app does not install or ship it separately, and it iterates without a rootfs
-rebuild. The rootfs still provides the Node 22 runtime that `tsx` runs the agent under.
+Both agents ship on the runner volume for the target arch (`linux/amd64` on Windows, `linux/arm64` on
+macOS) — `image/build.sh runner` builds them via `image/agent/Dockerfile` and packs them at
+`/opt/atelier`; mounted at `/opt`, **not** baked into the rootfs — so the desktop app does not install
+or ship them separately, and they iterate without a rootfs rebuild. artisan carries its `node_modules`;
+partisan carries a `uv`-built venv at `packages/partisan/.venv` pinned to the rootfs's system Python 3.12.
+The rootfs provides both the Node 22 runtime (for `tsx`) and Python 3.12 + `tmux` (the launched partisan
+loop runs under the venv's interpreter; OpenHands' TerminalTool needs tmux).
 
 ## Protocol codegen — `tools/protogen`
 

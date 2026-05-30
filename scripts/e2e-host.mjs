@@ -732,11 +732,11 @@ async function runBattery(work) {
   await test('serve-mode agent loop: a persistent turn over execInput (the desktop path)', async () => {
     assert(process.env.ANTHROPIC_API_KEY, 'ANTHROPIC_API_KEY is not set in this environment');
     // The test above drives `atelierctl agent` (one-shot runOnce). The DESKTOP instead runs a PERSISTENT
-    // loop — `cli-guest --serve`, fed user turns over execInput as NDJSON (the Session Manager). That
-    // path had zero e2e coverage, which is how an env-drift regression shipped: HOME on a non-writable
-    // dir → the SDK's native `claude` binary "exists but failed to launch". Reproduce the desktop path:
-    // attach a session share, launch --serve with the SAME env the manager builds, feed one turn, and
-    // assert the loop streams init → a result carrying the token, then closes cleanly.
+    // loop — partisan `cli_guest.py --serve`, fed user turns over execInput as NDJSON (the Session
+    // Manager). That path had zero e2e coverage, which is how an env-drift regression shipped: HOME on a
+    // non-writable dir → the agent can't launch. Reproduce the desktop path: attach a session share,
+    // launch --serve with the SAME env the manager builds, feed one turn, and assert the loop streams
+    // init → a result carrying the token, then closes cleanly.
     const tag = 'serve';
     const gpath = `/sessions/${tag}`;
     fs.mkdirSync(path.join(work, tag), { recursive: true });
@@ -750,23 +750,25 @@ async function runBattery(work) {
     const sess = 'e2e-serve';
     const token = 'ATELIER_SERVE_OK_8842';
     // KEEP IN SYNC with apps/desktop/src/main/sessions/manager.ts startLoop (itself mirroring atelierctl
-    // agent's genv): the writable HOME/TMPDIR/XDG_CACHE_HOME are load-bearing — the non-root agent
-    // (uid 1001, /opt read-only) can't launch the SDK's native binary without them.
+    // agent's genv): the writable HOME/TMPDIR/XDG_CACHE_HOME/PARTISAN_PERSIST are load-bearing — the
+    // non-root agent (uid 1001, /opt read-only) can't write its conversation store or caches without them.
     const env = [
       '-env', `ANTHROPIC_API_KEY=${process.env.ANTHROPIC_API_KEY}`,
-      '-env', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1',
       '-env', 'DISABLE_AUTOUPDATER=1',
       '-env', 'DISABLE_TELEMETRY=1',
       '-env', 'DISABLE_ERROR_REPORTING=1',
+      '-env', 'OPENHANDS_SUPPRESS_BANNER=1',
+      '-env', 'LITELLM_LOCAL_MODEL_COST_MAP=True',
       '-env', 'HOME=/home/atelier',
       '-env', 'TMPDIR=/tmp',
       '-env', 'XDG_CACHE_HOME=/home/atelier/.cache',
+      '-env', 'PARTISAN_PERSIST=/home/atelier/.partisan',
     ];
     const child = spawn(
       VMCTL,
       [
-        'exec', '-addr', ADDR, '-id', 'vm0', '-session', sess, '-cwd', '/opt/atelier/packages/artisan', ...env,
-        '--', '/opt/atelier/packages/artisan/node_modules/.bin/tsx', 'src/cli-guest.ts', '--serve', '--workspace', gpath,
+        'exec', '-addr', ADDR, '-id', 'vm0', '-session', sess, '-cwd', '/opt/atelier/packages/partisan', ...env,
+        '--', '/opt/atelier/packages/partisan/.venv/bin/python', 'cli_guest.py', '--serve', '--workspace', gpath,
       ],
       { cwd: repoRoot, env: process.env },
     );
@@ -811,7 +813,7 @@ async function runBattery(work) {
 
     try {
       await sleep(1500); // let runner register the session's stdin channel (mirrors the stdin-feed test)
-      // If the loop crashed on launch (the native-binary regression this guards), report it plainly.
+      // If the loop crashed on launch (env-drift / missing venv / tmux), report it plainly.
       const early = events.find((e) => e.type === 'error');
       assert(!early, `loop errored on launch: ${early && early.message}\n${tail(errOut)}`);
       assert(exited === null, `loop exited (code ${exited}) before first turn\n${tail(errOut)}`);
