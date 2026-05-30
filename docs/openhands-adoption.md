@@ -2,7 +2,7 @@
 
 | Field | Detail |
 |---|---|
-| Status | **Phase 2 implemented** — `--serve`/`--resume` coded; awaiting live verification. Phase 1 done (commit `28df76c`). |
+| Status | **Phase 2 done** — `--serve`/`--resume` live-verified (streaming, mid-LLM interrupt, kill-and-resume persistence recovery). Phase 1 done (commit `28df76c`). |
 | Project | **partisan** — Python (OpenHands SDK) successor to artisan, behind the same NDJSON wire |
 | Goal | Replace the Anthropic-locked in-guest agent with a provider-agnostic one (LiteLLM) |
 | Approach | Embed the SDK **in-process** (`LocalConversation` + `callbacks`); NDJSON only at the host↔guest edge |
@@ -135,14 +135,19 @@ Built (`packages/partisan/`, uv + Python 3.14):
 
 Resolved from source: `ObservationEvent` has **no** `is_error` (errors are distinct event types ⇒ `isError:false`); `result` = last assistant `MessageEvent` text after `run()` returns; `run()` blocks (no stdout lock needed yet).
 
-### Phase 2 — serve (`--serve`, `--resume`) ⏳ implemented, pending live verification
-*Exit:* multi-turn over NDJSON; `export_context`→`context{}`; relaunch `--resume <id>` continues.
+### Phase 2 — serve (`--serve`, `--resume`) ✅ DONE
+*Exit (met):* multi-turn over NDJSON; `export_context`→`context{}`; relaunch `--resume <id>` continues.
 
-- stdin reader **thread** → control queue; main thread runs turns; **all stdout under one lock**.
-- Turn: `user`→`send_message`+`run`→`result`+`turn_done`; defer `export_context` until idle (mirror `cli-guest.ts:174`).
-- `conversation_id` from `--resume` else `uuid4()`; `persistence_dir=$PARTISAN_PERSIST/<id>`; auto-resume; emit `init`.
+Built on an **asyncio control loop** (richer than the originally-planned thread+queue): a daemon
+stdin reader hands control messages to the loop via `call_soon_threadsafe`; turns run as a background
+`conversation.arun()` task so an `interrupt`/`pause` control can cancel an in-flight LLM call
+mid-completion; **all stdout under one `_emit_lock`**. This is what enables Phase 2's token streaming
+(`text_delta` via `token_callbacks`) + mid-LLM-call interrupt.
+- Turn: `user`→`send_message`+`arun`→`result`+`turn_done`; busy-guard rejects a 2nd `user` mid-turn; defer `export_context` until idle (mirror `cli-guest.ts:174`).
+- `conversation_id` from `--resume` else `uuid4()`; `persistence_dir=$PARTISAN_PERSIST/<id.hex>`; auto-resume; emit `init`. Resume does **not** auto-`run()` — it waits for the next `user` turn (matches artisan).
+- `recover_unmatched_actions` repairs an orphaned tool call left by a kill mid-run (RUNNING→ERROR + synthetic error observation), so the next completion isn't rejected by the provider.
 - `transcript[]` from callbacks (RENDERABLE subset, mirror `cli-guest.ts:140`); `export_context`→`context{sessionId,transcript}`→shutdown.
-- *Verify:* send-while-processing (example 18 — serialize vs inject); resume auto-`run()` y/n; `persistence_dir` survives the process kill.
+- *Verified:* 26 pytest (mapper + in-process serve, fake model) + cross-language wire (real partisan ↔ shipped `PartisanClient`); `--live` smoke (real model): streaming turn, interrupt mid-stream, and **kill-and-resume persistence recovery** (`scripts/test-partisan.mjs --live`).
 
 ### Phase 3 — packaging + the hardwired switch
 *Exit:* a full WORK session driven by partisan on a booted VM.

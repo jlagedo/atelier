@@ -15,7 +15,8 @@
 //   node scripts/test-partisan.mjs                 pytest + cross-language wire (fake model)
 //   node scripts/test-partisan.mjs --pytest-only   only the Python suite
 //   node scripts/test-partisan.mjs --wire-only     only the cross-language wire test
-//   node scripts/test-partisan.mjs --live          + real-API smoke (needs ANTHROPIC_API_KEY)
+//   node scripts/test-partisan.mjs --live          + real-API smoke: streaming, interrupt,
+//                                                    kill-and-resume (needs ANTHROPIC_API_KEY)
 //   node scripts/test-partisan.mjs --keep          keep temp workspaces for debugging
 
 import { spawn, spawnSync } from "node:child_process";
@@ -39,7 +40,7 @@ for (const a of process.argv.slice(2)) {
   else if (a === "--keep") flags.keep = true;
   else if (a === "-h" || a === "--help") {
     const header = fs.readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n");
-    console.log(header.slice(1, 22).map((l) => l.replace(/^\/\/ ?/, "")).join("\n"));
+    console.log(header.slice(1, 21).map((l) => l.replace(/^\/\/ ?/, "")).join("\n"));
     process.exit(0);
   } else die(`unknown flag: ${a} (try --help)`);
 }
@@ -107,11 +108,20 @@ async function test(name, fn) {
 
 // ----- live smoke driver (real cli_guest, real model) ---------------------------------------------
 
-function spawnLiveAgent(workdir) {
-  const child = spawn("uv", ["run", "python", "cli_guest.py", "--serve", "--workspace", workdir], {
+// opts.persist sets PARTISAN_PERSIST (the on-disk conversation store, needed for
+// --resume); opts.resume passes a prior sessionId so the loop replays that state.
+function spawnLiveAgent(workdir, opts = {}) {
+  const args = ["run", "python", "cli_guest.py", "--serve", "--workspace", workdir];
+  if (opts.resume) args.push("--resume", opts.resume);
+  // detached: own process group, so a SIGKILL can take down the whole tree —
+  // `uv run` is a wrapper that forks the real python child, and the terminal tool
+  // spawns helpers; killing just `child` would orphan them (and leave the stdout
+  // pipe held open, so `close` never fires).
+  const child = spawn("uv", args, {
     cwd: partisanDir,
-    env: process.env,
+    env: { ...process.env, ...(opts.persist ? { PARTISAN_PERSIST: opts.persist } : {}) },
     stdio: ["pipe", "pipe", "pipe"],
+    detached: !isWin,
   });
   const events = [];
   let buf = "";
@@ -131,8 +141,10 @@ function spawnLiveAgent(workdir) {
     }
   });
   child.stderr.on("data", () => {});
+  const exited = new Promise((resolve) => child.on("close", (code) => resolve(code)));
   return {
     events,
+    exited,
     send: (o) => child.stdin.write(JSON.stringify(o) + "\n"),
     waitFor: async (pred, ms = 90_000) => {
       const dl = Date.now() + ms;
@@ -142,15 +154,31 @@ function spawnLiveAgent(workdir) {
       }
       return false;
     },
-    kill: () => child.kill("SIGKILL"),
+    kill: () => {
+      // Negative pid → signal the whole process group (uv + python + tool helpers).
+      try {
+        if (!isWin) process.kill(-child.pid, "SIGKILL");
+        else child.kill("SIGKILL");
+      } catch {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          /* already gone */
+        }
+      }
+    },
   };
 }
 
 const isType = (t) => (e) => e.type === t;
 
 async function liveSmoke(work) {
+  // Contain every live session's persisted store under the temp tree (cleaned with
+  // `work` unless --keep), so live runs never leak conversation dirs into ~/.partisan.
+  const persist = path.join(work, "persist");
+
   await test("live: streaming turn", async () => {
-    const a = spawnLiveAgent(work);
+    const a = spawnLiveAgent(work, { persist });
     try {
       a.send({ type: "user", text: "Reply with a short one-sentence greeting." });
       if (!(await a.waitFor(isType("turn_done")))) throw new Error("no turn_done within timeout");
@@ -164,7 +192,7 @@ async function liveSmoke(work) {
   });
 
   await test("live: interrupt mid-stream", async () => {
-    const a = spawnLiveAgent(work);
+    const a = spawnLiveAgent(work, { persist });
     try {
       a.send({ type: "user", text: "Count slowly from 1 to 100, one number per line, with a short note on each." });
       if (!(await a.waitFor(isType("text_delta"), 60_000))) return SKIP; // model finished/blocked before any delta
@@ -175,6 +203,56 @@ async function liveSmoke(work) {
       return "cancelled mid-stream";
     } finally {
       a.kill();
+    }
+  });
+
+  // SIGKILL mid-turn (ideally mid-tool-call), then --resume the same id against the
+  // same PARTISAN_PERSIST. Proves persistence survives a hard kill AND that resume's
+  // recover_unmatched_actions repairs an orphaned tool call so the next completion
+  // isn't rejected by the provider (doc §5 Phase-2 verify, row 3).
+  await test("live: kill-and-resume (persistence recovery)", async () => {
+    const persist = fs.mkdtempSync(path.join(os.tmpdir(), "partisan-persist-"));
+    try {
+      // Session 1: provoke a long-running tool call, capture the sessionId, then SIGKILL
+      // before its tool_result so the persisted state is left mid-flight.
+      const s1 = spawnLiveAgent(work, { persist });
+      let sessionId;
+      try {
+        s1.send({ type: "user", text: "Use your terminal tool to run exactly `sleep 30`, and nothing else first." });
+        if (!(await s1.waitFor(isType("init"), 30_000))) throw new Error("session 1: no init");
+        sessionId = s1.events.find(isType("init")).sessionId;
+        if (!sessionId) throw new Error("session 1: init had no sessionId");
+        // Prefer killing mid-tool-call (exercises recover_unmatched_actions); fall back
+        // to mid-stream if the model answered without a tool.
+        const midTool = await s1.waitFor(isType("tool_use"), 45_000);
+        if (!midTool && !(await s1.waitFor(isType("text_delta"), 15_000))) {
+          throw new Error("session 1: neither tool_use nor text_delta before kill");
+        }
+        s1.kill();
+        if ((await Promise.race([s1.exited, sleep(15_000).then(() => "timeout")])) === "timeout") {
+          throw new Error("session 1: did not exit after SIGKILL");
+        }
+      } finally {
+        s1.kill();
+      }
+
+      // Session 2: resume the same id; the persisted store must reload and a fresh turn
+      // must complete (would fail at the provider if the orphaned action weren't repaired).
+      const s2 = spawnLiveAgent(work, { persist, resume: sessionId });
+      try {
+        if (!(await s2.waitFor(isType("init"), 30_000))) throw new Error("session 2: no init");
+        const resumedId = s2.events.find(isType("init")).sessionId;
+        if (resumedId !== sessionId) throw new Error(`session 2: resumed id ${resumedId} != ${sessionId}`);
+        s2.send({ type: "user", text: "Reply with the single word: resumed." });
+        if (!(await s2.waitFor(isType("turn_done"), 60_000))) throw new Error("session 2: no turn_done after resume");
+        const r = s2.events.find(isType("result"));
+        if (r?.subtype !== "success") throw new Error(`session 2: expected success, got ${r?.subtype}`);
+        return `resumed ${sessionId.slice(0, 8)} after kill`;
+      } finally {
+        s2.kill();
+      }
+    } finally {
+      if (!flags.keep) fs.rmSync(persist, { recursive: true, force: true });
     }
   });
 }
