@@ -86,8 +86,8 @@ PROCESS 4 — GUEST VM  Linux utility VM, one shared VM named vm0
     model calls exit only through the egress jail
 ```
 
-`packages/artisan` still ships as the TypeScript reference implementation. The
-live launch site is partisan.
+`packages/partisan` is the sole in-guest agent; the former TypeScript `artisan`
+loop was removed at cutover (recover from git history if needed).
 
 ## One Round-Trip
 
@@ -144,5 +144,4 @@ Renderer  renders text, tool cards, policy cards, and final result
 - Guest runner and sandbox: `services/cmd/runner/main.go`,
   `services/cmd/runner/sandbox_linux.go`, `services/cmd/atelier-landlock/main.go`
 - Egress jail: `services/internal/netjail/network.go`, `services/internal/netjail/filter.go`
-- Live in-guest agent: `packages/partisan/cli_guest.py`
-- TS reference agent: `packages/artisan/src/cli-guest.ts`
+- In-guest agent (the sole agent): `packages/partisan/cli_guest.py`

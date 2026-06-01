@@ -67,10 +67,10 @@ func TestSandboxedCommandNarrowsBind(t *testing.T) {
 	t.Cleanup(func() { seccompFilterPath = old })
 
 	cmd, err := sandboxedCommand(context.Background(), execParams{
-		Cmd:       "/opt/atelier/packages/artisan/node_modules/.bin/tsx",
-		Args:      []string{"src/cli-guest.ts", "--serve", "--workspace", "/sessions/s123"},
-		Cwd:       "/opt/atelier/packages/artisan", // covered by the ro toolbox
-		SessionID: "stdin-chan",                    // only the stdin channel — NOT a bind source
+		Cmd:       "/opt/atelier/packages/partisan/.venv/bin/python",
+		Args:      []string{"cli_guest.py", "--serve", "--workspace", "/sessions/s123"},
+		Cwd:       "/opt/atelier/packages/partisan", // covered by the ro toolbox
+		SessionID: "stdin-chan",                     // only the stdin channel — NOT a bind source
 	})
 	if err != nil {
 		t.Fatalf("sandboxedCommand: %v", err)
@@ -110,7 +110,7 @@ func TestSandboxedCommandNarrowsBind(t *testing.T) {
 		hasSeq(a, "--bind", "/sessions/stdin-chan", "/sessions/stdin-chan") {
 		t.Errorf("SessionID must not be bound as a path: %v", a)
 	}
-	if hasSeq(a, "--bind", "/opt/atelier/packages/artisan", "/opt/atelier/packages/artisan") {
+	if hasSeq(a, "--bind", "/opt/atelier/packages/partisan", "/opt/atelier/packages/partisan") {
 		t.Errorf("cwd under /opt/atelier should not get its own bind: %v", a)
 	}
 	// The Landlock shim is the exec target after `--seccomp 3 --`, gets the rw path, then
@@ -122,23 +122,23 @@ func TestSandboxedCommandNarrowsBind(t *testing.T) {
 	if !hasSeq(a, "--rw", "/sessions/s123") {
 		t.Errorf("shim missing --rw for the session workspace: %v", a)
 	}
-	if !hasSeq(a, "--", "/opt/atelier/packages/artisan/node_modules/.bin/tsx", "src/cli-guest.ts") {
+	if !hasSeq(a, "--", "/opt/atelier/packages/partisan/.venv/bin/python", "cli_guest.py") {
 		t.Errorf("real command not found after the shim separator: %v", a)
 	}
 }
 
 func TestCwdNeedsBind(t *testing.T) {
 	cases := map[string]bool{
-		"":                              false,
-		"/":                             false,
-		"relative/path":                 false,
-		"/usr":                          false,
-		"/opt/atelier/packages/artisan": false,
-		"/home/atelier/.cache":          false,
-		"/tmp/x":                        false,
-		"/sessions/s1":                  true,
-		"/workspace":                    true,
-		"/mnt/proj":                     true,
+		"":                               false,
+		"/":                              false,
+		"relative/path":                  false,
+		"/usr":                           false,
+		"/opt/atelier/packages/partisan": false,
+		"/home/atelier/.cache":           false,
+		"/tmp/x":                         false,
+		"/sessions/s1":                   true,
+		"/workspace":                     true,
+		"/mnt/proj":                      true,
 	}
 	for in, want := range cases {
 		if got := cwdNeedsBind(in); got != want {
@@ -152,9 +152,9 @@ func TestWorkspaceArg(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"src/cli-guest.ts", "--serve", "--workspace", "/sessions/x"}, "/sessions/x"},
+		{[]string{"cli_guest.py", "--serve", "--workspace", "/sessions/x"}, "/sessions/x"},
 		{[]string{"--workspace=/sessions/y"}, "/sessions/y"},
-		{[]string{"src/cli-guest.ts", "--task", "do it"}, ""},
+		{[]string{"cli_guest.py", "--task", "do it"}, ""},
 		{[]string{"--workspace"}, ""}, // dangling flag, no value
 	}
 	for _, c := range cases {

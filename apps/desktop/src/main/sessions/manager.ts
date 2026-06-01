@@ -1,6 +1,6 @@
 // Session Manager (S6.1): the host-owned state machine for WORK sessions over ONE
 // shared VM. It brings up vm0 once, then per session: mounts the folder at
-// /sessions/<appId>, launches a PERSISTENT in-guest agent loop (cli-guest --serve),
+// /sessions/<appId>, launches a PERSISTENT in-guest agent loop (cli_guest.py --serve),
 // feeds turns via execInput, and streams the loop's NDJSON events to the renderer.
 // To bound guest memory it caps live loops: an idle timer and a max-active LRU both
 // HIBERNATE a session — export its context to the durable store, kill the loop,
@@ -50,9 +50,8 @@ export interface ManagerOptions {
   maxActive?: number;
 }
 
-// The in-guest agent is partisan (Python/OpenHands), launched from its baked venv on the
-// runner volume. artisan (TS) still ships alongside it; reverting is a constants edit +
-// rebuild, not a runtime switch (docs/plans/openhands-adoption.md D4).
+// The in-guest agent is partisan (Python/OpenHands), the sole agent, launched from its baked
+// venv on the runner volume (docs/plans/openhands-adoption.md).
 const GUEST_PY = "/opt/atelier/packages/partisan/.venv/bin/python";
 const GUEST_CWD = "/opt/atelier/packages/partisan";
 const GUEST_AGENT = "cli_guest.py";

@@ -112,10 +112,12 @@ function npm(args, opts = {}) {
 // (WSLENV is finicky); on macOS it's a plain env on the bash child.
 const imageOutBase = path.posix.join('..', 'build', flags.config, 'image');
 function imageRun(subcmd) {
+  // ATELIER_CONFIG lets build.sh strip the dev-only debug-console block from init.sh for
+  // release rootfs images (debug keeps it). debug is build.sh's own default when unset.
   if (isWin) {
-    run('wsl', ['bash', '-lc', `cd image && TARGET=${target} ATELIER_OUT_BASE='${imageOutBase}' ./build.sh ${subcmd}`]);
+    run('wsl', ['bash', '-lc', `cd image && TARGET=${target} ATELIER_OUT_BASE='${imageOutBase}' ATELIER_CONFIG=${flags.config} ./build.sh ${subcmd}`]);
   } else {
-    run('bash', ['build.sh', subcmd], { cwd: rel('image'), env: { TARGET: target, ATELIER_OUT_BASE: imageOutBase } });
+    run('bash', ['build.sh', subcmd], { cwd: rel('image'), env: { TARGET: target, ATELIER_OUT_BASE: imageOutBase, ATELIER_CONFIG: flags.config } });
   }
 }
 
@@ -216,7 +218,7 @@ function clean() {
   info(`removed generated code, services/bin, build/${flags.config}/{${cleaned.join(', ')}}`);
 
   if (flags.deep) {
-    for (const d of ['', 'apps/desktop', 'packages/artisan', 'packages/provider', 'packages/protocol', 'tools/protogen'])
+    for (const d of ['', 'apps/desktop', 'packages/protocol', 'tools/protogen'])
       rm(d, 'node_modules');
     info('removed all node_modules');
     if (buildFullImage) {
@@ -243,6 +245,9 @@ function hostBuild() {
   // symbols + trims paths; debug keeps them. `-o <dir>` writes both binaries into build/<config>/.
   const args = ['-C', 'services', 'build'];
   if (flags.config === 'release') args.push('-trimpath', '-ldflags=-s -w');
+  // The VM debug console (hvc1 root shell, outside the cage) is compiled in ONLY for debug
+  // builds via this tag; release binaries contain none of that code (see vmm/debugconsole_*).
+  if (flags.config === 'debug') args.push('-tags=debugconsole');
   args.push('-o', dest, './cmd/atelierd', './cmd/atelierctl');
   run('go', args, { env: { CGO_ENABLED: '1' } });
   info(`atelierd${exe}, atelierctl${exe} -> build/${flags.config}/`);
@@ -310,7 +315,6 @@ exec "$APP/Contents/MacOS/Atelier" "$@"
 function desktop() {
   section('JS dependencies');
   npm(['--prefix', 'apps/desktop', 'install']);
-  npm(['--prefix', 'packages/artisan', 'install']); // for the verify phase; runtime deps ship on the runner volume
 
   // Package the Electron app for both configs so build/<config>/desktop/ is runnable. Debug pays the
   // Forge packaging cost too; for fast host-only iteration, run the desktop via `npm run dev`.
@@ -360,8 +364,12 @@ function verify() {
     return;
   }
   section('Verify: Go');
-  run('go', ['-C', 'services', 'vet', './...']);
-  run('go', ['-C', 'services', 'test', './...']);
+  // Exercise the same debug-console code path the host build ships: debug builds compile the
+  // live seam (debugconsole), release builds the inert stub. The GOOS=windows build below
+  // always exercises the !debugconsole stub regardless.
+  const goTags = flags.config === 'debug' ? ['-tags', 'debugconsole'] : [];
+  run('go', ['-C', 'services', 'vet', ...goTags, './...']);
+  run('go', ['-C', 'services', 'test', ...goTags, './...']);
   const unformatted = tryCapture('gofmt', ['-l', 'services']);
   if (unformatted) warn(`gofmt -l flagged:\n${unformatted}`);
   run('go', ['-C', 'services', 'build', './...'], { env: { GOOS: 'windows', CGO_ENABLED: '0' } });
@@ -379,10 +387,6 @@ function verify() {
   npm(['--prefix', 'apps/desktop', 'run', 'typecheck']);
   npm(['--prefix', 'apps/desktop', 'run', 'lint']);
   npm(['--prefix', 'apps/desktop', 'run', 'test']);
-
-  section('Verify: agent');
-  npm(['--prefix', 'packages/artisan', 'run', 'typecheck']);
-  npm(['--prefix', 'packages/artisan', 'run', 'test']);
 }
 
 function summary() {

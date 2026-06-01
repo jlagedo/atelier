@@ -72,7 +72,7 @@ src/renderer/    sandboxed React (no Node)
 ```
 
 The **Session Manager** (`sessions/manager.ts`) is the heart of WORK mode: brings up the shared VM
-once, then per session mounts the folder, launches a persistent in-guest loop (`cli-guest --serve`),
+once, then per session mounts the folder, launches a persistent in-guest loop (`cli_guest.py --serve`),
 feeds turns, streams NDJSON events to the renderer, and hibernates idle/LRU sessions to bound guest
 memory. Detailed design lives in that file's header and root `CLAUDE.md`.
 

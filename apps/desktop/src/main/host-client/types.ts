@@ -2,7 +2,7 @@
 // on the generated `packages/protocol` (gitignored, built by protogen). These
 // mirror packages/protocol/schema/protocol.json — keep them in sync by hand. The
 // LoopEvent/LoopControl unions mirror the in-guest agent's --serve NDJSON wire
-// (packages/artisan/src/cli-guest.ts).
+// (packages/partisan/cli_guest.py).
 
 export interface Status {
   service: string;

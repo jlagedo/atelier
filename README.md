@@ -42,7 +42,8 @@ Linux utility VM — one cage, N sessions: each /sessions/<id> mount + its own a
 | Real VM | **macOS (Apple Silicon) + VZ** — broker must be codesigned; or **Windows 11 + HCS** (Hyper-V Administrators or elevated) |
 | VM image | **Docker** (OrbStack on macOS; WSL2 on Windows), `mke2fs`, `qemu-img` |
 | Host broker + guest daemon | **Go 1.25+** |
-| Desktop app, agent, codegen | **Node ≥ 22.12** |
+| Desktop app + codegen | **Node ≥ 22.12** |
+| In-guest agent | **Python ≥ 3.12** + `uv` (partisan/OpenHands) |
 | Model calls | **`ANTHROPIC_API_KEY`** in the environment that launches the app |
 
 ### Build everything (one command)
@@ -109,6 +110,23 @@ atelierctl setEgressPolicy -allow <model-api-host>
 atelierctl agent    -id vm0 -- "read orders.csv, write summary.csv"
 atelierctl stopVM   -id vm0
 ```
+
+### Debug console (debug builds only, macOS/VZ)
+
+The guest has no inbound network path (vsock-only, egress default-deny, no sshd by design). For an
+interactive root shell into the VM to debug the guest OS itself, a **debug build** adds a second
+virtio console (`/dev/hvc1`) with a root shell on it; attach over its unix socket. No env var — the
+socket appears at boot.
+
+```sh
+atelierd -addr /tmp/atelierd.sock &   # then createVM/startVM as above
+atelierctl console -id vm0            # interactive shell; Ctrl-] detaches
+```
+
+This shell runs **as root, outside the agent's bwrap/seccomp cage**, so it is gated at **build time**:
+the host code is behind the `debugconsole` Go build tag and the `init.sh` block is stripped from the
+release rootfs — a `--config=release` build contains neither, so it can never ship in production
+(Windows/HCS analog TBD).
 
 ### Test (end-to-end)
 

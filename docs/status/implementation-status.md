@@ -32,7 +32,7 @@ valuable as implementation history.
 | Area | Current state |
 |---|---|
 | Go host substrate | Cross-platform VZ/HCS substrate exists; macOS egress containment is verified through S9, with packaging/notarization still open |
-| Guest agent | Live launch path is **partisan** (`packages/partisan`, Python/OpenHands); `packages/artisan` remains the TypeScript reference |
+| Guest agent | **partisan** (`packages/partisan`, Python/OpenHands) is the sole in-guest agent; the former TypeScript `artisan` loop was removed at cutover |
 | Desktop | WORK mode drives the broker and Session Manager; chat mode is still mock |
 | Security remediation | bwrap narrowing, seccomp, uid/gid drop, cgroups, sysctls, module latch, and Landlock are present; key residency and broker `AllowAll` remain open |
 | Shipping | LocalSystem/service install, Hop-2 ACLs, macOS notarization, and polished install docs remain open |

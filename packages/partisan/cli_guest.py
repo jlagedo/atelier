@@ -56,8 +56,8 @@ from openhands.tools.terminal import TerminalTool
 
 DEFAULT_MODEL = "anthropic/claude-sonnet-4-6"
 
-# OpenHands tool name -> Atelier "door" (mirrors artisan's doorFor in
-# packages/artisan/src/seams/policy.ts). Anything unmapped is "other".
+# OpenHands tool name -> Atelier "door" (originally mirrored from the removed
+# artisan policy seam's doorFor). Anything unmapped is "other".
 _DOOR = {"terminal": "compute", "file_editor": "files", "grep": "files"}
 
 _RENDERABLE = {"text", "tool_use", "tool_result", "policy", "result"}

@@ -2,20 +2,21 @@
 
 | Field | Detail |
 |---|---|
-| Status | **Phase 3 done** — packaged into the VM image + launch site flipped to partisan; `e2e:host` green (43/43), partisan reaches the model in-cage (one-shot + serve). Phases 1–2 done. Remaining: Phase 4 (conformance suite + Node removal). |
+| Status | **Done (cutover complete)** — partisan is the **sole** in-guest agent; `packages/artisan` + `packages/provider` and the Anthropic TS SDK are deleted, and they no longer ship on the runner volume. Node is **retained** in the guest as a general language runtime (the original "drop Node" step was re-scoped — embedding more guest languages is the next goal). The formal conformance suite was intentionally **deferred** in favour of the existing `e2e:host` + `test:partisan` coverage. Phases 1–3 done. |
 | Primary reader | Engineers finishing the Python/OpenHands cutover or debugging the in-guest agent wire. |
 | Project | **partisan** — Python (OpenHands SDK) successor to artisan, behind the same NDJSON wire |
 | Goal | Replace the Anthropic-locked in-guest agent with a provider-agnostic one (LiteLLM) |
 | Approach | Embed the SDK **in-process** (`LocalConversation` + `callbacks`); NDJSON only at the host↔guest edge |
 | Validated | SDK cloned to `~/Developer/software-agent-sdk`, read against source; 410 MB minimal install |
 
-artisan (TypeScript, `@anthropic-ai/claude-agent-sdk`) targets Anthropic only.
-partisan rebuilds the in-guest agent on `OpenHands/software-agent-sdk` v1.23.0
-(MIT, Python >=3.12) for model-provider freedom. The host Session Manager and
-`atelierctl` keep the same NDJSON serve wire.
+The deleted artisan (TypeScript, `@anthropic-ai/claude-agent-sdk`) targeted Anthropic only.
+partisan rebuilt the in-guest agent on `OpenHands/software-agent-sdk` v1.23.0
+(MIT, Python >=3.12) for model-provider freedom, on the same NDJSON serve wire the host
+Session Manager and `atelierctl` already spoke. The cutover (below) made it the sole agent;
+artisan/provider were removed (recover from git history if ever needed).
 
-Scope: live in-guest path (`cli-guest.ts`, Topology B). Out of scope: host-loop
-`cli.ts`.
+Scope: live in-guest path (`cli_guest.py`, Topology B). The old host-loop `cli.ts` (Topology A)
+was never carried over and went away with artisan.
 
 ## 1. Decisions
 
@@ -26,7 +27,7 @@ Scope: live in-guest path (`cli-guest.ts`, Topology B). Out of scope: host-loop
 | D3 | Keep the **NDJSON wire** (`cli-guest.ts:18-33`); translate SDK events ↔ NDJSON at the process edge. | Lowest blast radius; rides the existing audited `exec` door. |
 | D4 | **Coexist** via a **hardwired launch site** (no env switch); switching = edit + rebuild. | No runtime selector to build then delete; A/B is the conformance suite, not runtime. |
 | D5 | **Cutover when green** (conformance suite + `e2e:host` on the Python path) → flip launch, drop Node, guest Python-only. | A named exit prevents two-runtime limbo. |
-| D6 | Post-cutover, artisan + `packages/provider` stay as **reference source** (unbuilt). | The TS path can't run without Node anyway. |
+| D6 | ~~Post-cutover, artisan + `packages/provider` stay as **reference source**.~~ **Superseded:** at cutover both were **deleted** (recover from git history). | Keeping dead, unbuildable TS in-tree added confusion, not value. |
 | D7 | **API key the OpenHands way:** `LLM(api_key=SecretStr(env))`, never on the wire, redacted in persistence, re-injected each launch. | Containment + egress jail are the real control; you can't hide a key from the process using it (§2). |
 | D8 | **Build first, trim later** — install `openhands-sdk`+`openhands-tools` as-is (410 MB; browser import-safe); size matters, but it's a post-cutover concern, not Phase-1 work. | Don't let footprint slow the build; revisit once partisan is green — and trim by dropping deps, *not* by forking/vendoring SDK code (D9). |
 | D9 | **Commit to OpenHands; no wrapper layer around its API.** Use SDK types directly; copy its behavior when in doubt; the **only** adapters are at the Atelier boundary (NDJSON wire, egress, key resolver) — never around the SDK. Accept partisan isn't framework-swappable. | We want **model** freedom (LiteLLM), not **framework** freedom. The replaceability tax > the lock-in it insures against (cf. abstracting Oracle to stay DB-agnostic); churn is contained by pinned versions + conformance, not abstraction. |
@@ -162,12 +163,23 @@ mid-completion; **all stdout under one `_emit_lock`**. This is what enables Phas
 - **The switch (flipped, artisan coexists):** `manager.ts` launch constants → `…/partisan/.venv/bin/python cli_guest.py`; env drops `CLAUDE_CODE_*`, adds `OPENHANDS_SUPPRESS_BANNER`; `waitForGuest` probes the venv python. Same flip in `atelierctl agent` (`cmd`/`args`/`cwd`/env). `scripts/e2e-host.mjs`'s serve test drives partisan too.
 - *Verified:* `build:all --image` (venv: 177 pkgs, runner.raw ~828 MB) + `e2e:host` 43/43 on macOS/VZ; partisan launches in-cage (Landlock + seccomp + bwrap), runs tmux/TerminalTool, and completes a full serve turn (init → token → clean close).
 
-### Phase 4 — conformance + cutover
-*Exit:* conformance suite + `e2e:host` (Python path) green ⇒ Node removed, artisan = reference source.
+### Phase 4 — cutover (done; conformance deferred)
+*Exit (met):* artisan + provider deleted, the Anthropic TS SDK and the artisan packaging removed,
+`e2e:host` + `test:partisan` green with partisan as the only agent.
 
-- **Conformance suite:** fixtures `(flags + stdin) → ordered stdout`; **strict** on `type` / ordering / `door` / invariants (`tool_use` precedes its `tool_result`; `init` first, `turn_done` last); **non-strict** on ids / free text / names. Live models are non-deterministic ⇒ **structural-invariant checking** (run live a few times) + a partisan-only golden for the emitter — *not* exact transcript equality.
-- Python-path mode in `scripts/e2e-host.mjs`.
-- Cutover: drop Node + artisan `npm ci` from `Dockerfile`/`build.sh`; update CLAUDE.md/README to "Python-only guest".
+- **Removed:** `packages/artisan` + `packages/provider` (deleted); `image/agent/Dockerfile` no longer
+  `npm ci`s artisan and drops the build-image `nodejs`; `image/build.sh` no longer stages
+  artisan/provider (agent tag `atelier-agent`); `scripts/build-all.mjs` + root `package.json` drop the
+  artisan install/verify/`artisan` script; `services/cmd/runner/sandbox_linux_test.go` fixtures
+  repointed to the partisan launch. Docs (CLAUDE.md, README, host-client comments) updated to
+  "Python-only agent".
+- **Node retained (re-scope):** the original plan dropped Node from the rootfs; instead Node stays as a
+  general guest language runtime (next goal: embed more languages into the image). So the
+  `e2e:host` `node -e` egress/Landlock/DNS probes are unchanged.
+- **Conformance suite deferred:** the structural-invariant fixture suite (`(flags + stdin) → ordered
+  stdout`, strict on `type`/ordering/`door`/invariants) was intentionally not built; `e2e:host` (real
+  boot, one-shot + serve through the egress jail) and `test:partisan` (pytest + cross-language wire)
+  are the standing coverage. Revisit if a regression slips past them.
 
 ### Deferred
 **Image trim** (drop unused deps / slim wheels — *not* by vendoring or forking SDK code). Further

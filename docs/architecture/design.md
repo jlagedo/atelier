@@ -9,7 +9,7 @@
 | Slice history | [`../status/implementation-status.md`](../status/implementation-status.md). |
 | Live agent path | [`../plans/openhands-adoption.md`](../plans/openhands-adoption.md). |
 | Current stack | Go host broker with VZ/HCS drivers, Python/OpenHands in-guest agent (`packages/partisan`), Electron/React UI. |
-| Reference stack | TypeScript/Node agent (`packages/artisan`) remains as source/reference compatibility. |
+| Reference stack | In-guest agent is Python/OpenHands (`packages/partisan`); the original TypeScript/Node agent (`packages/artisan`) was removed at the OpenHands cutover — see `docs/plans/openhands-adoption.md`. |
 
 Name: Atelier, a workshop where a craftsperson works on their own materials in
 their own space. Earlier working name: `theparser`.

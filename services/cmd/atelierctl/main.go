@@ -19,6 +19,7 @@
 //	atelierctl setEgressPolicy -allow pypi.org,files.pythonhosted.org  (empty = deny all)
 //	atelierctl setTime  -id vm0                               (push host wall clock into the guest)
 //	atelierctl agent    -id vm0 -- "<task>"   (S5b.1: run the agent loop INSIDE the guest)
+//	atelierctl console  -id vm0   (debug builds only: interactive root shell over the VM's hvc1 debug console; macOS/VZ)
 package main
 
 import (
@@ -30,10 +31,17 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/jlagedo/atelier/services/internal/rpc"
 )
+
+// defaultConsoleSock mirrors the broker's debugSockPath (internal/vmm/debugconsole_on_darwin.go)
+// so `console` can find the socket from -id alone; the -sock flag overrides for odd layouts.
+func defaultConsoleSock(id string) string {
+	return filepath.Join(os.TempDir(), "atelier-console-"+id+".sock")
+}
 
 // envFlag collects repeated -env KEY=VALUE flags into a map.
 type envFlag map[string]string
@@ -128,7 +136,23 @@ func main() {
 	tag := fs.String("tag", "", "9p share tag/name for a per-session share (attach/detachWorkspace)")
 	wsport := fs.Uint64("wsport", 0, "vsock port for a per-session share (attachWorkspace; 0 = broker allocates)")
 	session := fs.String("session", "", "exec session id: registers a stdin channel (exec) / targets one (execInput)")
+	sock := fs.String("sock", "", "debug-console unix socket path (console; default derives from -id)")
 	_ = fs.Parse(args)
+
+	// console is a side-channel: it dials the VM's hvc1 debug-console unix socket directly
+	// (NOT the broker JSON-RPC wire) and bridges it to this terminal. Handled before the
+	// broker dial since it needs no broker connection.
+	if method == "console" {
+		sockPath := *sock
+		if sockPath == "" {
+			sockPath = defaultConsoleSock(*id)
+		}
+		if err := runConsole(sockPath); err != nil {
+			fmt.Fprintf(os.Stderr, "console: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	conn, err := rpc.Dial(*addr)
 	if err != nil {

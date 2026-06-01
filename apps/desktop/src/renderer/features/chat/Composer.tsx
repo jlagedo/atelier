@@ -33,7 +33,7 @@ export function Composer({
     : "Mock interface — no agent connected. Chat sessions do not map a work folder.";
 
   return (
-    <div className="border-border bg-background border-t px-6 py-5">
+    <div className="border-border bg-background shrink-0 border-t px-6 py-5">
       <div className="border-input bg-card focus-within:border-ring/60 focus-within:ring-ring/20 mx-auto flex max-w-reading items-end gap-2 rounded-2xl border px-4 py-2.5 transition-[border-color,box-shadow] focus-within:ring-[3px]">
         <Button
           type="button"

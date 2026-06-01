@@ -51,9 +51,9 @@ stage_pkg() {
 }
 
 # stage_agent_ctx assembles the in-guest agent's Docker build context in $WORK/agentctx so
-# image/agent/Dockerfile can COPY + npm-install the agent (Topology B, S5b.1). The agent is
-# packed into the runner volume (cmd_runner), NOT baked into the rootfs. npm install runs INSIDE
-# that build (linux/$GOARCH via --platform) so the node_modules has the right platform binaries.
+# image/agent/Dockerfile can COPY + build the agent (Topology B, S5b.1). The agent is packed into
+# the runner volume (cmd_runner), NOT baked into the rootfs. partisan's venv is built INSIDE that
+# build (linux/$GOARCH via --platform) so its native wheels have the right platform binaries.
 stage_agent_ctx() {
   # protocol/src is generated (gitignored). It must exist before we stage it.
   [ -f "../packages/protocol/src/index.ts" ] \
@@ -63,11 +63,9 @@ stage_agent_ctx() {
   cp agent/Dockerfile "$WORK/agentctx/Dockerfile"
   # seccomp profile + translator (F-13); the Dockerfile compiles it for the target arch.
   cp -r agent/seccomp "$WORK/agentctx/seccomp"
-  stage_pkg "$WORK/agentctx" artisan
-  stage_pkg "$WORK/agentctx" provider
   stage_pkg "$WORK/agentctx" protocol
-  # partisan (Python/OpenHands successor) ships alongside artisan on the same volume; its
-  # venv is built target-arch in agent/Dockerfile (uv) and exported with /opt/atelier.
+  # partisan (Python/OpenHands) is the sole in-guest agent; its venv is built target-arch in
+  # agent/Dockerfile (uv) and exported with /opt/atelier.
   stage_pkg "$WORK/agentctx" partisan
 }
 
@@ -180,7 +178,17 @@ mke2fs -q -t ext4 -L atelier-root -d /rootfs -r 1 -N 0 -m 1 /rootfs.ext4 4G'
   local icid; icid="$(docker create atelier-imager bash -c "$build")"
   docker cp "$WORK/rootfs.tar"      "$icid:/rootfs.tar"
   docker cp "$WORK/bin/gvforwarder" "$icid:/gvforwarder"
-  docker cp guest/init.sh           "$icid:/init.sh"
+  # Release rootfs images get the dev-only debug-console block stripped out of init.sh (the
+  # hvc1 root shell lives OUTSIDE the cage — it must be physically absent from production, not
+  # just dormant). Debug is the default when ATELIER_CONFIG is unset (standalone make/build.sh),
+  # so the dev fast path keeps the block; only build:all --config=release strips it.
+  local init_src="guest/init.sh"
+  if [ "${ATELIER_CONFIG:-debug}" = "release" ]; then
+    init_src="$WORK/init.release.sh"
+    sed '/# >>> ATELIER_DEBUG_CONSOLE/,/# <<< ATELIER_DEBUG_CONSOLE/d' guest/init.sh > "$init_src"
+    log "release rootfs: stripped dev-only debug-console block from init.sh"
+  fi
+  docker cp "$init_src"             "$icid:/init.sh"
   if ! docker start -a "$icid"; then
     docker rm -f "$icid" >/dev/null 2>&1 || true
     die "imager failed to build the ext4"
@@ -250,10 +258,10 @@ EOF
 # cmd_runner builds the runner volume — one ro ext4 shipped as a separate disk so runner AND the
 # in-guest agent iterate in seconds without rebuilding the rootfs (design.md §7/§8). It carries
 # both: runner (/opt/runner/atelier-runner, the vsock RPC daemon) and the agent (/opt/atelier, Topology B
-# — code + node_modules), plus the sandbox seccomp filter (/opt/runner/seccomp.bpf, F-13) compiled
+# — partisan code + its venv), plus the sandbox seccomp filter (/opt/runner/seccomp.bpf, F-13) compiled
 # for the target arch in the agent image. init.sh mounts the volume ro at /opt. Self-contained vs
-# the rootfs (no ensure_tree, no apt/kernel), but the agent's node_modules DO need a target-arch
-# npm install, so this builds image/agent/Dockerfile (npm ci) and exports /opt/atelier from it. Cross-compile
+# the rootfs (no ensure_tree, no apt/kernel), but partisan's venv DOES need target-arch native wheels,
+# so this builds image/agent/Dockerfile (uv sync) and exports /opt/atelier from it. Cross-compile
 # runner, pack a labeled ext4 INSIDE the imager (perms preserved, sized from the staged tree),
 # then emit raw (VZ attaches as-is) or convert to VHD (HCS SCSI disk), mirroring cmd_rootfs.
 cmd_runner() {
@@ -267,10 +275,10 @@ cmd_runner() {
   local lout; lout="$(pwd)/$WORK/bin/atelier-landlock"
   ( cd ../services && env GOOS=linux GOARCH="$GOARCH" CGO_ENABLED=0 go build -trimpath -o "$lout" ./cmd/atelier-landlock )
 
-  log "staging agent build context (agent/Dockerfile + packages/{artisan,provider,protocol})"
+  log "staging agent build context (agent/Dockerfile + packages/{protocol,partisan})"
   stage_agent_ctx
-  local agent_tag="atelier-artisan:${UBUNTU_VERSION}-${ARCH}"
-  log "building agent payload image ($agent_tag, $DOCKER_PLATFORM) — npm ci for linux/$GOARCH"
+  local agent_tag="atelier-agent:${UBUNTU_VERSION}-${ARCH}"
+  log "building agent payload image ($agent_tag, $DOCKER_PLATFORM) — partisan venv for linux/$GOARCH"
   docker build --platform "$DOCKER_PLATFORM" -t "$agent_tag" "$WORK/agentctx"
   log "exporting agent tree (/opt/atelier) from the payload image"
   local acid; acid="$(docker create "$agent_tag")"

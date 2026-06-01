@@ -6,9 +6,9 @@ FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Manifest (design.md §7): init shell, python3+pip, git, ripgrep, CA certs.
-# Node is installed from NodeSource below (not apt — Ubuntu 22.04's `nodejs` is
-# v12, far too old for the agent SDK). The guest bridge daemon (runner, design.md
-# §8 Hop 3) is cross-compiled and injected by image/build.sh (not apt).
+# Node is installed from NodeSource below (not apt — Ubuntu 24.04's `nodejs` is
+# too old) as a general guest language runtime. The guest bridge daemon (runner,
+# design.md §8 Hop 3) is cross-compiled and injected by image/build.sh (not apt).
 #
 # The matched guest kernel (design.md §7 coupling rule) is installed here too, so
 # the kernel, its /lib/modules/<ver>, and the boot initramfs all come from ONE apt
@@ -45,10 +45,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       linux-image-virtual-hwe-24.04 \
     && rm -rf /var/lib/apt/lists/*
 
-# Modern Node + npm (NodeSource). The in-guest agent loop (Topology B, S5b.1) runs via
-# tsx under this Node runtime; the SDK requires Node >=18, pin the 22.x line to match
-# packages/artisan's engines. (The agent's own code + node_modules are NOT baked here — they
-# ship on the runner volume; see /opt below and image/agent/Dockerfile.)
+# Modern Node + npm (NodeSource). The in-guest agent is Python (partisan/OpenHands), but Node
+# stays as a general-purpose guest language runtime the agent can drive (alongside Python 3.12);
+# pin the 22.x line. Ubuntu 24.04's apt `nodejs` is far too old, hence NodeSource.
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*

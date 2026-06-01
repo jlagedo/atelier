@@ -117,7 +117,7 @@ function PanelHeader({ session, onClose }: { session: Session; onClose: () => vo
 
 function ChatContextPanel({ session }: { session: Extract<Session, { mode: "chat" }> }) {
   return (
-    <ScrollArea className="flex-1">
+    <ScrollArea className="min-h-0 flex-1">
       <div className="space-y-section p-4">
         <Section title="Session">
           <div className="border-sidebar-border bg-background/40 rounded-lg border p-3">
@@ -161,7 +161,7 @@ function WorkContextPanel({ session }: { session: WorkSession }) {
         <p className="text-muted-foreground truncate font-mono text-[11px]">{session.folderPath}</p>
       </div>
 
-      <ScrollArea className="flex-1">
+      <ScrollArea className="min-h-0 flex-1">
         <div className="space-y-section p-4">
           <Section title="Access" hint="fixed by policy">
             <div className="grid gap-1.5">
@@ -211,7 +211,7 @@ function WorkContextPanel({ session }: { session: WorkSession }) {
 
 export function WorkspacePanel({ session, onClose }: { session: Session; onClose: () => void }) {
   return (
-    <aside className="bg-sidebar border-sidebar-border hidden w-panel shrink-0 flex-col border-l md:flex">
+    <aside className="bg-sidebar border-sidebar-border hidden h-full min-h-0 w-panel shrink-0 flex-col overflow-hidden border-l md:flex">
       <PanelHeader session={session} onClose={onClose} />
       {session.mode === "work" ? (
         <WorkContextPanel session={session} />

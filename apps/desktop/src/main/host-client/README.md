@@ -11,4 +11,4 @@ Hop 2: named-pipe JSON-RPC client → Go host service (`\\.\pipe\atelierd`).
   streamed `exec/output` notifications never mix.
 - `types.ts` — protocol + agent-loop (`--serve` NDJSON) types, inlined to avoid a
   cross-package build dep on the generated `packages/protocol`. Keep in sync with
-  `packages/protocol/schema/protocol.json` and `packages/artisan/src/cli-guest.ts`.
+  `packages/protocol/schema/protocol.json` and `packages/partisan/cli_guest.py`.

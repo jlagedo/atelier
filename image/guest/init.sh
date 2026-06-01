@@ -103,6 +103,23 @@ echo 2 > /proc/sys/kernel/yama/ptrace_scope 2>/dev/null || true
 # tun; ext4 via initramfs) is already loaded above.
 echo 1 > /proc/sys/kernel/modules_disabled 2>/dev/null || true
 
+# >>> ATELIER_DEBUG_CONSOLE — dev-only; image/build.sh strips this whole block from release rootfs images >>>
+# Debug console (DEV-ONLY): spawn a root login shell on the second virtio console (hvc1) when
+# a debug-built broker signals it via `atelier.debug=1` on the kernel cmdline (it also wires
+# the hvc1 device + host socket — vmm/debugconsole_on_darwin.go, compiled only with the
+# `debugconsole` build tag). This is for debugging the guest OS itself; it is a root shell
+# OUTSIDE the bwrap/Landlock/seccomp cage, the sanctioned counterpart to "openssh-server is
+# intentionally NOT installed". Two build-time gates keep it out of production: a release
+# broker emits no token (this branch never fires) AND a release rootfs has this block stripped
+# entirely. setsid detaches it into its own session so it survives PID 1 `exec`ing runner below.
+case " $(cat /proc/cmdline 2>/dev/null) " in
+  *" atelier.debug=1 "*)
+    echo "atelier guest init: DEBUG console on /dev/hvc1 (dev-only, root, outside the cage)"
+    setsid sh -c 'exec sh </dev/hvc1 >/dev/hvc1 2>&1' &
+    ;;
+esac
+# <<< ATELIER_DEBUG_CONSOLE <<<
+
 # runner becomes the long-running PID 1 (the vsock RPC server). Neither runner NOR the
 # in-guest agent is baked into the rootfs — they ship together on ONE read-only ext4 volume
 # (image/build.sh runner; LABEL=runner) attached as a second disk, so both rebuild in seconds

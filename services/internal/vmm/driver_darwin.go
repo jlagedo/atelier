@@ -43,6 +43,11 @@ const (
 	darwinKernelCmdLine = "console=hvc0 root=/dev/vda ro noresume init=/sbin/init"
 )
 
+// The debug console (hvc1 + a root shell outside the cage) is gated by the `debugconsole`
+// build tag, NOT a runtime flag: debugConsoleToken() and newDebugConsolePort() are the seam,
+// implemented live in debugconsole_on_darwin.go (debug builds) and inert in
+// debugconsole_off_darwin.go (release). Release binaries contain none of that code.
+
 // darwinDriver maps the platform-neutral VMM seam onto Apple's
 // Virtualization.framework via the Code-Hex/vz cgo binding (Option A: the broker
 // drives the VM in-process; no Swift helper). The binding owns one serial
@@ -58,7 +63,10 @@ type darwinDriver struct {
 type darwinInstance struct {
 	vm      *vz.VirtualMachine
 	console *darwinConsole
-	cfg     VMConfig
+	// debugConsole is the optional interactive root shell over a second virtio console
+	// (hvc1). Non-nil only in debug builds (the `debugconsole` tag); nil in release.
+	debugConsole io.Closer
+	cfg          VMConfig
 	// socket is the runtime virtio-socket device, cached on Start for S5's
 	// DialGuest (VZVirtioSocketDevice.connect(toPort:)). Nil until started.
 	socket *vz.VirtioSocketDevice
@@ -105,7 +113,13 @@ func (d *darwinDriver) Create(_ context.Context, cfg VMConfig) error {
 
 	// The bundle ships a decompressed arm64 Image for the VZ target (image/build.sh
 	// gunzips the kernel for darwin); VZLinuxBootLoader cannot boot a gzip vmlinuz.
-	bootOpts := []vz.LinuxBootLoaderOption{vz.WithCommandLine(darwinKernelCmdLine)}
+	// debugConsoleToken() is empty in release builds (the seam is inert), so the cmdline
+	// is unchanged there; debug builds append the hvc1 handshake token.
+	cmdLine := darwinKernelCmdLine
+	if t := debugConsoleToken(); t != "" {
+		cmdLine += " " + t
+	}
+	bootOpts := []vz.LinuxBootLoaderOption{vz.WithCommandLine(cmdLine)}
 	if cfg.InitrdPath != "" {
 		bootOpts = append(bootOpts, vz.WithInitrd(cfg.InitrdPath))
 	}
@@ -183,29 +197,50 @@ func (d *darwinDriver) Create(_ context.Context, cfg VMConfig) error {
 	// gvisor-tap-vsock jail re-hosted over the VZ vsock listener (StartEgress), so
 	// containment is the vsock jail alone (S9 dropped the S4 NAT crutch).
 
-	// Serial console captured to broker logs (darwin analog of console_windows.go).
+	// Serial console captured to broker logs (darwin analog of console_windows.go). It
+	// stays FIRST so the kernel's console=hvc0 boot log lands here untouched.
 	console, consoleCfg, err := newDarwinConsole(d.log.With("vm", cfg.ID))
 	if err != nil {
 		return fmt.Errorf("vm: console: %w", err)
 	}
-	config.SetSerialPortsVirtualMachineConfiguration([]*vz.VirtioConsoleDeviceSerialPortConfiguration{consoleCfg})
+	ports := []*vz.VirtioConsoleDeviceSerialPortConfiguration{consoleCfg}
 
-	if ok, err := config.Validate(); err != nil {
+	// Optional dev-only debug console as a SECOND serial port -> /dev/hvc1 in the guest,
+	// bridged to a unix socket an interactive client attaches to. The seam is live only in
+	// debug builds (`debugconsole` tag); in release newDebugConsolePort returns nil and no
+	// second port is added.
+	debugConsole, dbgPort, derr := newDebugConsolePort(cfg.ID, d.log.With("vm", cfg.ID))
+	if derr != nil {
 		_ = console.Close()
+		return fmt.Errorf("vm: debug console: %w", derr)
+	}
+	if dbgPort != nil {
+		ports = append(ports, dbgPort)
+	}
+	config.SetSerialPortsVirtualMachineConfiguration(ports)
+
+	closeConsoles := func() {
+		_ = console.Close()
+		if debugConsole != nil {
+			_ = debugConsole.Close()
+		}
+	}
+	if ok, err := config.Validate(); err != nil {
+		closeConsoles()
 		return fmt.Errorf("vm: validate config: %w", err)
 	} else if !ok {
-		_ = console.Close()
+		closeConsoles()
 		return errors.New("vm: configuration is invalid")
 	}
 
 	vm, err := vz.NewVirtualMachine(config)
 	if err != nil {
-		_ = console.Close()
+		closeConsoles()
 		return fmt.Errorf("vm: create: %w", err)
 	}
 
 	d.mu.Lock()
-	d.vms[cfg.ID] = &darwinInstance{vm: vm, console: console, cfg: cfg}
+	d.vms[cfg.ID] = &darwinInstance{vm: vm, console: console, debugConsole: debugConsole, cfg: cfg}
 	d.mu.Unlock()
 	d.log.Info("vm created", "vm", cfg.ID, "cpu", cpu, "memMB", memMB)
 	return nil
@@ -253,6 +288,9 @@ func (d *darwinDriver) Stop(ctx context.Context, id string) error {
 	err := d.shutdown(ctx, inst.vm)
 	if inst.console != nil {
 		_ = inst.console.Close()
+	}
+	if inst.debugConsole != nil {
+		_ = inst.debugConsole.Close()
 	}
 	d.mu.Lock()
 	delete(d.vms, id)

@@ -77,7 +77,7 @@ export function App() {
 
   return (
     <ThemeProvider>
-      <SidebarProvider className="h-svh">
+      <SidebarProvider className="h-svh overflow-hidden">
         <AppSidebar
           activeMode={activeMode}
           activeId={activeId}
@@ -88,7 +88,7 @@ export function App() {
           onKill={isWork ? work.kill : undefined}
           onDelete={isWork ? work.close : undefined}
         />
-        <SidebarInset className="min-w-0">
+        <SidebarInset className="min-h-0 min-w-0 overflow-hidden">
           {activeSession ? (
             <ChatView
               session={activeSession}

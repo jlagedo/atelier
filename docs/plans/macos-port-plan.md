@@ -52,8 +52,7 @@ The product-level contract is already mostly portable:
   `setEgressPolicy`.
 - Guest control plane: `runner` JSON-RPC over a socket, with `exec/output`
   notifications.
-- Agent loop: live path `packages/partisan/cli_guest.py` in `--serve` mode
-  (`packages/artisan/src/cli-guest.ts` remains the older TypeScript reference).
+- Agent loop: `packages/partisan/cli_guest.py` in `--serve` mode (the sole in-guest agent).
 
 The non-portable pieces are concentrated below the broker's VMM seam:
 
