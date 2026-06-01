@@ -35,6 +35,10 @@ services/bin/*
 
 # Claude Code (local, per-machine — never commit), in any package
 **/.claude/settings.local.json
+**/.claude/scheduled_tasks.lock
+
+# transient dev-run logs (build:all / e2e:host tee output — never commit)
+*.log
 
 # OS / editor
 .DS_Store
