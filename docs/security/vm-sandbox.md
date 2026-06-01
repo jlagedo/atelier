@@ -7,6 +7,7 @@
 | Scope | Autonomous agent working on local files inside the utility VM. |
 | Out of scope | App-to-Broker IPC; see [`ipc-security.md`](ipc-security.md). |
 | Raw evidence | [`audits/2026-05-24-vz-guest-assessment.md`](audits/2026-05-24-vz-guest-assessment.md). |
+| External cross-check | [`sandbox-escape-benchmark-2026.md`](sandbox-escape-benchmark-2026.md) — cage vs. SANDBOXESCAPEBENCH ([arXiv:2603.02277](https://arxiv.org/abs/2603.02277)). |
 
 This consolidated register supersedes the old top-level `security.md`. That file
 marked F-03, F-04, F-06, F-09, and F-16 open; the newer audit and current code show

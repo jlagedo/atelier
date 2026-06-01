@@ -18,6 +18,7 @@ A **Go** host service boots a Linux utility VM, a **Python/OpenHands** agent loo
 - [`docs/README.md`](docs/README.md) — docs map, including current references, plans, and research
 - [`docs/architecture/runtime-architecture.md`](docs/architecture/runtime-architecture.md) — current process/protocol map
 - [`docs/status/implementation-status.md`](docs/status/implementation-status.md) — milestone ladder + historical implementation log
+- [`docs/security/sandbox-escape-benchmark-2026.md`](docs/security/sandbox-escape-benchmark-2026.md) — Atelier's guest cage cross-checked against SANDBOXESCAPEBENCH ([arXiv:2603.02277](https://arxiv.org/abs/2603.02277))
 - [`CLAUDE.md`](CLAUDE.md) — build/run/test commands, conventions, repo layout
 
 ## Architecture

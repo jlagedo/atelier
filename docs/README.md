@@ -13,6 +13,7 @@ agent.
 | Understand the live UI -> broker -> VM -> agent path | [`architecture/runtime-architecture.md`](architecture/runtime-architecture.md) |
 | Find historical rationale | [`architecture/design.md`](architecture/design.md) |
 | Review VM sandbox risks | [`security/vm-sandbox.md`](security/vm-sandbox.md) |
+| Cross-check the cage vs. an external escape benchmark | [`security/sandbox-escape-benchmark-2026.md`](security/sandbox-escape-benchmark-2026.md) |
 | Harden App-to-Broker IPC | [`security/ipc-security.md`](security/ipc-security.md) |
 | Check implementation history | [`status/implementation-status.md`](status/implementation-status.md) |
 | Continue the macOS port | [`plans/macos-port-execution.md`](plans/macos-port-execution.md), then [`plans/macos-port-plan.md`](plans/macos-port-plan.md) |
@@ -29,7 +30,7 @@ agent.
 | Active tracker | `plans/macos-port-execution.md`, `plans/openhands-adoption.md` |
 | Proposal | `plans/package-cache-overlay.md` |
 | Historical log | `architecture/design.md`, `status/implementation-status.md`, `plans/macos-port-plan.md` |
-| Research snapshot | `research/claude-cowork-internals.md`, `research/rocky-el10-migration.md` |
+| Research snapshot | `research/claude-cowork-internals.md`, `research/rocky-el10-migration.md`, `security/sandbox-escape-benchmark-2026.md` |
 | Raw evidence | `security/audits/2026-05-24-vz-guest-assessment.md` |
 
 Build, run, and test commands live in [`../README.md`](../README.md) and
