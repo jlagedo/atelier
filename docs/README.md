@@ -16,6 +16,7 @@ Start here when the repo shape or history feels fuzzy. Each document has one job
 | [`security.md`](security.md) | Consolidated VM + IPC security notes (audit findings, hardening, threat model). |
 | [`openhands-adoption.md`](openhands-adoption.md) | Review + phased plan for replacing the in-guest agent with an OpenHands-SDK engine (provider-agnostic, WORK now, expand later). |
 | [`package-cache-overlay.md`](package-cache-overlay.md) | Design for fast + persistent + isolated `pip`/`uv`/`npm` installs via a shared read-only cache (overlayfs lower) + per-session writeable upper. |
+| [`rocky-el10-migration.md`](rocky-el10-migration.md) | Research + decision record for swapping the cage rootfs from Ubuntu 24.04 to Rocky Linux EL10: porting surface, the 9p→virtiofs blocker, bootc/UBI endpoints, and the spike sequence. |
 
 Operational build/run/test commands live in the root [`README`](../README) and
 [`AGENTS.md`](../AGENTS.md).
