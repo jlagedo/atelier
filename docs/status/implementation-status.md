@@ -1,32 +1,43 @@
 # Atelier — Implementation Status
 
-> **Companion to [`design.md`](design.md).** That doc decides *what* and *why*; this one
-> records the slice order, current milestone status, and verification notes. Section references
-> like "§8" point at `design.md`.
->
-> **Status:** active implementation log. **Last updated:** 2026-05-22.
+| Field | Detail |
+|---|---|
+| Purpose | Record slice order, milestone status, and verification notes. |
+| Primary reader | Engineers reading project history or checking how a capability landed. |
+| Status | Historical log through S6.1. Original last broad update: 2026-05-22. |
+| Current macOS status | [`../plans/macos-port-execution.md`](../plans/macos-port-execution.md). |
+| Current agent status | [`../plans/openhands-adoption.md`](../plans/openhands-adoption.md). |
+| Current security status | [`../security/vm-sandbox.md`](../security/vm-sandbox.md). |
+| Companion | [`../architecture/design.md`](../architecture/design.md); section refs such as "§8" point there. |
 
 ---
 
 ## How to use this doc
 
-- The work was cut into **thin vertical slices**. A slice is the *smallest* change that
-  adds an **observable capability** and leaves the system **runnable**. One slice ≈ one PR.
-- Treat the Result blocks as the source of truth for what was actually implemented; some older
-  Goal/Work text preserves the plan before the implementation taught us more.
-- The work goes **depth-first along the critical path** (HCS boot → guest bridge) before breadth.
-  Breadth (the three doors, the UI) comes after the substrate exists.
-- **"Vertical" early ≠ "reaches the UI."** `design.md` §6 accepts that Electron is the
-  *last* milestone, not the first. So early slices are vertical through the stack *that
-  exists at that point* — each ends in a real, demoable command from the **terminal /
-  `atelierctl`**, not a mock. Once the bridge lands (M2), slices become genuinely
-  feature-vertical: each of the **three doors** (§10) is its own slice.
-- Each slice below lists: **Goal · Work · Touches · Verify · Exit · Depends · Risk.**
-- Keep the **status box** at the top of each phase current: `☐` todo · `◐` in progress · `☑` done.
+- Use the Result blocks as the source of truth. Older Goal/Work text may preserve
+  pre-implementation plans.
+- Early slices are vertical through the stack that existed then. They end in a
+  terminal or `atelierctl` demo, not a UI demo.
+- After M2, each of the three doors in `design.md` §10 becomes its own slice.
+- Each slice lists Goal, Work, Touches, Verify, Exit, Depends, and Risk.
+- Keep phase status boxes current: `☐` todo, `◐` in progress, `☑` done.
 
 ---
 
-## Current Status — 2026-05-22
+## Current Overlay
+
+Use this overlay for the current repo state; the detailed phase sections below remain
+valuable as implementation history.
+
+| Area | Current state |
+|---|---|
+| Go host substrate | Cross-platform VZ/HCS substrate exists; macOS egress containment is verified through S9, with packaging/notarization still open |
+| Guest agent | Live launch path is **partisan** (`packages/partisan`, Python/OpenHands); `packages/artisan` remains the TypeScript reference |
+| Desktop | WORK mode drives the broker and Session Manager; chat mode is still mock |
+| Security remediation | bwrap narrowing, seccomp, uid/gid drop, cgroups, sysctls, module latch, and Landlock are present; key residency and broker `AllowAll` remain open |
+| Shipping | LocalSystem/service install, Hop-2 ACLs, macOS notarization, and polished install docs remain open |
+
+## Historical Status — 2026-05-22
 
 | Area | State |
 |---|---|

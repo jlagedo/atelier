@@ -3,40 +3,35 @@
 | Field | Detail |
 |---|---|
 | Status | Design — not yet executed |
+| Primary reader | Engineers evaluating guest package install performance and isolation. |
 | Objective | Make `pip` / `uv` / `npm` installs in the guest fast and persistent without eroding session isolation |
 | Approach | Shared read-only package cache as overlayfs `lowerdir` + per-session writeable `upperdir`; install trees stay per-session in `/sessions` |
 | Validated | overlayfs + uv/pip/npm cache semantics confirmed against kernel/Docker/tool docs + issue trackers (2026-05) |
 
-This document captures the design for how the in-guest agent should handle `pip install` /
-`uv` / `npm install`. The goal is the opposite of Cowork's behaviour (see
-[`claude-cowork-internals.md`](claude-cowork-internals.md) §11–12), where per-session installs hit
-the read-only-ish root partition, **don't persist, and re-burn disk every session** on a VM with
-only ~940 MB free for user work.
-
----
+Cowork's per-session installs hit the read-only-ish root partition, do not
+persist, and re-burn disk every session on a VM with about 940 MB free for user
+work. See [`../research/claude-cowork-internals.md`](../research/claude-cowork-internals.md)
+§11-12.
 
 ## 1. Problem
 
-Two things get conflated under "handle package installs":
+Package installs create two different surfaces:
 
-1. **Tool binaries** (`node`, `pip`, `uv`, `npm`) — immutable runtime. These belong baked into the
-   ro image surface (rootfs / the `/opt` volume), exactly like `runner` + the agent ship today. Not
-   the interesting question.
-2. **What installs *produce*** — the download cache (wheels/tarballs) and the resolved install tree
-   (`site-packages`, `node_modules`). This is the real design question: where do these land so that
-   they are **fast** (cache reuse), **persistent** (survive hibernate/resume + reboot), and
-   **isolated** (no cross-session contamination)?
+| Surface | Policy |
+|---|---|
+| Tool binaries (`node`, `pip`, `uv`, `npm`) | Bake into the read-only image surface, like `runner` and the agent. |
+| Install output: download cache and install tree (`site-packages`, `node_modules`) | Make cache reuse fast, persistent, and isolated. |
 
 Rejected alternatives:
-- **Pre-bake a big package zoo** (Cowork bakes 717 MB of pip packages incl. dual OpenCV) — bloat,
-  and still doesn't help packages the user actually asks for.
-- **One shared *writable* cache dir** — ~10 lines, but concedes containment (one session can poison
-  another's `node_modules`/site-packages) *and* hits documented package-manager concurrency-corruption
-  bugs from multiple writers to one cache.
+
+| Alternative | Reason rejected |
+|---|---|
+| Pre-bake a big package zoo | Bloats the image. Cowork bakes 717 MB of pip packages, including dual OpenCV, and still misses user-requested packages. |
+| One shared writable cache dir | Lets one session poison another and hits documented package-manager corruption bugs from concurrent writers. |
 
 ## 2. Design: overlay the cache, keep install trees per-session
 
-Split the two writeable things and give them different fates.
+Split cache artifacts from install trees.
 
 ### The download cache → overlayfs
 
@@ -49,9 +44,9 @@ merged cache  =  what the package manager sees (e.g. ~/.cache/uv)
    spill here                       common wheels / npm tarballs
 ```
 
-- **Read** → hit in shared `lower` ⇒ no network, no re-download. Many sessions share it safely.
-- **Write** (miss) → fetched once, lands in this session's private `upper`. Shared layer untouched;
-  other sessions never see it.
+- **Read:** hit shared `lower`; skip network and re-download.
+- **Write miss:** fetch once into the session's private `upper`; leave shared `lower`
+  untouched.
 
 Each package manager already supports a redirectable cache dir:
 
@@ -65,9 +60,8 @@ Point all three at the merged overlay mount.
 
 ### The install tree → stays per-session
 
-`site-packages` / venv / `node_modules` live in `/sessions/<tag>` — **fully isolated, never shared.**
-Only the raw artifact cache (content-addressed, hence safe to share read-only) goes through the
-overlay.
+`site-packages`, venvs, and `node_modules` live in `/sessions/<tag>`. They are
+never shared. Only the raw artifact cache goes through the overlay.
 
 ## 3. Map onto Atelier's volumes
 

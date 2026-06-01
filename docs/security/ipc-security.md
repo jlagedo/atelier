@@ -1,28 +1,30 @@
 # IPC Security — Hop 2 (App to Host Broker)
 
-Scope: securing **Hop 2**, the IPC boundary between the unprivileged desktop app
-and the privileged host broker. For the full component map and the other hops see
-[`runtime-architecture.md`](runtime-architecture.md). For VM-internal hardening,
-see [`vm-hardening.md`](vm-hardening.md).
+| Field | Detail |
+|---|---|
+| Purpose | Define the Hop 2 IPC threat model and hardening ladder. |
+| Primary reader | Engineers shipping or hardening the desktop-to-broker boundary. |
+| Scope | IPC between the unprivileged desktop app and privileged host broker. |
+| Other hops | [`../architecture/runtime-architecture.md`](../architecture/runtime-architecture.md). |
+| VM hardening | [`vm-sandbox.md`](vm-sandbox.md). |
 
-## Why Hop 2 is the boundary that matters
+## Boundary
 
 | Side | Identity | Privilege |
 |------|----------|-----------|
 | Electron **main** (Hop 2 client) | runs as the interactive user | unprivileged |
 | Host **broker** (`cmd/atelierd`, Hop 2 server) | elevated process now; planned Windows service | privileged |
 
-The pipe exposes the **full privileged surface** — `exec`, `readFile`/`writeFile`,
-`setEgressPolicy`, plus VM lifecycle (`pkg/protocol/protocol.go`). Anyone who can
-open the pipe *and* pass the gate can drive the sandbox and the host-side file
-jail. So Hop 2 is the privilege boundary.
+Hop 2 exposes the privileged surface: `exec`, `readFile`/`writeFile`,
+`setEgressPolicy`, and VM lifecycle (`pkg/protocol/protocol.go`). Anyone who opens
+the pipe or socket and passes the gate can drive the sandbox and host-side file
+jail.
 
-**Threat:** another local process driving the broker's privileged methods by
-opening the pipe / socket.
+**Threat:** a local process drives broker methods by opening the pipe or socket.
 
 **Non-threat:** on-wire eavesdropping. The channel is a local, kernel-mediated
-named pipe / unix socket — **TLS/mTLS buys nothing here.** The real controls are
-*who can open it*, *who you prove they are*, and *what they're allowed to call*.
+named pipe or unix socket. TLS/mTLS does not address the boundary. Control who can
+open it, prove who they are, and gate what they can call.
 
 ## Current State
 
@@ -35,12 +37,12 @@ named pipe / unix socket — **TLS/mTLS buys nothing here.** The real controls a
 - **Both:** the policy gate is `AllowAll` (`services/internal/broker/policy.go`) —
   every method is permitted, though each check is still audited.
 
-Net: Hop 2 has no meaningful access control today. This is **L0** below.
+Net: Hop 2 has no meaningful access control today. This is L0 below.
 
 ## The hardening ladder
 
-The same five levels apply on both platforms; the *mechanisms* differ. L1–L3 gate
-**who connects**; L4 gates **what they can do** and is the real containment.
+The same five levels apply on both platforms. L1-L3 gate who connects. L4 gates
+what callers can do.
 
 | Level | Control | Threat closed | Effort |
 |-------|---------|---------------|--------|
@@ -106,7 +108,7 @@ can't rely on signature verification.**
 
 Replace `AllowAll` (`services/internal/broker/policy.go`) with a `Gate` that does
 **allow/ask/deny per method+door** and audit-logs every call. Sensitive doors
-(`exec`, `writeFile`, `setEgressPolicy`) should be policy-controlled even if the
+(`exec`, `writeFile`, `setEgressPolicy`) need policy control even if the
 connection boundary is bypassed. The renderer already has display-only policy cards;
 an `Ask` flow can be added later if the product needs human approval.
 

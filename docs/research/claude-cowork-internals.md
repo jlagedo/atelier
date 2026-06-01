@@ -1,16 +1,12 @@
 # Inside Claude Cowork: The Desktop Agent Sandbox
 
-> A consolidated reverse-engineering survey of Anthropic's Claude Cowork desktop
-> agent sandbox, covering both the macOS and Windows ports.
->
-> **Sources:** Anthropic help-center & Trust Center docs, Simon Willison (Jan 12, 2026),
-> aaddrick (Jan 26, 2026), Pluto Security / Yotam Perkal (Apr 1, 2026), Jonas Kamsker /
-> blog.kamsker.at (Feb 19, 2026), pvieito.com, blog.jimmyvo.com, and GitHub issues on
-> `anthropics/claude-code` (#24945, #25513, #26216, #26282, #29887, #29941, #30179,
-> #31848, #36298, #36522, #36642, #36801, #37860, #38783, #46661, #51598).
->
-> **Snapshot:** January–April 2026. Anthropic ships frequently; minified symbol names,
-> flag names, and codenames drift week-over-week. Treat this as point-in-time.
+| Field | Detail |
+|---|---|
+| Purpose | Reverse-engineering survey of Anthropic Claude Cowork desktop agent sandbox internals. |
+| Primary reader | Engineers comparing Atelier against Cowork's macOS and Windows architecture. |
+| Snapshot | January-April 2026. Treat all internals as point-in-time. |
+| Drift risk | Anthropic ships frequently; symbol names, flag names, codenames, and behavior may have changed. |
+| Sources | Anthropic help-center and Trust Center docs; Simon Willison (Jan 12, 2026); aaddrick (Jan 26, 2026); Pluto Security / Yotam Perkal (Apr 1, 2026); Jonas Kamsker / blog.kamsker.at (Feb 19, 2026); pvieito.com; blog.jimmyvo.com; GitHub issues on `anthropics/claude-code` (#24945, #25513, #26216, #26282, #29887, #29941, #30179, #31848, #36298, #36522, #36642, #36801, #37860, #38783, #46661, #51598). |
 
 ---
 

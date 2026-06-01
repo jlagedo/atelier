@@ -3,25 +3,26 @@
 | Field | Detail |
 |---|---|
 | Status | **Phase 3 done** — packaged into the VM image + launch site flipped to partisan; `e2e:host` green (43/43), partisan reaches the model in-cage (one-shot + serve). Phases 1–2 done. Remaining: Phase 4 (conformance suite + Node removal). |
+| Primary reader | Engineers finishing the Python/OpenHands cutover or debugging the in-guest agent wire. |
 | Project | **partisan** — Python (OpenHands SDK) successor to artisan, behind the same NDJSON wire |
 | Goal | Replace the Anthropic-locked in-guest agent with a provider-agnostic one (LiteLLM) |
 | Approach | Embed the SDK **in-process** (`LocalConversation` + `callbacks`); NDJSON only at the host↔guest edge |
 | Validated | SDK cloned to `~/Developer/software-agent-sdk`, read against source; 410 MB minimal install |
 
-artisan (TypeScript, `@anthropic-ai/claude-agent-sdk`) targets Anthropic only. **partisan** rebuilds the
-in-guest agent on the OpenHands SDK (Python, `OpenHands/software-agent-sdk` @ v1.23.0, MIT, Python ≥3.12)
-for model-provider freedom, keeping Atelier's NDJSON serve wire so the host (Session Manager, atelierctl)
-is unchanged. Scope is the live in-guest path (`cli-guest.ts`, Topology B); the host-loop `cli.ts` is out
-of scope.
+artisan (TypeScript, `@anthropic-ai/claude-agent-sdk`) targets Anthropic only.
+partisan rebuilds the in-guest agent on `OpenHands/software-agent-sdk` v1.23.0
+(MIT, Python >=3.12) for model-provider freedom. The host Session Manager and
+`atelierctl` keep the same NDJSON serve wire.
 
----
+Scope: live in-guest path (`cli-guest.ts`, Topology B). Out of scope: host-loop
+`cli.ts`.
 
 ## 1. Decisions
 
 | # | Decision | Why |
 |---|---|---|
 | D1 | Build **partisan** on the OpenHands SDK as artisan's successor. | Provider freedom; the objection is *model* lock-in, not SDK use. |
-| D2 | Embed in-process (`LocalConversation` + `callbacks`); **no** `agent-server`. **This is the one and only place we deviate from stock OpenHands.** | We run a **local VM as the cage**, not a Docker/remote deployment — so the transport is the VM's vsock pipe and agent-server's REST/WS/webhook fan-out is dead weight. We tap `callbacks=` directly instead (§2). |
+| D2 | Embed in-process (`LocalConversation` + `callbacks`); **no** `agent-server`. This is the only stock OpenHands deviation. | Atelier uses a local VM as the cage, so the transport is the VM's vsock pipe. `agent-server` REST/WS/webhook fan-out is dead weight. We tap `callbacks=` directly (§2). |
 | D3 | Keep the **NDJSON wire** (`cli-guest.ts:18-33`); translate SDK events ↔ NDJSON at the process edge. | Lowest blast radius; rides the existing audited `exec` door. |
 | D4 | **Coexist** via a **hardwired launch site** (no env switch); switching = edit + rebuild. | No runtime selector to build then delete; A/B is the conformance suite, not runtime. |
 | D5 | **Cutover when green** (conformance suite + `e2e:host` on the Python path) → flip launch, drop Node, guest Python-only. | A named exit prevents two-runtime limbo. |
@@ -30,9 +31,10 @@ of scope.
 | D8 | **Build first, trim later** — install `openhands-sdk`+`openhands-tools` as-is (410 MB; browser import-safe); size matters, but it's a post-cutover concern, not Phase-1 work. | Don't let footprint slow the build; revisit once partisan is green — and trim by dropping deps, *not* by forking/vendoring SDK code (D9). |
 | D9 | **Commit to OpenHands; no wrapper layer around its API.** Use SDK types directly; copy its behavior when in doubt; the **only** adapters are at the Atelier boundary (NDJSON wire, egress, key resolver) — never around the SDK. Accept partisan isn't framework-swappable. | We want **model** freedom (LiteLLM), not **framework** freedom. The replaceability tax > the lock-in it insures against (cf. abstracting Oracle to stay DB-agnostic); churn is contained by pinned versions + conformance, not abstraction. |
 
-**Parked:** OIDC / per-user-token auth + a company LLM-gateway `base_url` (reduces key risk, fits data
-residency, but adds mid-session token refresh). The rule it leaves today: never use the
-`openhands/<model>` prefix — it routes to All-Hands' proxy (`llm.py:502-508`).
+**Parked:** OIDC/per-user-token auth and a company LLM-gateway `base_url`. This
+would reduce key risk and support data residency, but adds mid-session token
+refresh. Current rule: never use the `openhands/<model>` prefix; it routes to
+All-Hands' proxy (`llm.py:502-508`).
 
 ---
 

@@ -1,22 +1,36 @@
 # Atelier Docs
 
-Start here when the repo shape or history feels fuzzy. Each document has one job:
+Purpose: help engineers find the current implementation map, security register,
+status trackers, and historical research without reading stale plan text first.
 
-| Document | Purpose |
+Primary reader: engineers changing the desktop app, broker, VM image, or in-guest
+agent.
+
+## Open By Task
+
+| Task | Read |
 |---|---|
-| [`design.md`](design.md) | Product/architecture rationale, major decisions, glossary. Mostly historical, but kept current where decisions changed. |
-| [`color-system.md`](color-system.md) | The desktop color system: two reference-derived themes (Studio / Aegean Dusk), semantic tokens, and usage rules. Interactive preview: [`color-mock.html`](color-mock.html). |
-| [`runtime-architecture.md`](runtime-architecture.md) | Concrete process, protocol, port, and source-file map from renderer to in-guest agent. |
-| [`implementation-status.md`](implementation-status.md) | Slice-by-slice implementation history and current milestone status. |
-| [`macos-port-plan.md`](macos-port-plan.md) | Planning notes and proposed structure for adding a macOS Virtualization.framework backend. |
-| [`macos-port-execution.md`](macos-port-execution.md) | Execution tracker for the macOS port: thin reviewable slices, acceptance criteria, and a progress dashboard. |
-| [`ipc-security.md`](ipc-security.md) | Hop 2 App-to-Broker security gap and hardening ladder. |
-| [`vm-security-assessment.md`](vm-security-assessment.md) | Internal VM audit findings plus remediation status from the live Hyper-V verification. |
-| [`vm-hardening.md`](vm-hardening.md) | Forward-looking VM hardening roadmap after the audit fixes. |
-| [`security.md`](security.md) | Consolidated VM + IPC security notes (audit findings, hardening, threat model). |
-| [`openhands-adoption.md`](openhands-adoption.md) | Review + phased plan for replacing the in-guest agent with an OpenHands-SDK engine (provider-agnostic, WORK now, expand later). |
-| [`package-cache-overlay.md`](package-cache-overlay.md) | Design for fast + persistent + isolated `pip`/`uv`/`npm` installs via a shared read-only cache (overlayfs lower) + per-session writeable upper. |
-| [`rocky-el10-migration.md`](rocky-el10-migration.md) | Research + decision record for swapping the cage rootfs from Ubuntu 24.04 to Rocky Linux EL10: porting surface, the 9p→virtiofs blocker, bootc/UBI endpoints, and the spike sequence. |
+| Understand the live UI -> broker -> VM -> agent path | [`architecture/runtime-architecture.md`](architecture/runtime-architecture.md) |
+| Find historical rationale | [`architecture/design.md`](architecture/design.md) |
+| Review VM sandbox risks | [`security/vm-sandbox.md`](security/vm-sandbox.md) |
+| Harden App-to-Broker IPC | [`security/ipc-security.md`](security/ipc-security.md) |
+| Check implementation history | [`status/implementation-status.md`](status/implementation-status.md) |
+| Continue the macOS port | [`plans/macos-port-execution.md`](plans/macos-port-execution.md), then [`plans/macos-port-plan.md`](plans/macos-port-plan.md) |
+| Continue the OpenHands/partisan cutover | [`plans/openhands-adoption.md`](plans/openhands-adoption.md) |
+| Evaluate package cache overlays | [`plans/package-cache-overlay.md`](plans/package-cache-overlay.md) |
+| Change desktop color tokens | [`ui/color-system.md`](ui/color-system.md); preview in [`ui/color-mock.html`](ui/color-mock.html) |
+| Review docs staleness and cleanup notes | [`DOC_AUDIT.md`](DOC_AUDIT.md) |
 
-Operational build/run/test commands live in the root [`README`](../README) and
-[`AGENTS.md`](../AGENTS.md).
+## Document Status
+
+| Status | Documents |
+|---|---|
+| Current reference | `architecture/runtime-architecture.md`, `security/vm-sandbox.md`, `security/ipc-security.md`, `ui/color-system.md` |
+| Active tracker | `plans/macos-port-execution.md`, `plans/openhands-adoption.md` |
+| Proposal | `plans/package-cache-overlay.md` |
+| Historical log | `architecture/design.md`, `status/implementation-status.md`, `plans/macos-port-plan.md` |
+| Research snapshot | `research/claude-cowork-internals.md`, `research/rocky-el10-migration.md` |
+| Raw evidence | `security/audits/2026-05-24-vz-guest-assessment.md` |
+
+Build, run, and test commands live in [`../README.md`](../README.md) and
+[`../CLAUDE.md`](../CLAUDE.md).

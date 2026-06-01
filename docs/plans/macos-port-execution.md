@@ -1,26 +1,21 @@
 # macOS Port — Execution Plan
 
-> **Companion to [`macos-port-plan.md`](./macos-port-plan.md).** That doc decides *what*
-> and *why* (architecture, API validation, framework mapping). This doc is the **execution
-> tracker**: it cuts the port into thin, reviewable, demoable slices and records progress.
-> **Last updated:** 2026-05-23 (S9 network containment landed + verified on Apple Silicon:
-> egress re-hosted over a VZ vsock listener, NAT crutch dropped, guest has no real NIC;
-> allow/deny jail confirmed end-to-end. S8's egress-gated agent turn is unblocked).
+| Field | Detail |
+|---|---|
+| Purpose | Track macOS port execution slices and verification. |
+| Primary reader | Engineers implementing or reviewing port work. |
+| Companion | [`macos-port-plan.md`](./macos-port-plan.md) for architecture and API validation. |
+| Last updated | 2026-05-23. S9 network containment landed and was verified on Apple Silicon. |
+| Current blocker | S8 full desktop agent-turn re-run; S10 packaging/notarization. |
 
 ## How to use this doc
 
-- Work is cut into **thin vertical slices**, same convention as
-  [`implementation-status.md`](./implementation-status.md): a slice is the *smallest*
-  change that adds an **observable capability** and leaves the system **runnable**. One
-  slice ≈ one PR.
-- Each slice lists **Goal · Work · Touches · Verify · Exit · Review · Depends · Risk**.
-  `Verify` is a real command/observation, not a mock. `Exit` is the binary done-condition.
-  `Review` is the PR reviewer's focused checklist.
-- The path is **depth-first along the critical boot path** (compile → arm64 artifacts →
-  boot → guest exec) before the three doors (files, network) and the product loop.
-- Keep the **dashboard** below current: `☐` todo · `◐` in progress · `☑` done · `⊘` blocked.
-- Slice IDs map to the milestone numbers in `macos-port-plan.md` §"Milestone Plan" via the
-  **Plan ref** column, so the two docs stay reconcilable.
+- A slice is the smallest change that adds an observable capability and leaves the
+  system runnable. One slice is about one PR.
+- Each slice lists Goal, Work, Touches, Verify, Exit, Review, Depends, and Risk.
+- `Verify` must be a real command or observation.
+- Keep the dashboard current: `☐` todo, `◐` in progress, `☑` done, `⊘` blocked.
+- Slice IDs map to `macos-port-plan.md` milestone refs.
 
 ---
 
@@ -154,7 +149,7 @@ S4 NAT crutch for egress until S9 replaces it.
   - **NAT crutch:** attach `VZNATNetworkDeviceAttachment` (no entitlement, validation #4)
     purely to confirm liveness. Mark it clearly as removed in S9.
 - **Touches:** `services/internal/vmm/driver_darwin.go`, `services/go.mod`/`go.sum`,
-  a dev `entitlements.plist`, build/sign notes (root `README`/`AGENTS.md`).
+  a dev `entitlements.plist`, build/sign notes (root `README.md`/`CLAUDE.md`).
 - **Verify:** `atelierctl createVM -id vm0 …` then `atelierctl startVM -id vm0` boots the guest; serial
   log shows the kernel boot + login prompt; `atelierctl stopVM -id vm0` exits cleanly. Re-run is
   idempotent.
@@ -305,7 +300,7 @@ S4 NAT crutch for egress until S9 replaces it.
     needs a remount, the host-adds-then-guest-mounts shape is the documented primary; the
     fallbacks (staging symlinks → controlled restart → one-VM-per-session) are the ladder.
 - **Touches:** `services/internal/vmm/driver_darwin.go` (only if a nudge RPC is needed),
-  `services/cmd/runner/mount_linux.go`, `docs/macos-port-plan.md` (verdict).
+  `services/cmd/runner/mount_linux.go`, `docs/plans/macos-port-plan.md` (verdict).
 - **Verify:** a scripted run attaches/detaches ≥3 workspaces on a live VM; each becomes
   visible/invisible in the guest as expected; result documented.
 - **Exit:** runtime-share behavior is **known and documented**, and the chosen shape is
@@ -357,7 +352,8 @@ S4 NAT crutch for egress until S9 replaces it.
   - Egress may still ride the **NAT crutch** from S4 at this stage so the agent can reach the
     model; containment lands in S9.
 - **Touches:** `apps/desktop/src/main/sessions/manager.ts` (runtime path),
-  `packages/artisan/src/cli-guest.ts` (only if a platform assumption surfaces).
+  `packages/partisan/cli_guest.py` (only if a platform assumption surfaces; artisan is the older
+  TypeScript reference).
 - **Verify:** from the desktop in WORK mode, a session boots the macOS VM, mounts a workspace,
   and completes one agent turn with streamed output.
 - **Exit:** the full product loop runs on Apple Silicon (with NAT egress still permitted).
@@ -471,7 +467,7 @@ S4 NAT crutch for egress until S9 replaces it.
     helper (`macOS Helper Shape` in the plan) if a least-privilege split or background
     lifecycle (launchd/SMAppService) demands it.
   - Add macOS install/run docs; update `docs/README.md`,
-    `implementation-status.md`, and this dashboard.
+    `../status/implementation-status.md`, and this dashboard.
 - **Touches:** desktop packaging config, signing/notarization scripts, `entitlements.plist`,
   `docs/` (install guide + status), optionally a Swift helper target.
 - **Verify:** a notarized, Gatekeeper-passing build launches on a clean Apple Silicon Mac and

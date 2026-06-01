@@ -1,23 +1,25 @@
 # Migrating the cage to Rocky Linux EL10
 
-> Status: **research / decision record** (May 2026). No code changed yet. This captures what we
-> learned evaluating a swap of the utility-VM rootfs base from Ubuntu 24.04 to **Rocky Linux EL10**,
-> the porting surface, and the challenges — so the spike that follows starts from facts, not guesses.
+| Field | Detail |
+|---|---|
+| Status | Research / decision record, May 2026. No code changed. |
+| Primary reader | Engineers evaluating a future utility-VM rootfs move from Ubuntu 24.04 to Rocky Linux EL10. |
+| Decision | Target Rocky Linux EL10 for the spike. |
+| Main risk | RHEL-family kernels likely omit 9p, so Windows/HCS file sharing may need virtiofs. |
 
 ## Why this, why now
 
-Atelier is a research spike for an *enterprise-boring* AI-agent containment tool (see
-[`memory/project-north-star`] in the dev's notes). In a regulated/financial shop **Ubuntu is usually
-deferred and Red Hat owns the base**. So the cage — today `ubuntu:24.04` (`image/rootfs/Dockerfile:4`)
-— should be able to stand on a RHEL-family base if we want findings (path-jail, TOCTOU, driver quirks,
-hardening) to reproduce on what a bank actually runs.
+Atelier's cage currently uses `ubuntu:24.04` (`image/rootfs/Dockerfile:4`). A
+regulated or financial deployment may require a RHEL-family base so path-jail,
+TOCTOU, driver, and hardening findings reproduce on the target environment.
 
-**Decision: target Rocky Linux EL10**, explicitly as a *free, bug-for-bug stand-in for licensed
-RHEL/UBI*. Rocky over Alma because Rocky is the bug-for-bug RHEL clone — research findings transfer
-1:1 to the licensed RHEL a bank runs; Alma's ahead-of-RHEL patches/divergence mean they might not.
-RHEL UBI + an external kernel is the later swap only if a FIPS-validated crypto story is needed.
-EL10 (kernel 6.12, glibc 2.39) over EL9 because 6.12 ≈ our current Ubuntu HWE kernel, so the driver
-baseline is closest. Full distro reasoning: [`memory/distro-eval-azure-linux-vs-ubuntu`].
+Target Rocky Linux EL10 as a free, bug-for-bug stand-in for licensed RHEL/UBI.
+Prefer Rocky over Alma because Rocky tracks RHEL behavior more tightly. Keep RHEL
+UBI plus an external kernel as a later option only if FIPS-validated crypto is
+required.
+
+Prefer EL10 over EL9 because EL10 has kernel 6.12 and glibc 2.39, closer to the
+current Ubuntu HWE kernel baseline.
 
 ## Current state — the Ubuntu pipeline we're porting
 

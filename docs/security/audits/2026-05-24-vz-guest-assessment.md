@@ -1,10 +1,14 @@
 # Live Security Assessment — Guest VM Sandbox
 
-**Date:** 2026-05-24
-**Kernel:** 6.17.0-29-generic
-**OS:** Ubuntu 24.04.4 LTS (aarch64)
-**Hypervisor:** Apple Silicon VZ VM
-**Assessor:** Claude (sandboxed agent, uid=1001)
+| Field | Detail |
+|---|---|
+| Status | Raw point-in-time audit. Keep for evidence and traceability. |
+| Current register | [`../vm-sandbox.md`](../vm-sandbox.md). |
+| Date | 2026-05-24 |
+| Kernel | 6.17.0-29-generic |
+| OS | Ubuntu 24.04.4 LTS (aarch64) |
+| Hypervisor | Apple Silicon VZ VM |
+| Assessor | Claude (sandboxed agent, uid=1001) |
 
 ---
 

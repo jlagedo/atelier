@@ -1,35 +1,32 @@
 # macOS Port Plan
 
-> **Status:** in progress. Milestone 1 (the `internal/vmm` Driver seam) has landed
-> (`03a78ae`). The macOS driver, image, and desktop wiring are not yet implemented.  
-> **Last updated:** 2026-05-23.  
-> **Goal:** keep Atelier's containment model and product shape while replacing the
-> Windows HCS substrate with a macOS Virtualization.framework substrate.  
-> **Priority right now:** make the *current* code run on Apple Silicon as-is. Get a
-> guest booting, `runner` reachable, one workspace mounted, and the agent loop driven
-> from the existing Session Manager. Anything larger (host MITM proxy, dynamic
-> multi-session shares, Rosetta amd64 compatibility, credential-residency fixes) is
-> explicitly deferred until after the port boots.
+| Field | Detail |
+|---|---|
+| Status | Active/historical port plan. S1-S7 and S9 landed; S8 and S10 remain open. |
+| Last updated | 2026-05-23; cleanup notes added after docs reorganization. |
+| Primary reader | Engineers continuing the macOS VZ backend or checking port rationale. |
+| Goal | Keep Atelier's containment model while replacing Windows HCS with macOS Virtualization.framework. |
+| Priority | Run the current product on Apple Silicon: boot guest, reach `runner`, mount one workspace, drive the agent loop from Session Manager. |
+| Live agent | `packages/partisan/cli_guest.py`. Older sections may still name artisan because they predate the OpenHands cutover. |
 
-This plan starts from the current Windows implementation: a Go broker owns policy,
-audit, VM lifecycle, files, network, and compute; the Electron main process talks to
-that broker over Hop 2; the TypeScript agent loop runs inside the Linux guest.
+Do not fork the product for macOS. Add a platform driver below the same broker
+contract.
 
-The right macOS port is not a fork of the product. It is a new platform driver
-below the same broker contract.
+Defer host MITM proxy, dynamic multi-session scale work, Rosetta amd64
+compatibility, credential-residency fixes, and packaging polish until the port
+boots.
 
-The architecture choices below are cross-checked against Anthropic's own
-macOS implementation (see [`claude-cowork-internals.md`](./claude-cowork-internals.md)),
-which ships exactly this shape — Ubuntu guest under `Virtualization.framework`,
-vsock control plane, VirtioFS file sharing, host-mediated egress — and against
-direct validation of the Apple framework APIs (see
-[Framework API Validation](#framework-api-validation)).
+The architecture choices are cross-checked against Anthropic's macOS shape:
+Ubuntu guest under `Virtualization.framework`, vsock control plane, VirtioFS file
+sharing, and host-mediated egress. See
+[`../research/claude-cowork-internals.md`](../research/claude-cowork-internals.md)
+and [Framework API Validation](#framework-api-validation).
 
 ## Goals
 
 - Run the same Electron UI and Session Manager on Windows and macOS.
 - Keep the Go broker as the containment chokepoint for policy and audit.
-- Keep the in-guest `runner` protocol and the in-guest TypeScript agent loop.
+- Keep the in-guest `runner` protocol and the in-guest agent loop.
 - Preserve the "one shared VM, many session workspaces" product model if the macOS
   file-sharing primitives support it cleanly.
 - Produce pinned OS/architecture-specific VM bundles instead of mixing guest images
@@ -55,7 +52,8 @@ The product-level contract is already mostly portable:
   `setEgressPolicy`.
 - Guest control plane: `runner` JSON-RPC over a socket, with `exec/output`
   notifications.
-- Agent loop: `packages/artisan/src/cli-guest.ts` in `--serve` mode.
+- Agent loop: live path `packages/partisan/cli_guest.py` in `--serve` mode
+  (`packages/artisan/src/cli-guest.ts` remains the older TypeScript reference).
 
 The non-portable pieces are concentrated below the broker's VMM seam:
 
@@ -320,7 +318,7 @@ compute convenience; the privileged boundary still mediates `readFile` and `writ
 > NIC (`ip link` shows only `lo` + `tap0`). End-to-end: `allow=example.com` → `curl example.com`
 > HTTP 200 through the jail; google → NXDOMAIN. One fork robustness fix: `VirtioSocketListener.Close()`
 > now unblocks `Accept()` (`net.ErrClosed`) so the `http.Serve` goroutine doesn't leak on VM stop.
-> See `docs/macos-port-execution.md` §S9 for the full reproduction.
+> See [`macos-port-execution.md`](macos-port-execution.md) §S9 for the full reproduction.
 
 **Key realization from the current code:** Atelier already implements the "host is the
 whole network" jail that Cowork ships, and it's *not* NIC-based. In
@@ -363,7 +361,7 @@ it once the vsock bridge works.
 
 **Product direction (deferred).** Cowork additionally fronts model/MCP traffic with a
 per-boot ephemeral-CA MITM proxy and never puts `ANTHROPIC_API_KEY` in the guest
-(`vm-hardening.md` C1/C2). That protocol-gateway layer is a
+([`../security/vm-sandbox.md`](../security/vm-sandbox.md) F-02/F-05). That protocol-gateway layer is a
 [major feature](#major-features-deferred-until-after-the-port); the netjail allowlist is
 sufficient to boot. Avoid bridged networking entirely unless an enterprise environment
 demands it (it needs `com.apple.vm.networking` and is the wrong default for containment).
@@ -461,7 +459,8 @@ These are real product gaps versus Cowork, but none block booting the current co
 Tackle them only once milestones 0–8 pass:
 
 - **Host MITM proxy + per-boot ephemeral CA** as a model/MCP protocol gateway, so the
-  guest never holds `ANTHROPIC_API_KEY` (`vm-hardening.md` C1/C2; Cowork's egress model).
+  guest never holds `ANTHROPIC_API_KEY` ([`../security/vm-sandbox.md`](../security/vm-sandbox.md)
+  F-02/F-05; Cowork's egress model).
   The current `netjail` allowlist is enough to boot.
 - **Dynamic multi-session shares at scale** beyond the first validated mount — if the
   runtime-add smoke test (milestone 5) needs a fallback, that redesign lands here.
@@ -494,7 +493,7 @@ Tackle them only once milestones 0–8 pass:
 
 ## References
 
-- Cowork macOS substrate (cross-check): [`claude-cowork-internals.md`](./claude-cowork-internals.md)
+- Cowork macOS substrate (cross-check): [`../research/claude-cowork-internals.md`](../research/claude-cowork-internals.md)
 - `Code-Hex/vz` — Go/cgo binding for Virtualization.framework (Option A):
   <https://github.com/Code-Hex/vz>
 - Apple Virtualization.framework:

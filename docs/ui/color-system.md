@@ -1,20 +1,16 @@
-# Color system
+# Color System
 
-Atelier ships **two themes derived from real references** — a photograph and a
-painting — rather than from other UIs. That choice is the whole point, so it gets
-explained first.
+| Field | Detail |
+|---|---|
+| Purpose | Define semantic color tokens and usage rules for the desktop UI. |
+| Primary reader | Engineers adding or changing renderer components. |
+| Source of truth | [`../../apps/desktop/src/renderer/index.css`](../../apps/desktop/src/renderer/index.css). |
+| Preview | [`color-mock.html`](color-mock.html). |
 
-## Why reference-derived
+Atelier ships two themes derived from real references: a photograph and a
+painting. Do not sample colors from other app UIs.
 
-The "generic AI" look comes from sampling the same handful of product UIs
-(Linear/Vercel/dribbble), which regresses every palette toward the same pure,
-saturated hues (`#3B82F6` blue, electric violet, neon cyan) over cold grey
-neutrals, with everything glowing.
-
-Real light doesn't work that way. Sunlight and pigment are *muddied* by atmosphere,
-so a color pulled from a photo or painting carries a slight desaturation and a hue
-that no generator reaches for. That "dirt" is exactly what reads as **authored**
-instead of generated. So:
+## Source Rules
 
 - Pull palettes from photographs, paintings, film stills, textiles — anything with
   real light in it. Not from other apps.
@@ -22,9 +18,6 @@ instead of generated. So:
 - Keep neutrals slightly tinted toward the source (warm paper, cool dusk), never
   flat grey.
 - Use glow sparingly — one soft accent, not a neon haze.
-
-An interactive side-by-side of both themes in the app's real layout lives at
-[`color-mock.html`](color-mock.html) (open it in a browser).
 
 ## The two themes
 
@@ -44,7 +37,7 @@ branch on theme.
 
 ## Token roles
 
-Tokens are defined in [`apps/desktop/src/renderer/index.css`](../apps/desktop/src/renderer/index.css)
+Tokens are defined in [`apps/desktop/src/renderer/index.css`](../../apps/desktop/src/renderer/index.css)
 as OKLCH custom properties under `:root` (Studio) and `.dark` (Aegean Dusk), then
 exposed to Tailwind utilities via the `@theme inline` block (so `bg-signal`,
 `text-positive`, etc. exist). shadcn components consume them by name.

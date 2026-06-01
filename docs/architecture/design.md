@@ -1,14 +1,18 @@
 # Atelier — Design Document
 
-> **Name:** **Atelier** — a workshop where a craftsperson works on their own materials, in their own space; fitting for a contained, local AI workspace. *(Was "theparser", a throwaway working name.)*
->
-> **Status:** Design and decision record. The code now implements the main Topology B path; use
-> [`implementation-status.md`](implementation-status.md) for build history and
-> [`runtime-architecture.md`](runtime-architecture.md) for the concrete process/protocol map.
-> **Stack:** **Go** (host broker / HCS driver, with thin `computecore.dll` bindings) +
-> **TypeScript/Node** (agent loop via `@anthropic-ai/claude-agent-sdk`) + **Electron/React** (UI).
-> See §8.
-> **Last updated:** 2026-05-22
+| Field | Detail |
+|---|---|
+| Purpose | Preserve the design rationale that shaped Atelier. |
+| Primary reader | Engineers checking why the project chose VM containment, HCS, broker boundaries, or the three-door model. |
+| Status | Historical design and decision record. Original last update: 2026-05-22. |
+| Current runtime map | [`runtime-architecture.md`](runtime-architecture.md). |
+| Slice history | [`../status/implementation-status.md`](../status/implementation-status.md). |
+| Live agent path | [`../plans/openhands-adoption.md`](../plans/openhands-adoption.md). |
+| Current stack | Go host broker with VZ/HCS drivers, Python/OpenHands in-guest agent (`packages/partisan`), Electron/React UI. |
+| Reference stack | TypeScript/Node agent (`packages/artisan`) remains as source/reference compatibility. |
+
+Name: Atelier, a workshop where a craftsperson works on their own materials in
+their own space. Earlier working name: `theparser`.
 
 ---
 
@@ -354,7 +358,7 @@ The agent loop's *location* is the one big runtime choice. Both topologies run t
 - **Topology B — agent INSIDE.** Same loop runs as a Node CLI in the guest; its tools act directly
   on the guest filesystem through the SDK's built-in coding tools, and model calls leave through
   the host-enforced egress jail. Today the Anthropic key is still injected into the guest process;
-  a host-side model proxy is tracked in [`vm-hardening.md`](vm-hardening.md).
+  a host-side model proxy is tracked in [`../security/vm-sandbox.md`](../security/vm-sandbox.md).
 
 **Decision: build A first, then migrate to B.** Not because A is throwaway — **the loop is reused** — but to **debug the agent and the hypervisor separately** instead of fighting both unknowns at once. Then merge two known-good halves.
 
@@ -470,7 +474,7 @@ Study Claude Desktop **Desktop Extensions** (`.dxt` / `.mcpb` one-click MCP bund
 
 Historical milestone ladder. The main path is now implemented through S6.1, with live UI E2E,
 service installation, pipe ACLs, and packaging still open. See
-[`implementation-status.md`](implementation-status.md) for details.
+[`../status/implementation-status.md`](../status/implementation-status.md) for details.
 
 - **M0 — Boot someone else's UVM.** Use hcsshim `uvmboot` / LCOW to boot a Linux utility VM and get a guest shell. Confirm Hyper-V + HCS work on the box. Read `internal/uvm`.
 - **M1 — Drive HCS yourself.** Author the VM JSON compute-system doc, point at kernel + ext4 rootfs, `HcsCreateComputeSystem` + `Start` (via our `computecore.dll` bindings). *Your* VM boots.
@@ -521,9 +525,9 @@ service installation, pipe ACLs, and packaging still open. See
 - ~~**Rootfs distro**~~ → **DECIDED: Ubuntu 22.04 (glibc).** Mirrors Cowork; Python wheels just work. Alpine rejected (musl → wheel pain). See §7.
 - ~~**Kernel**~~ → **DECIDED: generic Ubuntu kernel, matched to the Ubuntu userland** (keep kernel ↔ `/lib/modules` coupled). **Do NOT hand-compile.** M0 uses the tooling's **matched LCOW pair** as a throwaway bootstrap only. WSL2 kernel rejected (mismatch with userland). See §7.
 - ~~**initramfs**~~ → **DECIDED: yes — a matching boot initramfs** (the generic Ubuntu kernel ships drivers as modules, so it's required; confirmed by the on-disk `initrd`). Built with `mkinitramfs` against the kernel version; ship `/lib/modules/<ver>` in the rootfs. See §7. **Verified (S0a, 2026-05-20):** unpacked Cowork's `initrd` — it's a textbook `initramfs-tools` boot initramfs (stock `/init`, `scripts/`, `conf/`, `cryptroot/`; ~482 MB once decompressed = modules+firmware), whose only job is to mount `rootfs.vhdx` and pivot. Exactly our S1.3 model.
-- ~~**HCS access strategy** (own bindings vs vendor hcsshim `internal/` vs shell-out to `uvmboot`)~~ → **DECIDED and implemented:** roll our own thin `computecore.dll` bindings + author our own compute-system JSON doc. hcsshim remains the reference for document shape, but its `internal/` packages are not importable and its LCOW path is welded to Microsoft's GCS guest. See `implementation-status.md` S0a → S1.2.
+- ~~**HCS access strategy** (own bindings vs vendor hcsshim `internal/` vs shell-out to `uvmboot`)~~ → **DECIDED and implemented:** roll our own thin `computecore.dll` bindings + author our own compute-system JSON doc. hcsshim remains the reference for document shape, but its `internal/` packages are not importable and its LCOW path is welded to Microsoft's GCS guest. See [`../status/implementation-status.md`](../status/implementation-status.md) S0a → S1.2.
 - ~~**File share:** virtiofs vs Plan9/9p~~ → **RESOLVED (lean Plan9/9p).** Cowork uses **Plan9** (`vm.Plan9ShareInfo`), not virtiofs — matches the Windows virtiofs bug threads. See §8 Hop 3.
-- ~~**Egress design**~~ → **DECIDED and implemented:** no-NIC user-mode network over hvsocket using `containers/gvisor-tap-vsock`, with a broker-owned default-deny hostname allowlist and DNS pinning. See `implementation-status.md` S4.1.
+- ~~**Egress design**~~ → **DECIDED and implemented:** no-NIC user-mode network over hvsocket using `containers/gvisor-tap-vsock`, with a broker-owned default-deny hostname allowlist and DNS pinning. See [`../status/implementation-status.md`](../status/implementation-status.md) S4.1.
 - **Skill registry:** naming + bundle format. (Cowork's analog = **DXT / `.mcpb`** desktop-extension bundles — strong prior art; see §11.)
 - ~~**App rename** away from "theparser."~~ → **DECIDED: Atelier.**
 - **Component library:** **shadcn/ui (Radix)** as an accelerator *vs* roll-your-own on Tailwind (what Cowork does). Lean shadcn for speed; revisit if the look diverges. See §11.
