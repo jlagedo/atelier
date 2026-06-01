@@ -283,7 +283,12 @@ cmd_runner() {
   log "exporting agent tree (/opt/atelier) from the payload image"
   local acid; acid="$(docker create "$agent_tag")"
   rm -rf "$WORK/agent"; mkdir -p "$WORK/agent"
-  docker cp "$acid:/opt/atelier" "$WORK/agent/atelier"   # -> $WORK/agent/atelier/packages/...
+  # Stream the agent tree as ONE gzipped tarball across the host boundary instead of ~14,449 loose
+  # files. On Windows/WSL the host side is NTFS via drvfs, where small-file writes are pathologically
+  # slow (this hop alone was ~8 min); one big-file write here, one big-file read on the pack side. The
+  # `docker cp SRC -` stream roots members at the basename, so the archive carries a top-level
+  # atelier/ dir and untars to /atelier in the imager (matching the old loose-file layout).
+  docker cp "$acid:/opt/atelier" - | gzip > "$WORK/agent.tar.gz"
   docker cp "$acid:/opt/seccomp/seccomp.bpf" "$WORK/agent/seccomp.bpf"  # sandbox filter (F-13)
   docker rm -f "$acid" >/dev/null 2>&1 || true
 
@@ -296,8 +301,10 @@ cmd_runner() {
   # headroom so mke2fs -d always fits. node_modules has thousands of tiny files, so the default
   # inode budget (~1/16KB) under-provisions — set -N from the actual file count + margin or the
   # populate fails with "out of inodes". mke2fs -d needs no mount/loop/privilege.
+  # Untar the agent payload onto the container's ext4 (fast — no drvfs), then stage as before.
   local build='set -eu
 mkdir -p /stage/runner
+tar xzf /agent.tar.gz -C /
 install -D -m 0755 /runner /stage/runner/atelier-runner
 install -D -m 0644 /seccomp.bpf /stage/runner/seccomp.bpf
 cp -a /atelier /stage/atelier
@@ -310,7 +317,7 @@ mke2fs -q -t ext4 -L runner -d /stage -r 1 -N "$ninodes" -m 0 /runner.ext4 "${sz
   docker cp "$WORK/bin/runner"      "$icid:/runner"
   docker cp "$WORK/bin/atelier-landlock" "$icid:/atelier-landlock"
   docker cp "$WORK/agent/seccomp.bpf" "$icid:/seccomp.bpf"
-  docker cp "$WORK/agent/atelier"   "$icid:/atelier"
+  docker cp "$WORK/agent.tar.gz"    "$icid:/agent.tar.gz"   # untarred onto ext4 inside the imager
   if ! docker start -a "$icid"; then
     docker rm -f "$icid" >/dev/null 2>&1 || true
     die "imager failed to build the runner volume"
