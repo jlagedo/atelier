@@ -52,7 +52,7 @@ export interface ManagerOptions {
 
 // The in-guest agent is partisan (Python/OpenHands), launched from its baked venv on the
 // runner volume. artisan (TS) still ships alongside it; reverting is a constants edit +
-// rebuild, not a runtime switch (docs/openhands-adoption.md D4).
+// rebuild, not a runtime switch (docs/plans/openhands-adoption.md D4).
 const GUEST_PY = "/opt/atelier/packages/partisan/.venv/bin/python";
 const GUEST_CWD = "/opt/atelier/packages/partisan";
 const GUEST_AGENT = "cli_guest.py";

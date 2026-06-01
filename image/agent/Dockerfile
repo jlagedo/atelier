@@ -33,7 +33,7 @@ RUN cd /opt/atelier/packages/artisan \
     && npm ci --omit=dev \
     && npm cache clean --force
 
-# partisan (Topology B successor, docs/openhands-adoption.md): build its Python venv here so the
+# partisan (Topology B successor, docs/plans/openhands-adoption.md): build its Python venv here so the
 # native wheels (pillow, tree-sitter, fakeredis) are baked for the target arch — the same
 # guarantee --platform gives artisan's node_modules. uv installs to /usr/local/bin;
 # UV_PYTHON_DOWNLOADS=never + --python /usr/bin/python3 force the venv onto the SYSTEM interpreter
@@ -51,7 +51,7 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
     && UV_PYTHON_DOWNLOADS=never uv sync --frozen --no-dev --python /usr/bin/python3 \
     && uv cache clean
 
-# Compile the agent sandbox's seccomp filter (docs/security.md F-13, closing F-01) from Docker's
+# Compile the agent sandbox's seccomp filter (docs/security/vm-sandbox.md F-13, closing F-01) from Docker's
 # vendored default profile, evaluated as a no-capability process. Runs in this --platform
 # container so the cBPF blob carries the target arch's syscall numbers by construction.
 # image/build.sh exports /opt/seccomp/seccomp.bpf onto the runner volume next to the binary.

@@ -4,7 +4,7 @@
 The profile is Docker's default, vendored from moby/profiles (see SOURCE). We evaluate it
 for a NO-CAPABILITY process, because the agent runs under `bwrap --cap-drop ALL`. That single
 fact is what makes the profile deny unshare()/setns()/mount()/clone3() and restrict clone()
-to non-namespace flags — closing docs/security.md F-01 (and F-13) with no custom rule:
+to non-namespace flags — closing docs/security/vm-sandbox.md F-01 (and F-13) with no custom rule:
 CAP_SYS_ADMIN-gated entries simply don't apply, so they fall through to the default ERRNO,
 while the no-cap clone rule allows thread creation but not CLONE_NEW* namespaces.
 

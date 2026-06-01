@@ -7,7 +7,8 @@ windows-amd64-hyperv/   vmlinuz initrd rootfs.vhd runner.vhd manifest.txt   (mak
 darwin-arm64-vz/        vmlinuz initrd rootfs.raw runner.raw manifest.txt   (make darwin)
 ```
 
-Produced by `image/build.sh` (`make -C image <target>`); see `docs/design.md` §7.
+Produced by `image/build.sh` (`make -C image <target>`); see
+`docs/architecture/design.md` §7.
 
 `runner.{raw,vhd}` is the ro guest payload volume — it carries BOTH the runner daemon
 (`/opt/runner/atelier-runner`) and the in-guest agent (`/opt/atelier`, code + node_modules), neither

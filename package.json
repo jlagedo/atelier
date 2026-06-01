@@ -2,7 +2,7 @@
   "name": "atelier",
   "version": "0.0.0",
   "private": true,
-  "description": "Cowork-style desktop AI workspace: Go host service + TypeScript agent loop + Electron/React UI. See docs/design.md.",
+  "description": "Cowork-style desktop AI workspace: Go host service + Python/OpenHands guest agent + Electron/React UI. See docs/README.md.",
   "license": "UNLICENSED",
   "engines": {
     "node": ">=22.12.0"

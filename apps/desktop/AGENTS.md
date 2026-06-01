@@ -3,8 +3,8 @@
 The **Atelier** desktop app: the chat-forward Electron/React shell that drives a contained AI agent.
 This file covers the Electron Forge app only — its build, process model, IPC contract, and
 conventions. For the wider stack (Go broker, in-guest agent loop, VM image, protocol codegen) and
-the design rationale, see the repo-root [`../../AGENTS.md`](../../AGENTS.md) and
-[`../../docs/design.md`](../../docs/design.md).
+the design rationale, see the repo-root [`../../CLAUDE.md`](../../CLAUDE.md) and
+[`../../docs/architecture/design.md`](../../docs/architecture/design.md).
 
 ## Commands
 
@@ -29,7 +29,7 @@ Electron Forge 7 + `@electron-forge/plugin-vite`, Vite 8 (Rolldown), React 19, T
 Tailwind v4, shadcn/ui (new-york; Radix + cva + tailwind-merge), `react-markdown`/`remark-gfm`,
 Phosphor icons, IBM Plex fonts, oxlint/oxfmt, vitest + Testing Library (jsdom). These are
 **latest-stable**, ahead of design §11's Cowork pins — when you need current API details for any of
-them, reach for the **Context7 MCP** rather than memory (see root AGENTS.md "Library docs").
+them, reach for the **Context7 MCP** rather than memory (see root `CLAUDE.md` "Library docs").
 
 ## Build wiring
 
@@ -74,7 +74,7 @@ src/renderer/    sandboxed React (no Node)
 The **Session Manager** (`sessions/manager.ts`) is the heart of WORK mode: brings up the shared VM
 once, then per session mounts the folder, launches a persistent in-guest loop (`cli-guest --serve`),
 feeds turns, streams NDJSON events to the renderer, and hibernates idle/LRU sessions to bound guest
-memory. Detailed design lives in that file's header and root AGENTS.md.
+memory. Detailed design lives in that file's header and root `CLAUDE.md`.
 
 ## Security model (don't weaken without reason — design §2)
 

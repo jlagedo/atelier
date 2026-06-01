@@ -135,7 +135,7 @@ export const chatSessions: ChatSession[] = [
     updatedAt: "1h",
     preview: "Describe the VM and broker boundaries",
     status: "idle",
-    notes: ["Useful for docs/design.md follow-up"],
+    notes: ["Useful for docs/architecture/design.md follow-up"],
     artifacts: ["Architecture summary"],
     items: [
       {

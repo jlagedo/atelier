@@ -9,7 +9,7 @@ const config: ForgeConfig = {
     name: "Atelier",
   },
   // maker-zip is the cross-platform smoke target. The real Windows target is maker-msix
-  // (see docs/design.md §11) — added when packaging moves onto Windows.
+  // (see docs/architecture/design.md §11) — added when packaging moves onto Windows.
   makers: [new MakerZIP({})],
   plugins: [
     new VitePlugin({

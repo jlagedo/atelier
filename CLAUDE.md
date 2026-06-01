@@ -1,12 +1,12 @@
 # CLAUDE.md
 
 Contributor + agent guide for **Atelier** — a Cowork-style desktop AI workspace: a Go host
-service drives a Linux utility VM (VZ on macOS, HCS on Windows), a TypeScript agent loop runs
+service drives a Linux utility VM (VZ on macOS, HCS on Windows), a Python/OpenHands agent loop runs
 the AI *inside* that VM (Topology B), and an Electron/React app is the UI. The point is letting an AI agent work
 on local files safely by **containment** (the VM is the cage), not per-click consent. Full design,
-decisions, and glossary: [`docs/design.md`](docs/design.md); slice-by-slice implementation status:
-[`docs/implementation-status.md`](docs/implementation-status.md); the end-to-end run guide is the root
-[`README`](README).
+decisions, and glossary: [`docs/architecture/design.md`](docs/architecture/design.md); slice-by-slice
+implementation status: [`docs/status/implementation-status.md`](docs/status/implementation-status.md);
+the end-to-end run guide is the root [`README.md`](README.md).
 
 This file is the source of truth for how to build, run, test, and what conventions to follow.
 
@@ -17,8 +17,9 @@ This repo is small (~210 files) but its docs are large. Keep the main context le
   subagent (or a general-purpose Agent) instead of grepping and reading inline. Have it return
   conclusions + `file:line`, not file dumps — exploration then stays out of the main context.
 - Do **not** reflexively open the big design docs. The repo-layout table and the "Where things
-  live" map below, plus the relevant source file, are usually enough. Only read `docs/design.md`,
-  `docs/implementation-status.md`, `docs/claude-cowork-internals.md`, and the other multi-hundred-line
+  live" map below, plus the relevant source file, are usually enough. Only read
+  `docs/architecture/design.md`, `docs/status/implementation-status.md`,
+  `docs/research/claude-cowork-internals.md`, and the other multi-hundred-line
   docs when a task genuinely needs that depth — and read the relevant section, not the whole file.
 
 ## Repo layout
@@ -28,7 +29,7 @@ This repo is small (~210 files) but its docs are large. Keep the main context le
 | `apps/desktop` | Electron/React desktop UI (the shell) | WORK mode wired to the broker; chat mode mock |
 | `services` | One Go module — host broker (`atelierd`), in-VM daemon (`runner`), dev CLI (`atelierctl`) | full substrate (boot/exec/files/net) |
 | `packages/artisan` | TS Claude-Agent-SDK loop — host (`cli.ts`) + in-guest (`cli-guest.ts`) | both topologies; in-guest is the **TS reference** (partisan is now launched) |
-| `packages/partisan` | Python/OpenHands successor to artisan's in-guest loop (`cli_guest.py`) | Phase 1–3 done — packaged in the image + **live launch site** (`e2e:host` green); artisan coexists; Phase 4 (conformance + Node removal) pending — `docs/openhands-adoption.md` |
+| `packages/partisan` | Python/OpenHands successor to artisan's in-guest loop (`cli_guest.py`) | Phase 1–3 done — packaged in the image + **live launch site** (`e2e:host` green); artisan coexists; Phase 4 (conformance + Node removal) pending — `docs/plans/openhands-adoption.md` |
 | `packages/provider` | Provider seam — resolves model + env for the loop | Anthropic API now, Eliza later |
 | `packages/protocol` | Generated Hop-2 protocol bindings (schema is canonical) | generated, gitignored |
 | `image` | VM image build — kernel + initrd + rootfs bundle; bakes in the agent | build pipeline |
@@ -223,7 +224,7 @@ OpenHands SDK) is now the **launched** in-guest agent (Phase 3 flipped the Sessi
 `atelierctl agent` launch site to it); `artisan` (TS, `@anthropic-ai/claude-agent-sdk`) still ships on
 the runner volume and stays the reference implementation (revert = edit the launch constants + rebuild).
 The host (Session Manager, `atelierctl`) is identical for both. Phase 4 (conformance + Node removal) is
-the remaining gate. Full plan + decisions + cutover gate: `docs/openhands-adoption.md`.
+the remaining gate. Full plan + decisions + cutover gate: `docs/plans/openhands-adoption.md`.
 
 ### artisan — TS, the reference path (still shipped; partisan is launched)
 
@@ -272,7 +273,7 @@ partisan into the VM image (target-arch venv on the runner volume) and **flipped
 (Session Manager + `atelierctl agent`) from artisan to partisan — verified in-cage by `npm run e2e:host`
 (43/43; partisan reaches the model through the egress jail, one-shot + serve). artisan still ships on the
 volume (coexist; revert = edit launch constants + rebuild). Phase 4 (conformance suite + dropping
-Node/artisan) remains the gate before artisan becomes pure reference source (`docs/openhands-adoption.md` §5).
+Node/artisan) remains the gate before artisan becomes pure reference source (`docs/plans/openhands-adoption.md` §5).
 
 Both agents ship on the runner volume for the target arch (`linux/amd64` on Windows, `linux/arm64` on
 macOS) — `image/build.sh runner` builds them via `image/agent/Dockerfile` and packs them at
@@ -334,7 +335,7 @@ redirects them into `build/<config>/image/<target>/`.)
 
 ## Versions
 
-This scaffold deliberately uses **latest stable** libraries, diverging from `docs/design.md`
+This scaffold deliberately uses **latest stable** libraries, diverging from `docs/architecture/design.md`
 §11's Cowork pins (Tailwind 3.4 → 4, React 18 → 19, Electron 41 → 42, etc.). Divergences are
 documented inline where they matter.
 

@@ -3,7 +3,7 @@ import { _electron as electron } from "playwright";
 import { join } from "node:path";
 
 // Captures both themes (dark "Aegean Dusk" + light "Studio") and a Work-mode view
-// for visual review of the color system — see docs/color-system.md.
+// for visual review of the color system — see docs/ui/color-system.md.
 const appRoot = join(__dirname, "..");
 const shots = join(appRoot, "e2e/screenshots");
 

@@ -4,19 +4,20 @@
   <p><strong>A quiet workshop for your files.</strong></p>
   <p>Ask in plain language. Atelier reads and edits files in your workspace<br>and runs code inside a contained sandbox — every change gated and audited.</p>
   <br/>
-  <img src="docs/screenshot.png" alt="Atelier desktop app" width="860" />
+  <img src="docs/ui/screenshot.png" alt="Atelier desktop app" width="860" />
 </div>
 
 ---
 
 A desktop AI workspace inspired by [Anthropic's Claude Cowork](https://www.anthropic.com/research/claude-cowork), with its own twists: **cross-OS** (Apple Virtualization.framework on macOS, HCS on Windows), a persistent multi-session model (one VM, N concurrent agent loops), and hibernate/resume to bound memory.
 
-A **Go** host service boots a Linux utility VM, a **TypeScript** agent loop runs the agent *inside* that VM, and an **Electron/React** app is the UI. The agent works on local files safely by **containment** — the VM is the cage, not per-click consent.
+A **Go** host service boots a Linux utility VM, a **Python/OpenHands** agent loop runs the agent *inside* that VM, and an **Electron/React** app is the UI. The older TypeScript agent remains as a reference path. The agent works on local files safely by **containment** — the VM is the cage, not per-click consent.
 
 ## Docs
 
-- [`docs/design.md`](docs/design.md) — full design, decisions, glossary
-- [`docs/implementation-status.md`](docs/implementation-status.md) — milestone ladder + current status
+- [`docs/README.md`](docs/README.md) — docs map, including current references, plans, and research
+- [`docs/architecture/runtime-architecture.md`](docs/architecture/runtime-architecture.md) — current process/protocol map
+- [`docs/status/implementation-status.md`](docs/status/implementation-status.md) — milestone ladder + historical implementation log
 - [`CLAUDE.md`](CLAUDE.md) — build/run/test commands, conventions, repo layout
 
 ## Architecture
@@ -42,7 +43,7 @@ Linux utility VM — one cage, N sessions: each /sessions/<id> mount + its own a
 | VM image | **Docker** (OrbStack on macOS; WSL2 on Windows), `mke2fs`, `qemu-img` |
 | Host broker + guest daemon | **Go 1.25+** |
 | Desktop app, agent, codegen | **Node ≥ 22.12** |
-| Model calls | **`AI_API_KEY`** in the environment that launches the app |
+| Model calls | **`ANTHROPIC_API_KEY`** in the environment that launches the app |
 
 ### Build everything (one command)
 
@@ -88,7 +89,7 @@ node scripts/build-all.mjs --only=desktop  # packaged desktop app
 ```sh
 # macOS (Apple Silicon) — broker needs no root (codesigned with the VZ entitlement)
 build/debug/atelierd                                                       # broker -> /tmp/atelierd.sock
-ATELIER_BUNDLE_DIR=build/debug/image/darwin-arm64-vz npm run dev       # desktop (AI_API_KEY set)
+ATELIER_BUNDLE_DIR=build/debug/image/darwin-arm64-vz npm run dev       # desktop (ANTHROPIC_API_KEY set)
 
 # Windows — broker must run elevated
 build\debug\atelierd.exe
@@ -121,4 +122,4 @@ npm run e2e:host -- --skip-build       # reuse build/<config>/ as-is
 the in-guest agent loop through `atelierctl` — both share models (legacy `/workspace` + Files door and
 concurrent `/sessions/<tag>`), the egress jail, and host↔guest file bridging both ways. It needs the
 same prerequisites as a real run (VZ + codesigned broker + image bundle); the agent check also needs
-`AI_API_KEY` and live egress to the model API.
+`ANTHROPIC_API_KEY` and live egress to the model API.
