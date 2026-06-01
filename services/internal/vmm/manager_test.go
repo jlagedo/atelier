@@ -89,6 +89,61 @@ func TestManagerStopClosesEgressAndRemovesVM(t *testing.T) {
 	}
 }
 
+func TestManagerStopRetainsInstanceWhenDriverStopFails(t *testing.T) {
+	boom := errors.New("stuck stopping")
+	closer := &fakeCloser{}
+	d := &fakeDriver{stopErr: boom, egressCloser: closer}
+	m := testManager(d)
+	if err := m.Create(context.Background(), VMConfig{ID: "vm0"}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := m.Start(context.Background(), "vm0"); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	if err := m.Stop(context.Background(), "vm0"); !errors.Is(err, boom) {
+		t.Fatalf("Stop error = %v, want %v", err, boom)
+	}
+	// A failed driver Stop must not orphan the instance: keep the handle (and its
+	// egress) so it can be retried or reaped later, not silently leaked.
+	if got := m.Count(); got != 1 {
+		t.Fatalf("Count after failed stop = %d, want 1 (instance retained)", got)
+	}
+	if closer.closed {
+		t.Fatal("egress closed on a failed stop; want retained")
+	}
+}
+
+func TestManagerUnexpectedExitReapsOnceAndToleratesRepeat(t *testing.T) {
+	closer := &fakeCloser{}
+	d := &fakeDriver{egressCloser: closer}
+	m := testManager(d)
+	if err := m.Create(context.Background(), VMConfig{ID: "vm0"}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := m.Start(context.Background(), "vm0"); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if d.onUnexpectedExit == nil {
+		t.Fatal("Manager did not register the unexpected-exit hook on the driver")
+	}
+
+	// The driver watcher reaped a crashed VM and is calling the host-side hook.
+	d.onUnexpectedExit("vm0")
+	if got := m.Count(); got != 0 {
+		t.Fatalf("Count after unexpected exit = %d, want 0 (reaped)", got)
+	}
+	if closer.count != 1 {
+		t.Fatalf("egress close count = %d, want 1", closer.count)
+	}
+
+	// Idempotent: a second fire (e.g. racing a Stop) must not panic or double-close.
+	d.onUnexpectedExit("vm0")
+	if closer.count != 1 {
+		t.Fatalf("egress close count after repeat = %d, want 1 (reap-once)", closer.count)
+	}
+}
+
 func TestManagerAttachDetachWorkspaceForwardsShareShape(t *testing.T) {
 	d := &fakeDriver{}
 	m := testManager(d)
@@ -157,7 +212,14 @@ type fakeDriver struct {
 	attached  []WorkspaceShare
 	detached  []WorkspaceShare
 	dialPorts []uint32
+
+	// onUnexpectedExit is the hook the Manager registers via the optional
+	// SetOnUnexpectedExit capability; tests fire it to simulate the driver watcher
+	// reaping a crashed VM.
+	onUnexpectedExit func(string)
 }
+
+func (d *fakeDriver) SetOnUnexpectedExit(fn func(string)) { d.onUnexpectedExit = fn }
 
 func (d *fakeDriver) Create(_ context.Context, cfg VMConfig) error {
 	d.calls = append(d.calls, "create:"+cfg.ID)
@@ -214,9 +276,11 @@ func (d *fakeDriver) StartEgress(_ context.Context, id string, _ *netjail.Allowl
 
 type fakeCloser struct {
 	closed bool
+	count  int
 }
 
 func (c *fakeCloser) Close() error {
 	c.closed = true
+	c.count++
 	return nil
 }

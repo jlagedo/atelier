@@ -27,6 +27,11 @@ const (
 	defaultCPUCount uint   = 2
 	startTimeout           = 30 * time.Second
 	stopTimeout            = 15 * time.Second
+	// watchInterval is how often the per-VM crash watcher polls vm.State() for an
+	// unexpected exit. We poll State() rather than reading StateChangedNotify()
+	// because the binding's notify channel is single-consumer and waitForState
+	// already drains it during Start/Stop — a second reader would steal transitions.
+	watchInterval = 2 * time.Second
 	// DialGuest retry budget. Start only waits for the hypervisor "running" state,
 	// not guest userspace, so the first dial after startVM can outrun runner binding
 	// its vsock listener. We retry on ECONNRESET ("guest not listening yet") across
@@ -58,6 +63,11 @@ type darwinDriver struct {
 
 	mu  sync.Mutex
 	vms map[string]*darwinInstance
+	// onUnexpectedExit, if set (via SetOnUnexpectedExit), is invoked by the per-VM
+	// watcher after it reaps a VM that reached a terminal state on its own (crash,
+	// guest OOM, framework error). The Manager registers it to tear down its own
+	// per-VM resources (egress, time-sync). Nil = no host-side hook (e.g. tests).
+	onUnexpectedExit func(id string)
 }
 
 type darwinInstance struct {
@@ -77,6 +87,23 @@ type darwinInstance struct {
 	// exposes no readable getter, so the driver tracks the set here and rebuilds the whole
 	// share on every attach/detach. Guarded by darwinDriver.mu.
 	shares map[string]*vz.SharedDirectory
+	// intentional marks that Stop() is driving this VM to a terminal state, so the
+	// watcher does not mislabel an operator-initiated stop as a crash. Guarded by
+	// darwinDriver.mu.
+	intentional bool
+	// onExit is the host-side crash hook stamped from darwinDriver.onUnexpectedExit at
+	// Start; the watcher calls it after reaping a VM that died on its own. Nil = no hook.
+	onExit func(id string)
+}
+
+// SetOnUnexpectedExit registers a hook invoked when the per-VM watcher reaps a VM that
+// reached a terminal state without an operator Stop(). It is an optional capability the
+// Manager discovers by type assertion, so the cross-platform Driver interface stays
+// unchanged (the Windows/stub drivers simply do not implement it). Call before Start.
+func (d *darwinDriver) SetOnUnexpectedExit(fn func(id string)) {
+	d.mu.Lock()
+	d.onUnexpectedExit = fn
+	d.mu.Unlock()
 }
 
 // NewDriver returns the macOS Virtualization.framework VMM driver.
@@ -271,46 +298,104 @@ func (d *darwinDriver) Start(ctx context.Context, id string) error {
 	if devs := inst.vm.DirectorySharingDevices(); len(devs) > 0 {
 		inst.fsdev = devs[0]
 	}
+	inst.onExit = d.onUnexpectedExit
 	d.mu.Unlock()
 	d.log.Info("vm running", "vm", id)
+	// Watch for an unexpected guest exit so a crashed cage is reaped, not left
+	// phantom-alive in the maps. Detached: it outlives Start and runs until the VM
+	// is reaped (here or by Stop).
+	go d.watch(id, inst)
 	return nil
 }
 
-// Stop asks the guest to stop, then forces a stop if it does not comply within
-// the timeout (our minimal guest init has no ACPI shutdown handler), and tears
-// down the console. Always drops the instance so the id can be recreated.
+// watch polls the VM's state and reaps it if it reaches a terminal state without an
+// operator Stop() (kernel panic, guest OOM, framework error). Polling vm.State() avoids
+// stealing transitions from waitForState, which is the sole consumer of the binding's
+// single-consumer StateChangedNotify channel.
+func (d *darwinDriver) watch(id string, inst *darwinInstance) {
+	ticker := time.NewTicker(watchInterval)
+	defer ticker.Stop()
+	for range ticker.C {
+		// Already reaped (by Stop or a prior tick) — nothing left to watch.
+		if d.instance(id) == nil {
+			return
+		}
+		s := inst.vm.State()
+		if s != vz.VirtualMachineStateStopped && s != vz.VirtualMachineStateError {
+			continue
+		}
+		d.mu.Lock()
+		intentional := inst.intentional
+		onExit := inst.onExit
+		d.mu.Unlock()
+		if intentional {
+			return // our own Stop() is driving this teardown; not a crash
+		}
+		d.log.Error("cage exited unexpectedly — reaping", "vm", id, "state", s)
+		d.reap(id)
+		if onExit != nil {
+			onExit(id) // host-side teardown (egress, time-sync), outside d.mu
+		}
+		return
+	}
+}
+
+// Stop hard-stops the VM (our minimal guest init installs no ACPI handler, so a
+// graceful ACPI RequestStop is dead weight) and, once it confirms a terminal state,
+// reaps it — drops the instance and tears down the consoles — so the id can be
+// recreated. A force-stop that leaves the VM non-terminal retains the handle and
+// returns the error rather than orphaning a still-live VM.
 func (d *darwinDriver) Stop(ctx context.Context, id string) error {
 	inst := d.instance(id)
 	if inst == nil {
 		return fmt.Errorf("vm: %q not found", id)
 	}
+	// Mark intentional so the watcher does not race in and log this teardown as a crash.
+	d.mu.Lock()
+	inst.intentional = true
+	d.mu.Unlock()
 
 	err := d.shutdown(ctx, inst.vm)
+	if s := inst.vm.State(); s == vz.VirtualMachineStateStopped || s == vz.VirtualMachineStateError {
+		d.reap(id)
+		d.log.Info("vm stopped", "vm", id, "err", err)
+	} else {
+		// Force-stop failed and the VM is still Running/Stopping — keep the only
+		// handle to it so it can be retried/inspected (and the watcher can still
+		// reap it if it later dies) instead of leaking a VM a same-id createVM
+		// would collide with.
+		d.log.Warn("vm did not stop; retaining handle", "vm", id, "state", s, "err", err)
+	}
+	return err
+}
+
+// reap removes the instance from the driver map and tears down its consoles exactly
+// once. Map presence under d.mu is the single-winner guard, so Stop and the watcher
+// can both call reap and only the first one does the teardown.
+func (d *darwinDriver) reap(id string) {
+	d.mu.Lock()
+	inst := d.vms[id]
+	if inst == nil {
+		d.mu.Unlock()
+		return
+	}
+	delete(d.vms, id)
+	d.mu.Unlock()
 	if inst.console != nil {
 		_ = inst.console.Close()
 	}
 	if inst.debugConsole != nil {
 		_ = inst.debugConsole.Close()
 	}
-	d.mu.Lock()
-	delete(d.vms, id)
-	d.mu.Unlock()
-	d.log.Info("vm stopped", "vm", id, "err", err)
-	return err
 }
 
-// shutdown drives a VM to the stopped state: a graceful RequestStop first, then a
-// forceful Stop if it has not stopped in time.
+// shutdown drives a VM to the stopped state. Terminal states (Stopped/Error) are a
+// no-op. Otherwise it hard-stops: the guest init installs no ACPI/poweroff handler,
+// so the old graceful RequestStop only ever timed out — we skip straight to Stop().
 func (d *darwinDriver) shutdown(ctx context.Context, vm *vz.VirtualMachine) error {
-	if vm.State() == vz.VirtualMachineStateStopped {
+	switch vm.State() {
+	case vz.VirtualMachineStateStopped, vz.VirtualMachineStateError:
 		return nil
-	}
-	if vm.CanRequestStop() {
-		if _, err := vm.RequestStop(); err == nil {
-			if waitForState(ctx, vm, vz.VirtualMachineStateStopped, stopTimeout/2) == nil {
-				return nil
-			}
-		}
 	}
 	if vm.CanStop() {
 		if err := vm.Stop(); err != nil {

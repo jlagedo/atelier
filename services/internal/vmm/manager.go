@@ -35,9 +35,10 @@ type instance struct {
 	// shares tracks the VM's live workspace shares by tag -> port. Guarded by
 	// Manager.mu.
 	shares map[string]uint32
-	// stopSync cancels the per-VM time-resync goroutine (Start → Stop). Nil until
-	// the VM is started. Guarded by Manager.mu.
-	stopSync context.CancelFunc
+	// cancel stops every per-VM background goroutine (time-resync). Set in Start,
+	// called by reap (on Stop or an unexpected guest exit). Nil until the VM is
+	// started. Guarded by Manager.mu.
+	cancel context.CancelFunc
 }
 
 // NewManager returns a Manager backed by the platform's default driver.
@@ -54,7 +55,14 @@ func NewManagerWithDriver(log *slog.Logger, egress *netjail.Allowlist, drv Drive
 	if drv == nil {
 		drv = NewDriver(log)
 	}
-	return &Manager{drv: drv, log: log, egress: egress, vms: make(map[string]*instance)}
+	m := &Manager{drv: drv, log: log, egress: egress, vms: make(map[string]*instance)}
+	// Arm the driver's unexpected-exit hook if it supports one (darwin does). This is
+	// an optional capability discovered by type assertion, so the cross-platform Driver
+	// interface stays unchanged and the Windows/stub drivers need no change.
+	if dn, ok := drv.(interface{ SetOnUnexpectedExit(func(string)) }); ok {
+		dn.SetOnUnexpectedExit(m.onUnexpectedExit)
+	}
+	return m
 }
 
 // Create realizes the VM through the platform driver, then records it as live.
@@ -103,32 +111,62 @@ func (m *Manager) Start(ctx context.Context, id string) error {
 	// and live until Stop cancels it.
 	syncCtx, cancel := context.WithCancel(context.Background())
 	m.mu.Lock()
-	inst.stopSync = cancel
+	inst.cancel = cancel
 	m.mu.Unlock()
 	go m.syncTimeLoop(syncCtx, id)
 	m.log.Info("vm started", "vm", id)
 	return nil
 }
 
-// Stop terminates a VM and tears down tracked resources.
+// Stop terminates a VM and, once the driver confirms it is down, tears down the
+// tracked host resources. A driver Stop that fails (VM not actually stopped) retains
+// the instance — the driver's crash watcher will reap it if it later dies — rather
+// than dropping the only handle to a still-live VM.
 func (m *Manager) Stop(ctx context.Context, id string) error {
-	inst, ok := m.get(id)
-	if !ok {
+	if _, ok := m.get(id); !ok {
 		return fmt.Errorf("vm: %q not found", id)
 	}
 	err := m.drv.Stop(ctx, id)
-	if inst.egress != nil {
-		_ = inst.egress.Close()
+	if err != nil {
+		m.log.Warn("driver stop failed; vm retained", "vm", id, "err", err)
+		return err
 	}
+	m.reap(id)
+	m.log.Info("vm stopped", "vm", id)
+	return nil
+}
+
+// reap tears down a VM's host-side resources (egress link, per-VM goroutines) and drops
+// it from the live set, exactly once. Map presence under m.mu is the single-winner
+// guard, so Stop and onUnexpectedExit can both call reap and only the first one runs the
+// teardown — no double Close or double cancel.
+func (m *Manager) reap(id string) {
 	m.mu.Lock()
-	if inst.stopSync != nil {
-		inst.stopSync()
-		inst.stopSync = nil
+	inst, ok := m.vms[id]
+	if !ok {
+		m.mu.Unlock()
+		return
 	}
 	delete(m.vms, id)
+	cancel := inst.cancel
+	egress := inst.egress
+	inst.cancel = nil
+	inst.egress = nil
 	m.mu.Unlock()
-	m.log.Info("vm stopped", "vm", id, "err", err)
-	return err
+
+	if cancel != nil {
+		cancel()
+	}
+	if egress != nil {
+		_ = egress.Close()
+	}
+}
+
+// onUnexpectedExit is the driver's crash hook: the driver has already reaped its own
+// side (instance + consoles) and logged the unexpected exit, so the Manager only has to
+// release its own per-VM resources and stop counting the dead VM.
+func (m *Manager) onUnexpectedExit(id string) {
+	m.reap(id)
 }
 
 // DialGuest opens a connection to runner's control-plane RPC port.
