@@ -18,6 +18,7 @@ agent.
 | Check implementation history | [`status/implementation-status.md`](status/implementation-status.md) |
 | Continue the macOS port | [`plans/macos-port-execution.md`](plans/macos-port-execution.md), then [`plans/macos-port-plan.md`](plans/macos-port-plan.md) |
 | Continue the OpenHands/partisan cutover | [`plans/openhands-adoption.md`](plans/openhands-adoption.md) |
+| Build Windows virtio-fs sharing for an EL10 guest (HDV) | [`plans/windows-virtiofs-hdv.md`](plans/windows-virtiofs-hdv.md), with [`research/rocky-el10-migration.md`](research/rocky-el10-migration.md) |
 | Evaluate package cache overlays | [`plans/package-cache-overlay.md`](plans/package-cache-overlay.md) |
 | Change desktop color tokens | [`ui/color-system.md`](ui/color-system.md); preview in [`ui/color-mock.html`](ui/color-mock.html) |
 | Review docs staleness and cleanup notes | [`DOC_AUDIT.md`](DOC_AUDIT.md) |
@@ -28,7 +29,7 @@ agent.
 |---|---|
 | Current reference | `architecture/runtime-architecture.md`, `security/vm-sandbox.md`, `security/ipc-security.md`, `ui/color-system.md` |
 | Active tracker | `plans/macos-port-execution.md`, `plans/openhands-adoption.md` |
-| Proposal | `plans/package-cache-overlay.md` |
+| Proposal | `plans/package-cache-overlay.md`, `plans/windows-virtiofs-hdv.md` |
 | Historical log | `architecture/design.md`, `status/implementation-status.md`, `plans/macos-port-plan.md` |
 | Research snapshot | `research/claude-cowork-internals.md`, `research/rocky-el10-migration.md`, `security/sandbox-escape-benchmark-2026.md` |
 | Raw evidence | `security/audits/2026-05-24-vz-guest-assessment.md` |
