@@ -388,11 +388,36 @@ Remaining, in priority order:
    `IVmExternalRestrictedFlexIOVDevice` RTTI symbol in `vmdevicehost.dll`, companion §1c) — i.e.
    WSL's model — not our **in-process** `HdvInitializeDeviceHost` device host. So the two paths we
    proved separately (in-process attach works in isolation; FlexibleIov gives the bus + routes by
-   GUID) do **not** simply compose. **The fork for next time:** (a) find an *in-process* HostingModel
-   value or a non-FlexibleIov in-process VPCI declaration that pairs with `HdvInitializeDeviceHost`;
-   or (b) adopt WSL's exact model — a separate `ExternalRestricted` emulator process registered with
-   HCS — which would revisit the in-process packaging decision (§6.2). This needs research/decision,
-   not a quick tweak. Tracked as task #16.
+   GUID) do **not** simply compose.
+
+   **A-vs-B experiment — out-of-process alone is NOT the missing piece (2026-06-02, third attach
+   spike, `hcs-testvm/tests/attach_oop.rs` + `src/bin/attach_child.rs`).** To split the fork we moved
+   the emulator into a **separate process the test spawns and owns**: the parent creates the VM (with
+   the slot) but opens *no* device host; a child binary opens its own `HCS_SYSTEM` via
+   `HcsOpenComputeSystem` and runs `HdvInitializeDeviceHost` + `HdvCreateDeviceInstance` there, then
+   signals ready so the parent starts only after the device exists. Result: the child's device host
+   registers and HDV **invokes our `Initialize` in the child** (so cross-process registration partly
+   works) — yet `HcsStartComputeSystem` fails **byte-for-byte identically** to in-process
+   (`0x8000FFFF`, `FinishReservingResources`, emulator `A7E1…0001` **`'Unknown'`**). **The failure is
+   invariant to the process boundary.** So the variable was never "who spawns the process" — atelierd
+   spawning a helper does *not* help. The missing piece is the **emulator registration/identity
+   contract**: HCS's FlexibleIov VID resolves the `EmulatorId` to an emulator it considers `'Unknown'`
+   because an ad-hoc `HdvInitializeDeviceHost` host — in *any* process — is not a registered
+   `ExternalRestricted` emulator. This **rules out fork option (a)** as a mere process/packaging tweak
+   and points squarely at **(b): HCS must own/recognise the emulator**, launched or registered through
+   the channel the `EmulatorId` names (how `wslservice`/`wsldevicehost` actually wire up — the next
+   forensic target). Tracked as task #16. (§6.2 in-process packaging decision is now likely forced
+   out-of-process — which is *better* for containment: the guest-memory-touching code leaves the
+   privileged broker.)
+
+   **RESOLVED mechanism (2026-06-02, WSL OSS source — Appendix C).** `microsoft/WSL` is open; its
+   host side spells out the real protocol. The `EmulatorId` is **not** the COM CLSID and there is **no**
+   static registry mapping. The slot is **hot-added** (`HcsModifyComputeSystem`) *after* the device host
+   is registered with the partition by **`HdvProxyDeviceHost(HCS_SYSTEM, IVmDeviceHost-IUnknown, pid,
+   &ipcSection)`** — the call our spike never made (which is why the VID saw `'Unknown'`). The COM
+   surrogate/CLSID is WSL's sandboxing, not a requirement. Concrete next build: bind
+   `HcsModifyComputeSystem` + `HdvProxyDeviceHost` + `HdvInitializeDeviceHostForProxy`, implement an
+   `IVmDeviceHost`, host it in-process first. See Appendix C for the full step-by-step + GUIDs.
 4. **Windows directory jail.** Confirm the `RESOLVE_BENEATH`-equivalent (reparse/junction-safe path
    confinement) for the FUSE server.
 
@@ -495,3 +520,73 @@ The closed bridge is therefore just two internal crates (sizes from the max pani
    not a duplicate of existing open code.
 
 The raw strings dump is archived under the session tool-results directory.
+
+## 12. Appendix C — WSL OSS source: the FlexibleIov / HDV-proxy host protocol (2026-06-02)
+
+`microsoft/WSL` is **open source** (`github.com/microsoft/WSL`, cloned to `E:\dev\WSL`). It contains the
+**host/orchestration** side (what `wslservice` does) in clear C++ — though **not** the device-host
+emulator itself (the `HdvInitializeDeviceHostForProxy` + `HdvCreateDeviceInstance` + virtiofs caller is
+still the closed `wsldevicehost.dll` = OpenVMM `oss\` + the closed `hyper-v\hdv\` bridge of Appendix B;
+the OSS grep finds those symbols only in `.def` proxy-stubs). This is the **authoritative** answer to
+"how does the `EmulatorId` resolve" and it **corrects** the binary-only guess that "EmulatorId == the
+COM CLSID."
+
+**Two distinct GUIDs, two roles** (`WslCoreVm.cpp:2200` `AddGuestDevice(VIRTIO_FS_DEVICE_ID, Admin ?
+VIRTIO_FS_ADMIN_CLASS_ID : VIRTIO_FS_CLASS_ID, …)`):
+- **`EmulatorId`** written into the `FlexibleIov` doc = a device-**type** GUID = the HDV `DeviceClassId`.
+  Virtio-fs: `VIRTIO_FS_DEVICE_ID = {872270E1-A899-4AF6-B454-7193634435AD}` (`GuestDeviceManager.h:14`).
+  (`FLEXIO_DEVICE_ID = {a8679153-843f-467f-ad7e-f429328f7568}` is the VID's own category id — and is
+  exactly the `"DeviceId"` in our spike's failure JSON.)
+- **`ImplementationClsid`** = the device host's **COM class**, `CoCreateInstance`d by the host with
+  `CLSCTX_LOCAL_SERVER` (`GuestDeviceManager.cpp:54`) so the registered **AppID `DllSurrogate`** runs it
+  out-of-process in `dllhost.exe`. Virtio-fs: `{60285AE6-…}` (`WslDeviceHost_VirtioFs`) / `{7e6ad219-…}`
+  (`…_Admin`). **This is WSL's sandboxing choice, not part of the HCS contract.**
+
+So the `EmulatorId`→emulator link is **not** a static registry mapping. It is established at **runtime**
+by a proxy protocol. The host side (`wslservice`; `DeviceHostProxy.cpp`, `GuestDeviceManager.cpp`) does:
+
+1. Create the VM — **`FlexibleIov` is *not* in the initial document** (added later, hot, by modify).
+2. Get an `IPlan9FileSystem` to the device host (WSL: `CoCreateInstance(ImplementationClsid,
+   CLSCTX_LOCAL_SERVER)` → dllhost surrogate; **we could host it in-process instead**).
+3. `server->AddSharePath(name, hostPath, flags)` — configure the share (host folder).
+4. `server->CreateVirtioDevice(vmId, deviceHostSupport, tag, &instanceId)` — the **device host** then
+   (closed side) calls `HdvInitializeDeviceHostForProxy` + `HdvCreateDeviceInstance(DeviceClassId =
+   EmulatorId, DeviceInstanceId = instanceId, vtable)`, and calls back
+   `deviceHostSupport->RegisterDeviceHost(itsIVmDeviceHost, GetCurrentProcessId(), &ipcSection)`.
+5. Host `RegisterDeviceHost` (`DeviceHostProxy.cpp:147`) dynamically loads **`HdvProxyDeviceHost`** from
+   `vmdevicehost.dll` and calls `HdvProxyDeviceHost(HCS_SYSTEM, IVmDeviceHost-as-IUnknown,
+   TargetProcessId, &IpcSectionHandle)` — **this** is what registers the (out-of-process) device host
+   with the partition (signature confirmed, `wdk.h:409`). It also puts the host process in a
+   kill-on-close job.
+6. Host `ModifyComputeSystem` **Add** `VirtualMachine/Devices/FlexibleIov/<instanceId>` with
+   `{EmulatorId = VIRTIO_FS_DEVICE_ID, HostingModel = ExternalRestricted}` (`DeviceHostProxy.cpp:61-67`).
+   The VID's `FinishReservingResources` now resolves the slot to the device host registered in step 5
+   (via `IVmDeviceHost::GetDeviceInstance(DeviceClassId, DeviceInstanceId)`) → the guest enumerates it.
+
+Doorbells/MMIO take a side channel: the device host reaches the **VM worker process** via
+`GetVmWorkerProcess(vmId, …)` (`vmwpctrl.dll`) → `IVmVirtualDeviceAccess::GetDevice(FLEXIO_DEVICE_ID,
+instanceId)` → `IVmFiovGuestMemoryFastNotification` / `IVmFiovGuestMmioMappings`.
+
+**The COM contract** (`src/windows/service/inc/windowsdefs.idl`):
+`IVmDeviceHost {78523d62-…}` `GetDeviceInstance(classId, instanceId, IUnknown**)` (device-host side);
+`IVmDeviceHostSupport {e31aa49b-…}` `RegisterDeviceHost(IVmDeviceHost*, pid, UINT64* ipcSection)` (host
+side); `IPlan9FileSystem {7649D52D-…}` `AddSharePath`/`CreateVirtioDevice`/…; `IPlan9FileSystemHost
+{8434F839-…}` doorbell callbacks; `Plan9FileSystem` coclass `{AFC7B6DE-…}`.
+
+**Why our spike failed (root cause, corrected):** we declared a `FlexibleIov` slot but **never
+registered a device host via `HdvProxyDeviceHost`**. The in-process `HdvInitializeDeviceHost` registers
+on a path the `ExternalRestricted` VID does not consult, so `FinishReservingResources` finds no emulator
+for the `EmulatorId` → `'Unknown'` → `0x8000FFFF`. Process boundary was never the variable (the
+out-of-process spike, `attach_oop.rs`, failed identically) — the **missing call is `HdvProxyDeviceHost`**
+(plus an `IVmDeviceHost` to hand it, and `HcsModifyComputeSystem` to hot-add the slot).
+
+**Implication for our build (task #16).** The mandatory contract is `HdvInitializeDeviceHostForProxy`
+(device side) + `HdvProxyDeviceHost` (host side) + `HcsModifyComputeSystem` (hot-add the slot) +
+an `IVmDeviceHost` COM object. The COM-surrogate / registry-CLSID / AppID machinery is **optional** —
+WSL uses it to sandbox the device host, but `HdvProxyDeviceHost` takes an `IVmDeviceHost` pointer + a
+`ProcessId`, so atelierd can host the device host **in-process** and pass its own PID for the minimal
+proof. (For containment we may still *want* a surrogate later — §6.2 — but it isn't required to make the
+guest enumerate the device.) To bind next: `HcsModifyComputeSystem` (hcs-sys); `HdvProxyDeviceHost` +
+`HdvInitializeDeviceHostForProxy[Ex]` (hdv-sys, dynamic-load from `vmdevicehost.dll`); the `IVmDeviceHost`
+vtable. `HdvProxyDeviceHost`'s signature is known; `HdvInitializeDeviceHostForProxy`'s is not in the OSS
+tree (closed `wsldevicehost`) and must be reversed or spiked.
