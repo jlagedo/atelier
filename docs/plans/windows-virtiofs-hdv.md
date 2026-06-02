@@ -356,7 +356,9 @@ Remaining, in priority order:
    VPCI. The path the in-process `HdvInitializeDeviceHost` *couldn't* take (it failed FlexibleIov's
    `FinishReservingResources`) is the **proxy** path; the missing call was `HdvProxyDeviceHost`. Guest
    needs `hv_vmbus` + `pci-hyperv` loaded. Full ABI + handshake: `hyperv-virtiofs/docs/hdv-proxy-abi.md`
-   and Appendix C. Everything else is engineering (swap the driverless device for `VirtioFsDevice`,
+   and Appendix C — **the reverse-engineered proxy ABI is confirmed against Microsoft's public
+   `VmDeviceHost.pdb`** (on the symbol server; `wsldevicehost.pdb` is not): `HDV::CreateDeviceHostForProxy(
+   IVmDeviceHostSupport const&, _GUID const&, HDV_DEVICE_HOST_FLAGS)` etc. match our inferences exactly. Everything else is engineering (swap the driverless device for `VirtioFsDevice`,
    task #8).
 
    <details><summary>Earlier (superseded) finding</summary>
