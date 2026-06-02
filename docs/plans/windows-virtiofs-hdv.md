@@ -128,8 +128,9 @@ the device's FUSE/file logic reused from OpenVMM's `virtiofs` crate.
 
 **Correction (verified against the cloned `microsoft/openvmm` tree):** the public OpenVMM repo does
 **not** ship the HDV device-host bridge. `HdvInitializeDeviceHost`/aperture/doorbell glue appears
-only in their `petri` test harness, not as a Rust crate. The `hyper-v\hdv\src\virtio_hdv.rs` path
-seen in `wsldevicehost.dll` strings is from Microsoft's **internal/WSL** tree. What *is* public: the
+only in their `petri` test harness, not as a Rust crate. The `hyper-v\hdv\src\*.rs` bridge paths
+seen in `wsldevicehost.dll` strings (`virtiofs.rs`/`api.rs`; see Correction³ in Appendix B) are from
+Microsoft's **internal/WSL** tree. What *is* public: the
 `virtiofs` device crate, the standalone VMM, and a VPCI/vmbus relay stack. So Option 1 = **write the
 HDV transport bridge ourselves**, reusing OpenVMM's `virtiofs` + `virtio` crates for everything above
 it. The `virtiofs` crate is also not a clean library (depends on `virtio`, `guestmem`, `vm_resource`,
@@ -143,7 +144,7 @@ it. `virtio::transport::pci::VirtioPciDevice` is **`pub`** (`pub use pci::Virtio
 `vm/devices/virtio/virtio/src/transport/mod.rs:54`), and `VirtioPciDevice::new`
 (`…/transport/pci.rs:148`) takes exactly the seams HDV provides — `GuestMemory`,
 `PciInterruptModel`, `Option<Arc<dyn DoorbellRegistration>>`, `&mut dyn RegisterMmioIntercept` — all
-public and externally implementable. Microsoft's own closed `hyper-v\hdv\src\virtio_hdv.rs` is an
+public and externally implementable. Microsoft's own closed `hyper-v\hdv\src\virtiofs.rs` is an
 *external consumer* of this same public crate (its panic strings reference
 `oss\…\virtio\…\transport\pci.rs` and `oss\…\pci_core\…\cfg_space_emu.rs`). So the HDV transport is
 **~4 trait adapters over HDV (~350–550 LOC) + a `VirtioPciDevice::new` call**, not a reimplemented
@@ -503,23 +504,36 @@ binary whose embedded panic-location strings expose its full source-file map. Ev
   `oss\vm\devices\support\fs\{fuse,lxutil}\…`, plus `mesh`/`pal_async`/`task_control` support.
 - **`hyper-v\…`** → Microsoft's **internal** Windows depot — **not** mirrored to the public repo.
 
-The closed bridge is therefore just two internal crates (sizes from the max panic line-ref seen):
+The closed bridge is therefore just two internal crates:
 
-| Closed file (`hyper-v\…`) | ~size | Our open counterpart |
-|---|---|---|
-| `hdv\src\api.rs` | ~1700 L | `hdv-sys` + `hdv` (HDV FFI + RAII) |
-| `hdv\src\virtio_hdv.rs` | ~1400 L | **`virtio-hdv`** (the adapter — the one file to write) |
-| `hdv\src\virtiofs.rs` | ~166 L | the `hyperv_virtiofs` cdylib wiring |
-| `hdv\src\{virtio_net,virtio_pmem}.rs` | — | not needed (we only ship virtio-fs) |
-| `wsldevicehost\src\{lib,hdv,virtiofs,…}.rs` | — | not needed (WSL's COM/DLL `ExternalRestricted` shim) |
+| Closed file (`hyper-v\…`) | Our open counterpart |
+|---|---|
+| `hdv\src\api.rs` (25 panic-refs — the largest) | `hdv-sys` + `hdv` (HDV FFI + RAII) |
+| `hdv\src\virtiofs.rs` | **`virtio-hdv`** (the adapter for virtio-fs — the one file to write) + the `hyperv_virtiofs` cdylib wiring |
+| `hdv\src\{virtio_net,virtio_pmem}.rs` | not needed (we only ship virtio-fs) |
+| `hdv\src\util.rs` | shared helpers |
+| `wsldevicehost\src\{lib,hdv,virtiofs,virtio_net,…}.rs` | not needed (WSL's COM/DLL `ExternalRestricted` shim) |
+
+> **Correction³ (2026-06-02, full Ghidra decompile).** The two rows above are revised from the
+> earlier surface-strings inference. A complete Ghidra decompilation of the DLL
+> (`wsldevicehost.dll.c`, 295k lines) shows the bridge has **no single `virtio_hdv.rs`** — the
+> adapter is split **one file per device type** (`virtiofs.rs`, `virtio_net.rs`, `virtio_pmem.rs`)
+> over a shared `api.rs` + `util.rs`. So `virtio-hdv` maps to `virtiofs.rs` (plus its slice of
+> `api.rs`), not to a monolithic ~1400-line file. The "~1700/~1400/~166 L" sizes were a guess from
+> max panic line-refs and don't survive the decompile (panic line numbers are stored as separate
+> integer args, not adjacent to the path string, so they aren't recoverable that way) — dropped
+> rather than restated. Three device files ⇄ **three distinct `HdvCreateDeviceInstance` vtables** in
+> the decompile (`DAT_180132400`, `DAT_180132528`, `DAT_180168cf0` at the three call sites), i.e. WSL
+> ships three FlexibleIov emulators; we need only the virtio-fs one.
 
 **Two conclusions that shaped the build:**
 
-1. **The bridge reuses public crates** (its `virtio_hdv.rs` panic strings reference
+1. **The bridge reuses public crates** (its device-file panic strings reference
    `oss\…\virtio\…\transport\pci.rs` and `oss\…\pci_core\…\cfg_space_emu.rs`) — i.e. it drives the
    *public* `VirtioPciDevice` rather than reimplementing it. This is the evidence behind Correction²
    (§4): our `virtio-hdv` is an adapter over public crates, ~350–550 LOC, with Microsoft's
-   ~1400-line `virtio_hdv.rs` as the structural upper bound. The relevant HDV→OpenVMM seam map:
+   `hdv\src\virtiofs.rs` (+ its slice of `api.rs`; see Correction³ above) as the structural map. The
+   relevant HDV→OpenVMM seam map:
    `HdvCreateGuestMemoryAperture` → `GuestMemoryAccess`/`GuestMemory::new`; `HdvRegisterDoorbell` →
    `DoorbellRegistration`; `HdvDeliverGuestInterrupt` (`msi_address`/`msi_data`, seen in
    `api.rs`) → `PciInterruptModel::Msix(&MsiTarget)`; HDV BAR intercept callbacks →
@@ -529,7 +543,27 @@ The closed bridge is therefore just two internal crates (sizes from the max pani
    the bridge query — *our own* `jlagedo/hyperv-virtiofs`. So this project is the open counterpart,
    not a duplicate of existing open code.
 
-The raw strings dump is archived under the session tool-results directory.
+**Two further findings from the full decompile (2026-06-02) that validate our build:**
+
+3. **The proxy ABI is confirmed from the *closed* caller's side, and it's a clean function seam.**
+   The decompiled call (line 37679) is `HdvInitializeDeviceHostForProxy(param_3 /*ctx GUID*/,
+   param_4 /*IVmDeviceHostSupport*/, &out)` — our exact 3-arg shape — and `HdvCreateDeviceInstance`
+   (line 36185) is `(host, 1 /*Pci*/, classId, instanceId, vtable, ctx, &out)`, matching `hdv-sys`.
+   Both call sites are guarded by the **same test-seam pattern**: `if (indirect == 0) { real HDV
+   export } else { (*indirect_vtable + 0x28)(same args) }` — i.e. WSL routes the call through an
+   optional trait object so it can substitute a mock host in unit tests. That the export is swappable
+   behind a vtable is direct evidence the ABI is a self-contained function boundary, which is why our
+   single-process spike (`hdv::proxy`, no COM surrogate) works.
+4. **The "adapter, not rewrite" thesis is proven by the binary itself.** The embedded panic paths
+   show the shipped DLL links these *public* OpenVMM crates verbatim:
+   `oss\vm\devices\virtio\virtiofs\src\lib.rs` (the FUSE virtio-fs device we drive),
+   `oss\vm\devices\pci\pci_core\src\{cfg_space_emu,capabilities\msix}.rs`, `oss\vm\vmcore\guestmem`,
+   `oss\vm\chipset_device`, the `virtio` transport/queue/common, and `lxutil`/`fuse`. That is exactly
+   the milestone-2 seam list — present, public, and already in our `Cargo.toml` — so `virtio-hdv` is
+   an adapter over these, not a reimplementation.
+
+The raw strings dump (and the full Ghidra decompile, `E:\tmp\wsldevicehost\wsldevicehost.dll.c`) are
+archived locally; the decompile is the authoritative source for the points above.
 
 ## 12. Appendix C — WSL OSS source: the FlexibleIov / HDV-proxy host protocol (2026-06-02)
 
