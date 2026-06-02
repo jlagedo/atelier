@@ -372,6 +372,28 @@ now over our own HDV bridge** (milestone 2 below).
 > `device_json`; (b) **live `set_shares`** — still `HVFS_ERR_NOT_IMPLEMENTED`, since OpenVMM's
 > `VirtioFsDevice` binds its share at construction (the initial share comes in via `device_json`).
 
+> **`set_shares` design probe — device-hotplug spike (2026-06-02).** Atelier maps a host dir
+> **per session, live**, on the one running VM (the VZ backend does this via `VZMultipleDirectoryShare`
+> + `fsdev.SetShare()`). Two ways to match it on Windows: **(A)** a composite multi-root FUSE wrapper
+> (one device, mutable `/sessions/<tag>` router — OpenVMM's `VirtioFs` is single-root + immutable, so
+> we'd fork/own it, the hard part being inode-namespace translation); or **(B)** hot-plug a virtio-fs
+> **device per share** over VPCI — the OpenVMM-endorsed answer
+> ([microsoft/openvmm#861](https://github.com/microsoft/openvmm/issues/861): "device per tag … add/remove
+> a device after start … straightforward on the VPCI transport, Windows-only"), reusing `VirtioFsDevice`
+> unchanged and **merging** the caller-supplied-GUIDs item. B's risk is *runtime* device add/remove
+> through our HDV proxy; a staged go/no-go spike (`hyperv-virtiofs/docs/hotplug-spike.md`) tested it.
+>
+> **Spike verdict (2026-06-02): B is viable — go.** Hot-**add** of concurrent virtio-fs devices works
+> (Stage 1 ✅, Stage 2 ✅): one shared HDV device host (`Arc<DeviceHost>`), N devices, each the
+> **well-known `VIRTIO_FS_DEVICE_ID`** as class id + a unique instance GUID — exactly WSL's model
+> (a *custom* class id rejects the second device with `ERROR_HV_INVALID_PARAMETER`; **not**
+> one-host-per-device — two device hosts fail with `0xC0370030`). Hot-**remove** is the one constraint:
+> `FlexibleIov` Remove returns `ERROR_NOT_SUPPORTED` on Win11 26200, independent of `SchemaVersion`
+> ({2,7} tested) — a platform gap WSL shares and works around. **Teardown = reclaim-at-recycle**: drop
+> host-side device refs when a session ends and rely on VM hibernate/restart to actually free them
+> (atelier already recycles). So `set_shares` = device-per-share hot-add + a per-VM share/device
+> registry, capped to bound lingering devices between recycles.
+
 Remaining, in priority order:
 
 1. **HDV attach handshake (the linchpin). ✅ RETIRED (2026-06-02).** The EL10 guest now **enumerates an
