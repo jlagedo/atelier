@@ -588,5 +588,13 @@ WSL uses it to sandbox the device host, but `HdvProxyDeviceHost` takes an `IVmDe
 proof. (For containment we may still *want* a surrogate later — §6.2 — but it isn't required to make the
 guest enumerate the device.) To bind next: `HcsModifyComputeSystem` (hcs-sys); `HdvProxyDeviceHost` +
 `HdvInitializeDeviceHostForProxy[Ex]` (hdv-sys, dynamic-load from `vmdevicehost.dll`); the `IVmDeviceHost`
-vtable. `HdvProxyDeviceHost`'s signature is known; `HdvInitializeDeviceHostForProxy`'s is not in the OSS
-tree (closed `wsldevicehost`) and must be reversed or spiked.
+vtable. `HdvProxyDeviceHost`'s signature is in WSL `wdk.h`; the `HdvInitializeDeviceHostForProxy[Ex]` ones are
+**not** in any header (closed `wsldevicehost`) but were **reverse-engineered** from `vmdevicehost.dll`
+and validated against the known exports — full ABI, the device↔host handshake, and the IIDs in
+`hyperv-virtiofs/docs/hdv-proxy-abi.md`. Net device-side shape:
+`HdvInitializeDeviceHostForProxy(ctx, IVmDeviceHostSupport*, HDV_HOST* out)` — it `QueryInterface`s the
+support callback (IID `e31aa49b-…`), builds the host, and drives
+`IVmDeviceHostSupport::RegisterDeviceHost` → `HdvProxyDeviceHost(system, IVmDeviceHost, pid, &ipc)`. All
+three exports + `HcsModifyComputeSystem` are now bound in `hdv-sys`/`hcs-sys`. The remaining build is
+two small Rust COM objects (`IVmDeviceHost`, `IVmDeviceHostSupport`) + the in-process spike; only `ctx`
+(arg1) and `GetDeviceInstance`'s expected return are unverified, to be settled when the spike runs.
