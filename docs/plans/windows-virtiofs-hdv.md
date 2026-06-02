@@ -346,18 +346,26 @@ Resolved so far: a stock EL10 guest mounts an OpenVMM virtio-fs device read-writ
 
 Remaining, in priority order:
 
-1. **HDV attach handshake (the linchpin).** Prove `HdvInitializeDeviceHost` works against an HCS
-   compute system *we own*, addressed **by system id** (`HcsOpenComputeSystem`) or inherited handle,
-   and that `HdvCreateDeviceInstance` surfaces a virtio-fs PCI device the EL10 guest enumerates and
-   mounts. Throwaway, single static `--shared-dir`. This is the one thing that can still invalidate
-   Option 1; everything else is engineering once it holds. *(Same work regardless of in-proc vs. not.)*
+1. **HDV attach handshake (the linchpin). ✅ RETIRED (2026-06-02).** The EL10 guest now **enumerates an
+   HDV-attached device end-to-end**, proving Option 1. Final spike
+   `hyperv-virtiofs/hcs-testvm/tests/attach_proxy.rs`: create the VM with a `FlexibleIov` slot →
+   `HdvInitializeDeviceHostForProxy` + our `IVmDeviceHostSupport` → `HdvProxyDeviceHost` (register_hr
+   `S_OK`) → `HdvCreateDeviceInstance` → `start` succeeds (no `0x8000FFFF`); the VID drives the device
+   `Initialize → GetDetails → Start → ReadConfigSpace`, and the guest logs
+   `hv_pci <instanceId>: PCI host bridge to bus 0001:00` / `pci 0001:00:00.0: [1af4:1100]` over VMBus
+   VPCI. The path the in-process `HdvInitializeDeviceHost` *couldn't* take (it failed FlexibleIov's
+   `FinishReservingResources`) is the **proxy** path; the missing call was `HdvProxyDeviceHost`. Guest
+   needs `hv_vmbus` + `pci-hyperv` loaded. Full ABI + handshake: `hyperv-virtiofs/docs/hdv-proxy-abi.md`
+   and Appendix C. Everything else is engineering (swap the driverless device for `VirtioFsDevice`,
+   task #8).
+
+   <details><summary>Earlier (superseded) finding</summary>
 
    **Host→HDV half RESOLVED (2026-06-02 attach spike).** Against a compute system we own,
    `HdvInitializeDeviceHost` **+** `HdvCreateDeviceInstance(PCI device, vtable)` both **succeed
-   in-process** — no `ExternalRestricted`, no HCS emulator registration. Proven by
-   `hyperv-virtiofs`'s `hcs-testvm/tests/attach.rs` driving a minimal HDV PCI device (the generic
-   `hdv::pci` substrate: vtable + `PciOps`). So the part that could have invalidated Option 1 holds.
-   The remaining half is *guest visibility* — unknown #3, which the same spike pinned exactly.
+   in-process** — but that path then fails FlexibleIov's `FinishReservingResources`; the working path
+   is the proxy registration above.
+   </details>
 2. **OpenVMM transport pluggability.** ~~Whether the `virtio` crate's transport seam cleanly accepts
    an HDV-backed `GuestMemory` + external queue-notify, or assumes OpenVMM's own PCI/VPCI
    transport.~~ **Resolved (2026-06-02, Correction² in §4 + Appendix B):** `VirtioPciDevice` is `pub`
@@ -598,3 +606,11 @@ support callback (IID `e31aa49b-…`), builds the host, and drives
 three exports + `HcsModifyComputeSystem` are now bound in `hdv-sys`/`hcs-sys`. The remaining build is
 two small Rust COM objects (`IVmDeviceHost`, `IVmDeviceHostSupport`) + the in-process spike; only `ctx`
 (arg1) and `GetDeviceInstance`'s expected return are unverified, to be settled when the spike runs.
+
+**Built + PROVEN (2026-06-02).** Done in one process (`hyperv-virtiofs`): we author **only**
+`IVmDeviceHostSupport` (`hdv::proxy::DeviceHostSupport`) — HDV builds the `IVmDeviceHost` inside
+`ForProxy` and hands it to us, and serves `GetDeviceInstance` itself. `ctx` resolved to a non-null
+`*const GUID` (device-host id; null faulted). The spike (`attach_proxy.rs`) registers via the proxy,
+hot-adds/declares the slot, and the **guest enumerates `pci 0001:00:00.0: [1af4:1100]` over VMBus VPCI**
+(`register_hr S_OK`, `start` succeeds, no `0x8000FFFF`). Linchpin retired; see §7 #1 +
+`hyperv-virtiofs/docs/hdv-proxy-abi.md`.
