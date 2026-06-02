@@ -359,6 +359,19 @@ now over our own HDV bridge** (milestone 2 below).
 > so a persistent mapping + interrupt re-arm + boot retry mask a residual staleness window. Follow-ups:
 > wire `hvfs_attach`, the eviction protocol for full coherency, DAX, `set_shares`.
 
+> **Milestone 2b — `hvfs_attach` wired through the C ABI (2026-06-02).** The proven mount now runs
+> through the **shipped front door**: `hvfs_attach(hcs_system_id, device_json, &out)` opens the
+> externally-owned compute system (`HcsOpenComputeSystem`), proxy-registers an HDV device host
+> (`DeviceHostSupport` → `DeviceHost::from_proxy`), and calls `VirtioHdvDevice::attach`; a guest mounts
+> the share and prints `PROOF_COMPLETE_PASS` driven entirely by the exported C symbols
+> (`hyperv-virtiofs/crates/hcs-testvm/tests/attach_abi.rs`). The ABI header is unchanged (no version
+> bump). `device_json` carries the initial share + guest RAM:
+> `{ "tag", "path", "ro", "memory_mb" }`. **Two deliberate deferrals**, both documented in the repo
+> README roadmap: (a) **caller-supplied device GUIDs** — host/class/instance are fixed well-known
+> constants the consumer must mirror in its `FlexibleIov` slot, rather than overridable via
+> `device_json`; (b) **live `set_shares`** — still `HVFS_ERR_NOT_IMPLEMENTED`, since OpenVMM's
+> `VirtioFsDevice` binds its share at construction (the initial share comes in via `device_json`).
+
 Remaining, in priority order:
 
 1. **HDV attach handshake (the linchpin). ✅ RETIRED (2026-06-02).** The EL10 guest now **enumerates an
