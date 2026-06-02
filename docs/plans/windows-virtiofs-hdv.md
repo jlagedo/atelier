@@ -343,7 +343,21 @@ grows untrusted-input surface beyond the audited unsafe boundary. Not worth engi
 
 ## 7. Open unknowns → spike plan
 
-Resolved so far: a stock EL10 guest mounts an OpenVMM virtio-fs device read-write on WHP (§2).
+Resolved so far: a stock EL10 guest mounts an OpenVMM virtio-fs device read-write on WHP (§2), **and
+now over our own HDV bridge** (milestone 2 below).
+
+> **Milestone 2 — DONE (2026-06-02).** A stock Rocky Linux 10 guest under Hyper-V/HCS **mounts a host
+> directory over our HDV virtio-fs bridge** — reads `SENTINEL.txt`, writes `FROM_GUEST.txt` back —
+> with no 9p (`hyperv-virtiofs/crates/hcs-testvm/tests/attach_virtiofs.rs`, `PROOF_COMPLETE_PASS`).
+> `virtio-hdv` implements `hdv::pci::PciOps` over OpenVMM's public `VirtioPciDevice`/`VirtioFsDevice`,
+> backing guest-memory DMA with `HdvCreateGuestMemoryAperture`, MSI with `HdvDeliverGuestInterrupt`,
+> and PCI config + BAR MMIO with HDV's device-vtable callbacks. Three findings shaped it: (a) the
+> VMBus VID owns guest-facing BAR placement and delivers MMIO pre-decoded as `(bar, offset)` — the
+> guest never touches our config BAR registers, so we route via *internal* BAR bases; (b) the copy
+> APIs (`HdvReadGuestMemory`) lack DMA rights → apertures are mandatory (matching WSL); (c) HDV
+> apertures are an **evictable cache**, not a coherent mapping (WSL's `HdvGuestMemoryEvictionWorker`),
+> so a persistent mapping + interrupt re-arm + boot retry mask a residual staleness window. Follow-ups:
+> wire `hvfs_attach`, the eviction protocol for full coherency, DAX, `set_shares`.
 
 Remaining, in priority order:
 
