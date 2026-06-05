@@ -86,6 +86,9 @@ general programming concepts.
 ## Housekeeping
 
 - Don't commit build output or generated code (already gitignored).
+- `npm run lint` / `npm run format` fan out across all four languages (oxlint, golangci-lint, ruff,
+  markdownlint); a `lefthook` pre-commit hook (auto-installed on `npm install`) runs them on staged
+  files. `golangci-lint` must be on PATH locally (`brew install golangci-lint`).
 - After editing any Markdown, run `npm run lint:md` (config in `.markdownlint-cli2.jsonc`); it must
   pass clean.
 - Comments explain WHY, not WHAT; keep them minimal.

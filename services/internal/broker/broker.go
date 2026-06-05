@@ -309,7 +309,7 @@ func (b *Broker) exec(ctx context.Context, params json.RawMessage) (any, error) 
 		// DialGuest errors already carry "vm: ..." context; don't re-prefix.
 		return nil, &rpc.Error{Code: rpc.CodeInternal, Message: err.Error()}
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// The handler runs on the Hop-2 connection, so this notifier writes back to
 	// the caller; relay the guest's exec/output notifications through it verbatim.
@@ -350,7 +350,7 @@ func (b *Broker) execInput(ctx context.Context, params json.RawMessage) (any, er
 	if err != nil {
 		return nil, &rpc.Error{Code: rpc.CodeInternal, Message: err.Error()}
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	return nil, rpc.NewClient(conn).Call(ctx, "execInput",
 		map[string]any{"sessionId": p.SessionID, "data": p.Data}, nil)

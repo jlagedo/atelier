@@ -49,7 +49,6 @@ def main() -> int:
     # Import cli_guest first (sets up the NDJSON stdout redirect and loads openhands),
     # then install the fake over the SDK's litellm entry points.
     import cli_guest
-
     from tests.fake_llm import patched_llm
 
     script = _load_script()

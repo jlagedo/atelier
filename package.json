@@ -10,18 +10,26 @@
   "scripts": {
     "dev": "npm --prefix apps/desktop run start",
     "build": "npm --prefix apps/desktop run package",
-    "lint": "npm --prefix apps/desktop run lint",
+    "lint": "npm run lint:js && npm run lint:go && npm run lint:py && npm run lint:md",
+    "lint:js": "npm --prefix apps/desktop run lint",
+    "lint:go": "cd services && golangci-lint run",
+    "lint:py": "cd packages/partisan && uv run ruff check .",
     "lint:md": "markdownlint-cli2",
     "lint:md:fix": "markdownlint-cli2 --fix",
-    "format": "npm --prefix apps/desktop run format",
+    "format": "npm run format:js && npm run format:go && npm run format:py && npm run lint:md:fix",
+    "format:js": "npm --prefix apps/desktop run format",
+    "format:go": "cd services && gofmt -w .",
+    "format:py": "cd packages/partisan && uv run ruff format .",
     "typecheck": "npm --prefix apps/desktop run typecheck",
     "test": "npm --prefix apps/desktop run test",
     "protogen": "node tools/protogen/protogen.mjs",
     "build:all": "node scripts/build-all.mjs",
     "e2e:host": "node scripts/e2e-host.mjs",
-    "test:partisan": "node scripts/test-partisan.mjs"
+    "test:partisan": "node scripts/test-partisan.mjs",
+    "prepare": "lefthook install"
   },
   "devDependencies": {
+    "lefthook": "^2.1.9",
     "markdownlint-cli2": "^0.22.1"
   }
 }

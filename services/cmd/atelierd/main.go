@@ -14,6 +14,14 @@ import (
 )
 
 func main() {
+	if err := run(); err != nil {
+		os.Exit(1)
+	}
+}
+
+// run owns the broker lifecycle and returns an error instead of calling os.Exit,
+// so the deferred cleanup (listener close, signal stop) runs on every exit path.
+func run() error {
 	addr := flag.String("addr", rpc.DefaultAddress, "listen address (named pipe on windows, unix socket otherwise)")
 	flag.Parse()
 
@@ -22,9 +30,9 @@ func main() {
 	ln, err := rpc.Listen(*addr)
 	if err != nil {
 		log.Error("listen", "addr", *addr, "err", err)
-		os.Exit(1)
+		return err
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 
 	srv := rpc.NewServer(log)
 	broker.New(log, nil).Register(srv)
@@ -39,7 +47,8 @@ func main() {
 	log.Info("atelierd listening", "addr", *addr)
 	if err := srv.Serve(ctx, ln); err != nil {
 		log.Error("serve", "err", err)
-		os.Exit(1)
+		return err
 	}
 	log.Info("atelierd stopped")
+	return nil
 }

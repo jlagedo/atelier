@@ -20,6 +20,7 @@ prints go to stderr. Model/key/`base_url` resolve `LLM_*` → `ATELIER_MODEL`/`A
 ```sh
 cd packages/partisan
 uv run cli_guest.py --task "create hello.txt" --workspace /tmp/ws   # one-shot
+uv run ruff check . && uv run ruff format .   # strict lint + format (config in pyproject.toml)
 npm run test:partisan        # from repo root: pytest + cross-language wire (scripts/test-partisan.mjs)
                              # --live adds streaming/interrupt/kill-and-resume against a real model
 ```

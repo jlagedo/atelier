@@ -159,8 +159,10 @@ func main() {
 		fmt.Fprintf(os.Stderr, "dial %s: %v\n", *addr, err)
 		os.Exit(1)
 	}
+	// One-shot CLI: each invocation makes a single call and exits, so the OS reclaims
+	// the connection. No deferred Close — most paths below os.Exit (which would skip a
+	// defer anyway), so an explicit Close would be cleanup theater.
 	client := rpc.NewClient(conn)
-	defer client.Close()
 
 	// exec streams the guest's stdout/stderr back as notifications, then returns
 	// an exit code we propagate. The command vector is everything after the flags

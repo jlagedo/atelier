@@ -195,7 +195,7 @@ func (m *Manager) SeedTime(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	return rpc.NewClient(conn).Call(ctx, "setTime",
 		map[string]any{"id": id, "unixMs": time.Now().UnixMilli()}, nil)
 }

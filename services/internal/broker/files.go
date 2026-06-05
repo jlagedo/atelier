@@ -56,7 +56,7 @@ func (b *Broker) readFile(ctx context.Context, params json.RawMessage) (any, err
 	if err != nil {
 		return nil, err
 	}
-	data, err := os.ReadFile(abs)
+	data, err := os.ReadFile(abs) //nolint:gosec // abs is jailed to the attached workspace by b.jail above
 	if err != nil {
 		return nil, &rpc.Error{Code: rpc.CodeInternal, Message: err.Error()}
 	}
@@ -83,7 +83,10 @@ func (b *Broker) writeFile(ctx context.Context, params json.RawMessage) (any, er
 	if err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(abs, data, 0o644); err != nil {
+	// 0644 (not 0600) is load-bearing, not incidental: the non-root guest agent reads
+	// host-written files over the virtio-fs/9p share, which passes the host uid through
+	// unmapped — at 0600 (owner-only) the guest user could not read them.
+	if err := os.WriteFile(abs, data, 0o644); err != nil { //nolint:gosec // G306: 0644 required for cross-uid guest reads — see comment above
 		return nil, &rpc.Error{Code: rpc.CodeInternal, Message: err.Error()}
 	}
 	return nil, nil
@@ -153,6 +156,9 @@ func (b *Broker) attachWorkspace(ctx context.Context, params json.RawMessage) (a
 	tag := strings.TrimSpace(p.Tag)
 	target := strings.TrimSpace(p.Target)
 	legacy := tag == ""
+	if p.Port < 0 || p.Port > 65535 {
+		return nil, &rpc.Error{Code: rpc.CodeInvalidParams, Message: "port must be 0–65535"}
+	}
 	port := uint32(p.Port)
 	if legacy {
 		tag = vsock.WorkspaceShareTag
@@ -237,7 +243,7 @@ func (b *Broker) guestMount(ctx context.Context, id string, m mountInfo) error {
 	if err != nil {
 		return &rpc.Error{Code: rpc.CodeInternal, Message: err.Error()}
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	return rpc.NewClient(conn).Call(ctx, "mount", map[string]any{
 		"port":   m.port,
 		"tag":    m.tag,
@@ -251,7 +257,7 @@ func (b *Broker) guestUnmount(ctx context.Context, id, target string) error {
 	if err != nil {
 		return &rpc.Error{Code: rpc.CodeInternal, Message: err.Error()}
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	return rpc.NewClient(conn).Call(ctx, "unmount", map[string]any{
 		"target": target,
 	}, nil)

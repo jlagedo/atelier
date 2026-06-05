@@ -8,6 +8,7 @@ import (
 // Decision is the outcome of a policy check (design.md §2, §10).
 type Decision int
 
+// Deny, Ask, and Allow are the policy outcomes, ordered least to most permissive.
 const (
 	Deny Decision = iota
 	Ask

@@ -28,7 +28,7 @@ func TestCallStreamDeliversNotificationsThenResult(t *testing.T) {
 	go srv.serveConn(context.Background(), sConn)
 
 	c := NewClient(cConn)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	_ = cConn.SetDeadline(time.Now().Add(5 * time.Second))
 
 	type out struct {
@@ -89,7 +89,7 @@ func TestCallStreamCancelAbortsAndTearsDownHandler(t *testing.T) {
 	go srv.serveConn(context.Background(), sConn)
 
 	c := NewClient(cConn)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)

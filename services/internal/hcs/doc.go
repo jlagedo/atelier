@@ -1,4 +1,4 @@
-// This file authors the HCS *compute-system document* — the JSON blob handed to
+// Package hcs authors the HCS *compute-system document* — the JSON blob handed to
 // HcsCreateComputeSystem that fully describes our utility VM. It is the model
 // captured from hcsshim's makeLCOWDoc (schema 2.1), deliberately re-implemented
 // here (own-bindings strategy, design.md §16) and stripped of Microsoft's GCS:
@@ -11,6 +11,7 @@ package hcs
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/jlagedo/atelier/services/internal/vsock"
@@ -197,6 +198,9 @@ const plan9ShareResourcePath = "VirtualMachine/Devices/Plan9/Shares"
 // the guest (runner) mounts the share itself over our control plane. tag/port
 // must be unique among a VM's live shares so several can coexist.
 func MakePlan9AddRequest(hostPath string, readOnly bool, tag string, port uint32) ([]byte, error) {
+	if port > math.MaxInt32 {
+		return nil, fmt.Errorf("plan9 share port %d exceeds int32", port)
+	}
 	flags := plan9FlagLinuxMetadata
 	if readOnly {
 		flags |= plan9FlagReadOnly
@@ -218,6 +222,9 @@ func MakePlan9AddRequest(hostPath string, readOnly bool, tag string, port uint32
 // MakePlan9RemoveRequest builds the ModifyComputeSystem document that removes the
 // 9p share identified by tag/port from a running VM (the host side of detach).
 func MakePlan9RemoveRequest(tag string, port uint32) ([]byte, error) {
+	if port > math.MaxInt32 {
+		return nil, fmt.Errorf("plan9 share port %d exceeds int32", port)
+	}
 	return json.Marshal(modifySettingRequest{
 		ResourcePath: plan9ShareResourcePath,
 		RequestType:  "Remove",

@@ -9,8 +9,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-
-import cli_guest
 from openhands.sdk import ConversationExecutionStatus
 from openhands.sdk.event import (
     ActionEvent,
@@ -22,6 +20,8 @@ from openhands.sdk.event import (
 )
 from openhands.sdk.event.conversation_error import ConversationErrorEvent
 from openhands.sdk.llm import Message, TextContent
+
+import cli_guest
 
 
 def _msg(text: str, source: str = "agent") -> MessageEvent:
@@ -134,8 +134,12 @@ def test_on_token_emits_text_delta():
     try:
         chunk = SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="ab"))])
         cli_guest.on_token(chunk)
-        cli_guest.on_token(SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=None))]))
-        cli_guest.on_token(SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=""))]))
+        cli_guest.on_token(
+            SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=None))])
+        )
+        cli_guest.on_token(
+            SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=""))])
+        )
         cli_guest.on_token(SimpleNamespace(choices=[]))
         cli_guest.on_token(SimpleNamespace(choices=None))
     finally:

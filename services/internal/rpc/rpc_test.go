@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"testing"
 )
@@ -28,12 +29,12 @@ func TestServerClientCall(t *testing.T) {
 	c1, c2 := net.Pipe()
 	srv := NewServer(nil)
 	srv.Register("echo", func(_ context.Context, params json.RawMessage) (any, error) {
-		return json.RawMessage(params), nil
+		return params, nil
 	})
 	go srv.serveConn(context.Background(), c2)
 
 	client := NewClient(c1)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	var got string
 	if err := client.Call(context.Background(), "echo", "hello", &got); err != nil {
@@ -50,7 +51,7 @@ func TestServerMethodNotFound(t *testing.T) {
 	go srv.serveConn(context.Background(), c2)
 
 	client := NewClient(c1)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	err := client.Call(context.Background(), "nope", nil, nil)
 	var rpcErr *Error
@@ -59,11 +60,7 @@ func TestServerMethodNotFound(t *testing.T) {
 	}
 }
 
-// asError is a tiny errors.As helper kept local to avoid importing errors twice.
+// asError reports whether err is, or wraps, an *Error and binds it into target.
 func asError(err error, target **Error) bool {
-	e, ok := err.(*Error)
-	if ok {
-		*target = e
-	}
-	return ok
+	return errors.As(err, target)
 }

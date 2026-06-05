@@ -1,0 +1,21 @@
+# Pre-commit lint gate, mirroring `npm run lint`. Each command is scoped to its
+# package via `root`, so globs/`{staged_files}` are relative to it and the command
+# is skipped when nothing in that package is staged.
+pre-commit:
+  parallel: true
+  commands:
+    js:
+      root: "apps/desktop/"
+      glob: "*.{ts,tsx}"
+      run: npm run lint
+    go:
+      root: "services/"
+      glob: "*.go"
+      run: golangci-lint run
+    py:
+      root: "packages/partisan/"
+      glob: "*.py"
+      run: uv run ruff check {staged_files}
+    md:
+      glob: "*.md"
+      run: npx markdownlint-cli2 {staged_files}

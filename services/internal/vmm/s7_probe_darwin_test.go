@@ -88,7 +88,7 @@ func TestS7RuntimeShareProbe(t *testing.T) {
 		t.Fatalf("DialGuest: %v", err)
 	}
 	gc := rpc.NewClient(conn)
-	defer gc.Close()
+	defer func() { _ = gc.Close() }()
 
 	if out, code := guestSh(t, gc, "uname -m; id -u"); code != 0 {
 		t.Fatalf("guest sanity exec failed (code=%d): %q", code, out)

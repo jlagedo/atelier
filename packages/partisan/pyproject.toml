@@ -12,8 +12,23 @@ dependencies = [
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.24",
+    "ruff>=0.9",
 ]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+# bugbear/security/pathlib-aware strict set; pairs with pyright type-checking.
+select = ["E", "F", "W", "I", "B", "UP", "C4", "SIM", "RET", "PTH", "N", "S", "A", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S108"]            # asserts + /tmp paths are fine in tests
+# stdout must be redirected (banner/NDJSON) before the openhands imports run, so the
+# module-level imports are deliberately not at the top, and subprocesses are the agent's job.
+"cli_guest.py" = ["E402", "S603", "S607"]

@@ -19,6 +19,7 @@ import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 
+import openhands.sdk.llm.llm as _llmmod
 from litellm import CustomStreamWrapper, ModelResponse
 from litellm.litellm_core_utils.litellm_logging import Logging as LiteLLMLogging
 from litellm.llms.base_llm.base_model_iterator import MockResponseIterator
@@ -28,8 +29,6 @@ from litellm.types.utils import (
     Function,
 )
 from litellm.types.utils import Message as LiteLLMMessage
-
-import openhands.sdk.llm.llm as _llmmod
 
 
 @dataclass
@@ -94,9 +93,7 @@ def _logging(model: str, messages) -> LiteLLMLogging:
         litellm_call_id=str(uuid.uuid4()),
         function_id="partisan-fake",
     )
-    lo.update_environment_variables(
-        litellm_params={}, optional_params={}, model=model, user=None
-    )
+    lo.update_environment_variables(litellm_params={}, optional_params={}, model=model, user=None)
     return lo
 
 

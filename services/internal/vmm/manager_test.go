@@ -178,8 +178,8 @@ func TestManagerDialGuestRejectsUnknownVMAndUsesGuestRPCPort(t *testing.T) {
 	}
 
 	client, server := net.Pipe()
-	defer client.Close()
-	defer server.Close()
+	defer func() { _ = client.Close() }()
+	defer func() { _ = server.Close() }()
 	d.dialConn = client
 	if err := m.Create(context.Background(), VMConfig{ID: "vm0"}); err != nil {
 		t.Fatalf("Create: %v", err)

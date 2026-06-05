@@ -32,7 +32,9 @@ def test_tool_call_turn(capture_emit, make_args):
     args = make_args(task="run echo")
     script = FakeScript(
         [
-            FakeTurn(tool=FakeToolCall(name="terminal", arguments={"command": "echo partisan-test"})),
+            FakeTurn(
+                tool=FakeToolCall(name="terminal", arguments={"command": "echo partisan-test"})
+            ),
             FakeTurn(text="done"),
         ]
     )

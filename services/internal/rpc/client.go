@@ -1,3 +1,6 @@
+// Package rpc implements the Hop-2 transport: JSON-RPC 2.0 with Content-Length
+// framing over a named pipe (Windows) or unix socket (dev), with streaming
+// notifications.
 package rpc
 
 import (

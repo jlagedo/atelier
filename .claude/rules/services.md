@@ -13,7 +13,7 @@ runner` — mounted as a second disk, not in the rootfs, so it iterates without 
 
 ```sh
 cd services
-go build ./... && go test ./... && go vet ./... && gofmt -l .
+go build ./... && go test ./... && golangci-lint run    # strict config: services/.golangci.yml (govet+gofmt folded in)
 GOOS=windows go build ./...     # verify the Windows named-pipe / HCS paths compile
 
 # dev end-to-end (unix socket, no VM):

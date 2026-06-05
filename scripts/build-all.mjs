@@ -417,6 +417,9 @@ function verify() {
   const goTags = flags.config === 'debug' ? ['-tags', 'debugconsole'] : [];
   run('go', ['-C', 'services', 'vet', ...goTags, './...']);
   run('go', ['-C', 'services', 'test', ...goTags, './...']);
+  if (!have('golangci-lint'))
+    die('golangci-lint not found — install it (brew install golangci-lint) or run with --no-verify');
+  run('golangci-lint', ['run'], { cwd: rel('services') });
   const unformatted = tryCapture('gofmt', ['-l', 'services']);
   if (unformatted) warn(`gofmt -l flagged:\n${unformatted}`);
   run('go', ['-C', 'services', 'build', './...'], { env: { GOOS: 'windows', CGO_ENABLED: '0' } });
@@ -429,6 +432,11 @@ function verify() {
   run('go', ['-C', 'services', 'build', '-o', probe, './cmd/runner'],
     { env: { GOOS: 'linux', GOARCH: guestArch, CGO_ENABLED: '0' } });
   fs.rmSync(probe, { force: true });
+
+  section('Verify: Python');
+  if (!have('uv'))
+    die('uv not found — install it (https://docs.astral.sh/uv/) or run with --no-verify');
+  run('uv', ['run', 'ruff', 'check', '.'], { cwd: rel('packages', 'partisan') });
 
   section('Verify: desktop');
   npm(['--prefix', 'apps/desktop', 'run', 'typecheck']);

@@ -59,7 +59,7 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 }
 
 func (s *Server) serveConn(ctx context.Context, conn net.Conn) {
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	// Tie a cancelable context to the connection's lifetime: when the peer
 	// disconnects (readMessage below returns), defer cancel() aborts any handler
 	// still in flight. That tears down a long-running exec — and kills its guest

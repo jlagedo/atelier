@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"time"
 
 	gvdhcp "github.com/containers/gvisor-tap-vsock/pkg/services/dhcp"
 	gvdns "github.com/containers/gvisor-tap-vsock/pkg/services/dns"
@@ -126,7 +127,7 @@ func Start(log *slog.Logger, filter *Allowlist, ln net.Listener) (*Network, erro
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		if err := bufrw.Flush(); err != nil {
 			return
 		}
@@ -134,8 +135,12 @@ func Start(log *slog.Logger, filter *Allowlist, ln net.Listener) (*Network, erro
 	})
 
 	n := &Network{ln: ln, log: log}
+	// ReadHeaderTimeout bounds only the request-header read (slowloris guard); it does
+	// not cap body or response streaming, which the egress proxy must allow for large
+	// transfers. Using an http.Server (not http.Serve) is also what clears gosec G114.
+	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 30 * time.Second}
 	go func() {
-		if err := http.Serve(ln, mux); err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, http.ErrServerClosed) {
+		if err := srv.Serve(ln); err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, http.ErrServerClosed) {
 			log.Warn("netjail: serve stopped", "err", err)
 		}
 	}()

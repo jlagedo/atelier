@@ -69,10 +69,8 @@ class Serve:
                 with contextlib.suppress(Exception):
                     await self.task
         finally:
-            try:
+            with contextlib.suppress(OSError):
                 os.close(self._w)
-            except OSError:
-                pass
             sys.stdin = self._old_stdin
             self._patch.__exit__(None, None, None)
 

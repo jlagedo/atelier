@@ -44,7 +44,7 @@ func TestHandlerNotificationsThenResponse(t *testing.T) {
 	})
 
 	client, server := net.Pipe()
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	go srv.serveConn(context.Background(), server)
 
 	_ = client.SetDeadline(time.Now().Add(5 * time.Second))

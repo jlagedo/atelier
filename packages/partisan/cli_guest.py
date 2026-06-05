@@ -27,8 +27,6 @@ from pathlib import Path
 _NDJSON_OUT = sys.stdout
 sys.stdout = sys.stderr
 
-from pydantic import SecretStr
-
 from openhands.sdk import (
     LLM,
     Agent,
@@ -52,7 +50,7 @@ from openhands.sdk.llm import content_to_str
 from openhands.tools.file_editor import FileEditorTool
 from openhands.tools.grep import GrepTool
 from openhands.tools.terminal import TerminalTool
-
+from pydantic import SecretStr
 
 DEFAULT_MODEL = "anthropic/claude-sonnet-4-6"
 
@@ -217,13 +215,13 @@ def build_conversation(
             Tool(name=GrepTool.name),
         ],
     )
-    kwargs: dict = dict(
-        agent=agent,
-        callbacks=[on_event],
-        token_callbacks=[on_token],
-        workspace=args.workspace,
-        conversation_id=conversation_id,
-    )
+    kwargs: dict = {
+        "agent": agent,
+        "callbacks": [on_event],
+        "token_callbacks": [on_token],
+        "workspace": args.workspace,
+        "conversation_id": conversation_id,
+    }
     if persistence_dir is not None:
         kwargs["persistence_dir"] = str(persistence_dir)
     return Conversation(**kwargs)
@@ -352,9 +350,17 @@ async def run_serve(args) -> int:
             emit({"type": "error", "message": state["error"]})
             result_obj = {"type": "result", "subtype": "error_during_execution", "result": ""}
         elif state["interrupted"]:
-            result_obj = {"type": "result", "subtype": "interrupted", "result": state.get("last_text") or ""}
+            result_obj = {
+                "type": "result",
+                "subtype": "interrupted",
+                "result": state.get("last_text") or "",
+            }
         else:
-            result_obj = {"type": "result", "subtype": "success", "result": state.get("last_text") or ""}
+            result_obj = {
+                "type": "result",
+                "subtype": "success",
+                "result": state.get("last_text") or "",
+            }
         transcript.append(result_obj)
         emit(result_obj)
         emit({"type": "turn_done"})
@@ -394,7 +400,9 @@ async def run_serve(args) -> int:
                 # Finish any in-flight turn before snapshotting (mirror
                 # cli-guest.ts: defer export until idle).
                 await drain_run()
-                emit({"type": "context", "sessionId": str(conversation_id), "transcript": transcript})
+                emit(
+                    {"type": "context", "sessionId": str(conversation_id), "transcript": transcript}
+                )
                 break
 
             elif t == "close":
