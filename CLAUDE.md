@@ -364,5 +364,6 @@ macOS; if you can't run it, say so explicitly rather than claiming success.)
 ## Housekeeping
 
 - Don't commit build output or generated code (already gitignored).
+- After editing any Markdown, run `npm run lint:md` (config in `.markdownlint-cli2.jsonc`); it must pass clean.
 - Comments explain WHY, not WHAT; keep them minimal.
 - Commit messages: conventional style (`feat`/`fix`/`chore` + scope), focused on the why.
