@@ -712,9 +712,6 @@ to feel ghost→resolve→relate before wiring the cage.
 
 Literature and market evidence for and against the design above. Each finding references its
 source in §14 by `[E#]`, tiered there ([R] research · [P] primary · [A] analyst · [O] opinion).
-Research sweeps use Kagi (it filters SEO by default, where general web search surfaces the blog
-layer). Standing rule: no load-bearing claim rests on a lone [O] or untraced-[A] source — trace
-to [R]/[P] first.
 
 ### What validates the thesis
 
