@@ -1,43 +1,30 @@
 # CLAUDE.md
 
-Contributor + agent guide for **Atelier** — a Cowork-style desktop AI workspace: a Go host
-service drives a Linux utility VM (VZ on macOS, HCS on Windows), a Python/OpenHands agent loop runs
-the AI *inside* that VM (Topology B), and an Electron/React app is the UI. The point is letting an AI agent work
-on local files safely by **containment** (the VM is the cage), not per-click consent. Full design,
-decisions, and glossary: [`docs/architecture/design.md`](docs/architecture/design.md); slice-by-slice
-implementation status: [`docs/status/implementation-status.md`](docs/status/implementation-status.md);
-the end-to-end run guide is the root [`README.md`](README.md).
+**Atelier** is a desktop AI workspace that lets an AI agent work on local files safely by
+**containment**: a Go host service (`atelierd`) drives a Linux utility VM (VZ on macOS, HCS on
+Windows), a Python/OpenHands agent loop runs the AI inside that VM, and an Electron/React app is the
+UI. The VM is the cage — safety comes from containment, not per-click consent.
 
-This file is the source of truth for how to build, run, test, and what conventions to follow.
-
-## Working efficiently in this repo
-
-This repo is small (~210 files) but its docs are large. Keep the main context lean and fast:
-
-- For any "where is X / how does Y work / which files touch Z" question, use the **Explore**
-  subagent (or a general-purpose Agent) instead of grepping and reading inline. Have it return
-  conclusions + `file:line`, not file dumps — exploration then stays out of the main context.
-- Do **not** reflexively open the big design docs. The repo-layout table and the "Where things
-  live" map below, plus the relevant source file, are usually enough. Only read
-  `docs/architecture/design.md`, `docs/status/implementation-status.md`,
-  `docs/research/claude-cowork-internals.md`, and the other multi-hundred-line
-  docs when a task genuinely needs that depth — and read the relevant section, not the whole file.
+**Per-package commands, conventions, and gotchas** live in `.claude/rules/*.md` and load when you
+open files in that package. Deeper architecture reference, when a task needs it:
+[`docs/architecture/design.md`](docs/architecture/design.md) (read the relevant section, not the
+whole file); current implementation state: [`docs/status/implementation-status.md`](docs/status/implementation-status.md); run guide: [`README.md`](README.md).
 
 ## Repo layout
 
 | Dir | What | State |
 | --- | --- | --- |
-| `apps/desktop` | Electron/React desktop UI (the shell) | WORK mode wired to the broker; chat mode mock |
+| `apps/desktop` | Electron/React desktop UI | WORK mode wired to the broker; chat mode mock |
 | `services` | One Go module — host broker (`atelierd`), in-VM daemon (`runner`), dev CLI (`atelierctl`) | full substrate (boot/exec/files/net) |
-| `packages/partisan` | Python/OpenHands in-guest agent loop (`cli_guest.py`) — the sole agent | live launch site (`e2e:host` green); LiteLLM picks the provider — `docs/plans/openhands-adoption.md` |
+| `packages/partisan` | Python/OpenHands in-guest agent loop (`cli_guest.py`) — the sole agent | live; LiteLLM picks the provider |
 | `packages/protocol` | Generated Hop-2 protocol bindings (schema is canonical) | generated, gitignored |
-| `image` | VM image build — kernel + initrd + rootfs bundle; bakes in the agent | build pipeline |
+| `image` | VM image build — kernel + initrd + rootfs bundle + runner volume | build pipeline |
 | `tools/protogen` | Protocol codegen (schema → TS + Go) | working |
 | `docs` | Design, runtime architecture, implementation, and security docs | see `docs/README.md` |
 
-Generated/build output is gitignored: `build/` (the orchestrator's staged artifacts),
-`apps/desktop/.vite`, `apps/desktop/out`, `**/node_modules`, `packages/protocol/src`,
-`services/pkg/protocol`, `services/bin`, `image/.work`, `image/bundle`.
+Generated/build output is gitignored: `build/`, `apps/desktop/.vite`, `apps/desktop/out`,
+`**/node_modules`, `packages/protocol/src`, `services/pkg/protocol`, `services/bin`, `image/.work`,
+`image/bundle`.
 
 ### Where things live (jump here, don't search)
 
@@ -55,315 +42,51 @@ Generated/build output is gitignored: `build/` (the orchestrator's staged artifa
 | In-guest agent wire client (NDJSON codec + transport seam) | `apps/desktop/src/main/sessions/client.ts` (`PartisanClient`), `transport.ts` |
 | Protocol (canonical schema) | `packages/protocol/schema/protocol.json` |
 
-## Build the whole stack
+## Build & verify the whole stack
 
-`scripts/build-all.mjs` is the **single source of truth** for the build. One command builds +
-verifies everything from zero and writes **every artifact into one tree**, `build/<config>/`:
+`scripts/build-all.mjs` is the single build entrypoint — it builds + verifies everything into one
+tree, `build/<config>/` (all gitignored). The heavy rootfs/kernel/initrd image is skipped by default;
+the cheaper `runner` volume (runner + in-guest agent, via `uv sync`) rebuilds in its place. Pass
+`--image` to rebuild the full bundle. Both need Docker (OrbStack on macOS, WSL2 on Windows).
 
 ```sh
-npm run build:all                      # debug (default): host + desktop + runner volume; full image skipped -> build/debug/
-npm run build:all -- --image           # also build the heavy VM image (rootfs+kernel+initrd) -> build/debug/
-npm run build:all -- --config=release  # stripped Go + self-contained               -> build/release/
-npm run build:all -- --only=host       # one phase: protocol + host/atelierctl (codesigned on macOS)
-npm run build:all -- --only=image      # one phase: full VM image bundle
-npm run build:all -- --only=desktop    # one phase: packaged desktop app
+npm run build:all                      # debug: host + desktop + runner volume; image skipped
+npm run build:all -- --image           # also rebuild the heavy VM image (rootfs+kernel+initrd)
+npm run build:all -- --config=release  # stripped Go + self-contained -> build/release/
+npm run build:all -- --only=host       # one phase only (host | image | desktop)
 npm run build:all -- --deep            # true from-zero: also wipe node_modules + image/.work
 npm run build:all -- --no-verify       # skip tests/typecheck/lint
 ```
 
-The full rootfs/kernel/initrd image is the heavy, rarely-changing part, so the default run **skips it**
-and only (re)builds the `runner` volume next to a reused image — pass `--image` (or `--only=image`)
-to rebuild the whole bundle. The `runner` volume carries **both** runner and the in-guest agent
-(partisan code + its venv), so rebuilding it does a `uv sync` for the agent (not the old runner-only ~10s);
-it's still far cheaper than a full rootfs rebuild. The `runner` volume is **always** built when the
-image phase runs; both the default and `--image` need Docker.
+Run the broker (`build/<config>/atelierd`; elevated only on Windows) and the app
+(`ATELIER_BUNDLE_DIR=build/<config>/image/<target> npm run dev`). Building the broker on macOS
+requires codesigning (VZ refuses an unsigned broker); use the orchestrator, not a bare `go build`.
+Image-build internals: `image/build.sh`. Full run guide + `atelierctl` terminal path + dev-without-VM:
+[`README.md`](README.md).
 
-`build/<config>/` layout: `atelierd(.exe)` + `atelierctl(.exe)` (Go broker + dev CLI, broker codesigned on
-macOS), `image/<target>/` (the VM bundle), `desktop/` (packaged Electron app).
+### The verification gate
 
-The orchestrator (zero-dep Node, runs on both OSes) drives the chain in order — submodule → clean →
-protogen → host build (cgo + codesign, done **in-process**, no per-OS shell script) → VM image →
-desktop → verify — branching only for the irreducible platform bits: `codesign` on macOS (VZ refuses
-an unsigned broker) and the `wsl` prefix for the Docker image build on Windows (unverified from a
-Mac). Neither `runner` nor the in-guest agent is baked into the rootfs — they ship together on one ro
-volume (`runner.{raw,vhd}`, mounted at `/opt`), built by the image build and attached as a second disk;
-verify also linux-cross-compiles `runner`.
-
-The image build lives in `image/build.sh` — one cross-OS bash+Docker script (native on macOS, via
-`wsl` on Windows). It writes to `image/bundle/<target>/` by default; the orchestrator redirects it
-into `build/<config>/image/` via `ATELIER_OUT_BASE`. Generated source (`packages/protocol/src`,
-`services/pkg/protocol`) is imported by module path, so it stays in-tree (regenerated by `protogen`,
-not moved into `build/`). All of `build/` is gitignored.
-
-Then run the broker (`build/<config>/atelierd`; elevated only on Windows) and the app
-(`ATELIER_BUNDLE_DIR=build/<config>/image/<target> npm run dev`). See the root [`README`](README) for
-the full run guide + the `atelierctl` terminal path + dev-without-VM.
-
-## Desktop app — `apps/desktop` (TypeScript / Electron)
-
-Stack: Electron Forge + `@electron-forge/plugin-vite`, Vite, React 19, TypeScript, Tailwind v4,
-shadcn/ui (Radix + cva + tailwind-merge), `react-markdown`/`remark-gfm`, Phosphor icons, IBM Plex
-fonts, oxlint/oxfmt, vitest.
-
-```sh
-cd apps/desktop
-npm install
-npm start            # dev
-npm run typecheck    # tsc --noEmit
-npm run lint         # oxlint
-npm run format       # oxfmt (code only)
-npm test             # vitest
-npm run package      # full Forge build (no window) -> apps/desktop/out/
-```
-
-`package` needs the `yauzl@^3.3.1` override in `package.json`: `electron-forge`'s `extract-zip@2.0.1`
-pins `yauzl@2.10.0`, whose inflate stream deadlocks on large entries under Node 24+, making
-`electron-forge package` silently exit 0 with no `out/`. The override is still required on every
-upgrade path (even `@electron/packager@20` pins `extract-zip@2`).
-
-Process layout:
-
-- `src/main` — Node main process. `host-client/` is the Hop-2 named-pipe JSON-RPC client to the Go
-  broker; `sessions/` is the **Session Manager** (`manager.ts`) + durable `store.ts` — the
-  host-owned state machine that brings up `vm0` once and runs **concurrent persistent per-session
-  in-guest loops** (`cli_guest.py --serve`), with idle/LRU **hibernate→resume** to bound guest memory.
-  The wire to each loop is `PartisanClient` (`sessions/client.ts`) — owns the NDJSON codec +
-  `export_context` correlation over a `LoopTransport` seam (`transport.ts`) that runs the **same**
-  client over the broker `exec` door (prod) or a spawned subprocess (tests), so the wire client is
-  tested against the real agent without a VM. `workspace/` reads + watches the session folder to
-  mirror deliverables back to the UI.
-- `src/renderer` — sandboxed React. `features/{chat,sessions,workspace}` (chat view + composer,
-  session list/mode/status, file panel), `components/ui` (shadcn primitives).
-
-Conventions:
-
-- Renderer is hardened (design §2): `sandbox: true`, `contextIsolation: true`,
-  `nodeIntegration: false`, strict CSP (`src/main/security.ts` — dev-relaxed for HMR, prod-strict).
-- The renderer's only bridge is a narrow `contextBridge` (`window.atelier`) in `src/preload`.
-- IPC channel names are centralized in `src/main/ipc/channels.ts` (shared by main + preload).
-- Tailwind v4: no `postcss.config`/`tailwind.config`; wired via `@tailwindcss/vite` +
-  `@import "tailwindcss"` / `@plugin` in `src/renderer/index.css`.
-- WORK mode drives the real broker; chat mode is still mock (`renderer/lib/mock-data.ts`).
-- Env knobs: `ATELIER_BUNDLE_DIR` (per-target bundle dir, e.g. `image\bundle\windows-amd64-hyperv`; platform-aware default resolver lands in S3), `ATELIER_IDLE_MS` (hibernate-after-idle,
-  default 10 min), `ATELIER_MAX_ACTIVE` (live loops before LRU hibernate, default 3),
-  `ATELIER_BOOT_TIMEOUT_MS` (default 120 000). The model call needs `ANTHROPIC_API_KEY` in the
-  environment that launches the app.
-
-## Host services — `services` (Go)
-
-Module: `github.com/jlagedo/atelier/services`. Protocol (Hop 2, design §8): JSON-RPC 2.0 with
-Content-Length framing, over a named pipe on Windows / a unix socket for dev. Three binaries under
-`cmd/`: **`atelierd`** (the privileged broker), **`runner`** (the in-VM daemon, shipped on the ro guest
-payload volume — `image/build.sh runner`, which also carries the in-guest agent — attached as a second
-disk, **not** baked into the rootfs, so it iterates without rebuilding the image), **`atelierctl`** (dev CLI).
-
-```sh
-cd services
-go build ./... && go test ./... && go vet ./... && gofmt -l .
-GOOS=windows go build ./...     # verify the Windows named-pipe / HCS paths compile
-
-# dev end-to-end (unix socket, no VM):
-go run ./cmd/atelierd  -addr /tmp/atelierd.sock &
-go run ./cmd/atelierctl -addr /tmp/atelierd.sock getStatus
-```
-
-On **macOS (Apple Silicon)** the broker drives Apple's Virtualization.framework via the
-`Code-Hex/vz` cgo binding (`internal/vmm/driver_darwin.go`), so darwin builds need
-`CGO_ENABLED=1` + Xcode Command Line Tools, and the broker must be codesigned with
-`com.apple.security.virtualization` (`services/packaging/darwin/atelier-vm.entitlements`)
-under the hardened runtime — the framework refuses to start otherwise, and cgo invalidates
-the signature on every rebuild. Build + sign via the orchestrator phase instead of a bare `go build`:
-
-```sh
-npm run build:all -- --only=host      # protogen -> cgo build host+atelierctl -> codesign host -> build/debug/
-build/debug/atelierd  -addr /tmp/atelierd.sock &
-B=build/debug/image/darwin-arm64-vz
-build/debug/atelierctl -addr /tmp/atelierd.sock createVM -id vm0 \
-  -kernel $B/vmlinuz -initrd $B/initrd -rootfs $B/rootfs.raw
-build/debug/atelierctl -addr /tmp/atelierd.sock startVM -id vm0   # serial boot log -> broker stderr
-build/debug/atelierctl -addr /tmp/atelierd.sock stopVM  -id vm0
-```
-
-**Debug console (debug builds only, macOS/VZ).** There is no inbound path into the guest (vsock-only,
-egress default-deny, no sshd by design). To get an *interactive* root shell into the VM for debugging
-the guest OS itself (kernel, `init.sh`, mounts, runner), **debug builds** wire a second virtio console
-(`/dev/hvc1`) bridged to a unix socket; the broker adds `atelier.debug=1` to the kernel cmdline and
-`init.sh` spawns a root shell on hvc1. Attach with `atelierctl console -id vm0` (raw-mode TTY; Ctrl-]
-detaches without ending the shell). The socket appears automatically at boot — **no env var**.
-
-```sh
-build/debug/atelierd -addr /tmp/atelierd.sock &   # then createVM/startVM as above
-build/debug/atelierctl console -id vm0            # interactive root shell on hvc1
-```
-
-This shell is **root, outside the bwrap/Landlock/seccomp cage**, so it is gated at **build time**, not
-runtime: the host code is behind the `debugconsole` Go build tag (`build:all` sets it only for
-`--config=debug`) and the `init.sh` block is stripped from the release rootfs (`image/build.sh` keyed
-on `ATELIER_CONFIG`). A **release** build contains neither the code nor the init block — there is no
-flag to flip, so it can never appear in a shipped image. (Windows/HCS analog is a follow-up.)
-
-End-to-end integration battery (mirrors `build:all` — zero-dep Node, `build/<config>/` tree):
-
-```sh
-npm run e2e:host                      # build debug if missing, boot vm0, drive all 12 doors + agent
-npm run e2e:host -- --config=release  # against build/release/
-npm run e2e:host -- --skip-build      # reuse build/<config>/ as-is (fast-fail if incomplete)
-```
-
-`scripts/e2e-host.mjs` spawns the **shipped** broker over a unix socket and exercises every door + the
-in-guest agent loop through `atelierctl` — the real Hop-2 wire, which the Go unit tests (fake drivers) and
-the S7 probe (`services/internal/vmm/s7_probe_darwin_test.go`, share shape) don't cover. It splits the two share models into their own sections
-(legacy `/workspace` + Files door; concurrent `/sessions/<tag>` — isolation, arbitrary targets,
-sibling-safe detach), plus the egress jail (default-deny blocks, allow reaches the model) and
-host↔guest bridging both ways. A real boot, so VZ + a codesigned broker + the image bundle are
-required; the agent check needs `ANTHROPIC_API_KEY` (it fails the suite if absent).
-
-`internal/` packages: `broker` (policy gate + audit + Files/Network doors), `hcs` (our own
-`computecore.dll` bindings + compute-system doc), `vmm` (lifecycle + guest/console wiring), `rpc`
-(JSON-RPC codec/transport/notifications), `vsock` (hvsocket dialing), `netjail` (default-deny egress
-via gvisor-tap-vsock). The 12 doors live in `pkg/protocol` (generated): `getStatus`, `createVM`,
-`startVM`, `stopVM`, `exec`, `execInput`, `attachWorkspace`, `detachWorkspace`, `readFile`,
-`writeFile`, `setEgressPolicy`, `setTime`.
-
-Conventions:
-
-- Windows/Linux-only code lives behind `//go:build` tags with a sibling stub
-  (e.g. `internal/rpc/transport_*.go`, `internal/hcs/hcs_*.go`, `cmd/runner/*_linux.go` +
-  `*_other.go`) so `go build ./...` works on either host.
-- `internal/broker` is the containment chokepoint: every capability use passes the policy gate
-  (allow/ask/deny) + audit log before acting (design §10). The Files door is workspace-relative and
-  jails paths (rejects `..` and escaping symlinks).
-- `go.mod` `go` directive is pinned to the installed toolchain (1.25); latest stable is Go 1.26.
-
-## Agent loop — `packages/partisan` (Python/OpenHands)
-
-`packages/partisan/cli_guest.py` is the **sole** in-guest agent (Topology B), built on the **OpenHands
-SDK** (Python ≥3.12, `openhands-sdk`/`openhands-tools` 1.23.*, LiteLLM under it) for model-provider
-freedom. The loop runs *in the cage*, so its hands are OpenHands' built-in coding tools
-(Bash/Read/Write/Edit/Glob/Grep) acting directly on the guest fs — no broker round-trip for tools; only
-the model call escapes via the egress jail. The SDK is embedded **in-process** (`Conversation` +
-`callbacks=[fn]`, **no** agent-server) — the one deviation from stock OpenHands, because the cage is a
-local VM, not a remote/Docker deploy. Full history + decisions: `docs/plans/openhands-adoption.md`
-(the TS `artisan`/`@anthropic-ai/claude-agent-sdk` loop it replaced is gone; recover from git history).
-
-Flags: one-shot `--task` (drives `atelierctl agent`), persistent `--serve` (NDJSON over stdin/stdout,
-driven by the Session Manager), `--resume <id>` for hibernate→resume; token streaming + mid-LLM-call
-interrupt via async `arun()`. **stdout is NDJSON only** — the banner is suppressed and stray library
-prints are redirected to stderr. Model/key/`base_url` resolve `LLM_*` → `ATELIER_MODEL`/`ANTHROPIC_*`;
-the `openhands/<model>` prefix is rejected (it routes to All-Hands' proxy). Uses `uv`.
-
-```sh
-cd packages/partisan
-uv run cli_guest.py --task "create hello.txt" --workspace /tmp/ws   # one-shot
-npm run test:partisan        # from repo root: pytest + cross-language wire (scripts/test-partisan.mjs)
-                             # --live adds streaming/interrupt/kill-and-resume against a real model
-```
-
-partisan ships on the runner volume for the target arch (`linux/amd64` on Windows, `linux/arm64` on
-macOS) — `image/build.sh runner` builds it via `image/agent/Dockerfile` and packs it at `/opt/atelier`;
-mounted at `/opt`, **not** baked into the rootfs — so the desktop app does not install or ship it
-separately, and it iterates without a rootfs rebuild. partisan carries a `uv`-built venv at
-`packages/partisan/.venv` pinned to the rootfs's system Python 3.12. The rootfs provides Python 3.12 +
-`tmux` (the launched loop runs under the venv's interpreter; OpenHands' TerminalTool needs tmux) plus a
-Node 22 runtime as a general guest language the agent can drive.
-
-## Protocol codegen — `tools/protogen`
-
-`packages/protocol/schema/protocol.json` is the **canonical** Hop-2 protocol (design §8).
-`tools/protogen` (zero-dep Node) generates TS + Go from it; outputs are **gitignored** —
-regenerate, don't hand-edit.
-
-```sh
-npm run protogen        # from repo root
-# writes packages/protocol/src/index.ts  and  services/pkg/protocol/protocol.go
-```
-
-TODO: emit Zod schemas alongside the TS interfaces.
-
-## VM image build — `image/`
-
-Builds the utility-VM bundle (kernel + initrd + ext4 rootfs VHD), Cowork's `claudevm.bundle`
-analog (design §7). Sources are tracked under `image/{rootfs,initrd,kernel,guest}`; build output
-goes to `image/bundle/` (gitignored). The matched kernel + `/lib/modules` + boot initramfs all come
-from one Ubuntu 24.04 Docker build (so the §7 coupling holds by construction); the same build
-cross-compiles `gvforwarder`. The in-guest agent is **not** baked into the rootfs — `image/build.sh
-runner` builds it (`stage_agent_ctx` assembles a small Docker context from `packages/{protocol,partisan}`
-source; `image/agent/Dockerfile` runs `uv sync` inside the target-arch build —
-`--platform linux/amd64` or `linux/arm64`) and packs it onto the runner volume. Big artifacts
-(multi-GB VHDs) are **not** committed — produced here and stored externally, not in git/LFS.
-
-Neither `runner` nor the agent is baked into the rootfs: `image/build.sh runner` ships them together on
-one ro ext4 **volume** (`runner.raw` for VZ / `runner.vhd` for HCS, `LABEL=runner`) — runner at
-`/opt/runner/atelier-runner`, the agent at `/opt/atelier` — attached as a second disk and mounted at `/opt`
-(then runner exec'd) by `image/guest/init.sh`. This is the fast dev loop: rebuild only the volume
-(compile runner + agent `npm ci` + `mke2fs`, no rootfs export/apt/kernel) and reboot, instead of the
-whole image. (Because `init.sh` lives in the rootfs, the **first** build after this layout change needs
-one full `--image` rebuild; thereafter the volume rebuilds on the fast path.) `createVM` carries its
-host path (`runnerImagePath`); `atelierctl createVM -runner <img>` and the desktop
-Session Manager both supply it from the bundle. `make all` / `build:all` include it automatically.
-
-A build `TARGET` (default `windows-amd64-hyperv`) selects guest arch + Docker platform + GOARCH +
-disk format + per-target output dir; output goes to `<base>/<target>/`, where `<base>` is `bundle`
-by default or `$ATELIER_OUT_BASE` when set (the orchestrator passes `../build/<config>/image`).
-
-```sh
-cd image
-./build.sh check        # tool readiness + resolved target profile (docker, mke2fs, qemu-img)
-./build.sh rootfs       # docker export -> ext4 (mke2fs -d, no root) -> VHD/raw
-make all                # Windows: kernel+rootfs+initrd+bundle -> bundle/windows-amd64-hyperv/{vmlinuz,initrd,rootfs.vhd}
-make darwin             # macOS arm64 (raw ext4)              -> bundle/darwin-arm64-vz/{vmlinuz,initrd,rootfs.raw}
-```
-
-(Standalone runs above write to `image/bundle/<target>/`; `npm run build:all` / `--only=image`
-redirects them into `build/<config>/image/<target>/`.)
-
-## Versions
-
-This scaffold deliberately uses **latest stable** libraries, diverging from `docs/architecture/design.md`
-§11's Cowork pins (Tailwind 3.4 → 4, React 18 → 19, Electron 41 → 42, etc.). Divergences are
-documented inline where they matter.
+Any change touching the host broker (`services`), the in-guest daemon/agent (`runner`,
+`packages/partisan`), or the VM image (`image/`) is **not done** until `npm run build:all` then
+`npm run e2e:host` pass — and when you add behavior, add a matching assertion to
+`scripts/e2e-host.mjs`. The per-package fast-loop checks (in `.claude/rules/*.md`) are not a
+substitute. `e2e:host` needs `ANTHROPIC_API_KEY` and a real VZ boot on macOS; if you can't run it,
+say so rather than claiming success. State clearly when something can't be verified (HCS,
+Windows-only paths, restricted network).
 
 ## Library docs — use Context7
 
-Because this stack runs **latest-stable** libraries (see Versions), training data is often
-stale here. When you need current API syntax, configuration, setup steps, version-migration
-details, or library-specific debugging for any third-party library/framework/SDK/CLI in the
-repo — Electron 42, React 19, Tailwind v4, shadcn/Radix, Vite, vitest, Go 1.25,
-`openhands-sdk`/`openhands-tools`, LiteLLM, gvisor-tap-vsock, HCS, etc. — reach for the **Context7 MCP**
-(`resolve-library-id` → `query-docs`) instead of relying on memory or web search. Do this
-proactively, even when you think you know the answer; the user shouldn't have to say "use
-context7" first.
-
-Skip it for: refactoring, writing scripts from scratch, debugging this repo's own business
-logic, code review, and general programming concepts.
-
-## Environment & verification
-
-The dev machine is **macOS (Apple Silicon) or Windows 11**. Each drives its own VM backend:
-VZ on macOS, HCS on Windows. Cross-compiling the other target is possible but can't be
-fully exercised without the matching host. For Linux build steps (VM image, rootfs):
-macOS uses **Docker via OrbStack**; Windows uses **WSL2**.
-
-**Always validate substrate changes with `npm run build:all` then `npm run e2e:host`.** For any
-change touching the host broker (`services`), the in-guest daemon/agent (`runner`,
-`packages/partisan`), or the VM image (`image/`), these two are the source-of-truth build +
-integration checks and must pass before the change is considered done — run them, and when you add
-behavior, add a matching assertion to `scripts/e2e-host.mjs`. The per-package checks below are the
-fast inner loop, not a substitute. (`e2e:host` needs `ANTHROPIC_API_KEY` and a real VZ boot on
-macOS; if you can't run it, say so explicitly rather than claiming success.)
-
-- TS: verify with typecheck + lint + vitest + `package`; run the Electron window directly.
-- Go: verify with `go build ./...` + `go test ./...`; cross-compile `GOOS=windows` to catch
-  Windows-only paths. macOS builds need CGO + codesign — use `npm run build:all -- --only=host`.
-- End-to-end: `npm run e2e:host` boots a real VM and drives all 12 broker doors + the agent loop
-  through the shipped broker (macOS/VZ; `scripts/e2e-host.mjs`) — the deepest integration check,
-  complementing the Go unit tests (fake drivers) and the S7 probe (share shape).
-- State clearly when something can't be verified (HCS, Windows-only paths, restricted network)
-  rather than claiming success.
+This stack runs latest-stable libraries (Electron 42, React 19, Tailwind v4, Go 1.25,
+`openhands-sdk`/`openhands-tools`, LiteLLM, gvisor-tap-vsock, etc.), so training data is often stale.
+For current API syntax, config, setup, version migration, or library-specific debugging, reach for
+the **Context7 MCP** (`resolve-library-id` → `query-docs`) proactively, without being asked first.
+Skip it for refactoring, scripts from scratch, this repo's own business logic, code review, and
+general programming concepts.
 
 ## Housekeeping
 
 - Don't commit build output or generated code (already gitignored).
-- After editing any Markdown, run `npm run lint:md` (config in `.markdownlint-cli2.jsonc`); it must pass clean.
+- After editing any Markdown, run `npm run lint:md` (config in `.markdownlint-cli2.jsonc`); it must
+  pass clean.
 - Comments explain WHY, not WHAT; keep them minimal.
 - Commit messages: conventional style (`feat`/`fix`/`chore` + scope), focused on the why.
