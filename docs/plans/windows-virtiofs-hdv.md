@@ -43,7 +43,7 @@ Rocky 10.1 kernel** (`6.12.0-211.16.1.el10_2.0.1.x86_64`, distro bzImage straigh
 `--virtio-fs`. The in-tree `virtiofs.ko`/`fuse.ko` loaded, the device enumerated, and the guest
 mounted it **read-write**:
 
-```
+```text
 loader::linux: detected bzImage format, loading via Linux boot protocol   # no ELF vmlinux needed
 Hypervisor detected: Microsoft Hyper-V
 virtio-pci 0000:01:00.0: enabling device ... virtio0/device:0x001a        # 0x1a (26) = virtio-fs
@@ -77,7 +77,7 @@ HDV attach handshake is the one remaining feasibility unknown (§7).
 A recurring confusion worth nailing: **OpenVMM is not a layer *above* VZ/HCS. It is a peer — an
 alternative VMM — that plugs in *below* them, onto the raw hypervisor.**
 
-```
+```text
  Windows                                  macOS (Apple Silicon)
  ───────                                  ─────────────────────
    guest VM                                  guest VM
@@ -103,6 +103,7 @@ alternative VMM — that plugs in *below* them, onto the raw hypervisor.**
   arm64 guests only. It is a *peer* of VZ, not a consumer of it.
 
 Consequences used below:
+
 - **Replacing** HCS/VZ with OpenVMM (Option 3) is swapping the VMM slot — large surgery on a working
   substrate.
 - **HDV** (Option 1) is the seam that lets HCS keep owning/running the VM while a *device* — backed
@@ -200,7 +201,7 @@ retires.
 
 ### 5.2 Components
 
-```
+```text
         Windows host                                    guest (Rocky EL10)
  ┌──────────────────────────────┐
  │ atelierd (Go broker, owns VM)│  HCS compute system ─────►  vmwp/HCS runs the VM
@@ -238,6 +239,7 @@ out-of-proc is irrelevant to file throughput (§6.2).
 ### 5.4 Per-session shares (mirror VZ)
 
 One virtio-fs device, one config-time tag (`WorkspaceShareTag`), with a mutable directory map:
+
 - legacy single workspace → `SingleDirectoryShare` semantics (dir at device root; guest mounts at
   `/workspace`);
 - sessions → `MultipleDirectoryShare` semantics (each session a named subdir; guest mounts once at
@@ -374,7 +376,8 @@ now over our own HDV bridge** (milestone 2 below).
 
 > **`set_shares` design probe — device-hotplug spike (2026-06-02).** Atelier maps a host dir
 > **per session, live**, on the one running VM (the VZ backend does this via `VZMultipleDirectoryShare`
-> + `fsdev.SetShare()`). Two ways to match it on Windows: **(A)** a composite multi-root FUSE wrapper
+>
+> - `fsdev.SetShare()`). Two ways to match it on Windows: **(A)** a composite multi-root FUSE wrapper
 > (one device, mutable `/sessions/<tag>` router — OpenVMM's `VirtioFs` is single-root + immutable, so
 > we'd fork/own it, the hard part being inode-namespace translation); or **(B)** hot-plug a virtio-fs
 > **device per share** over VPCI — the OpenVMM-endorsed answer
@@ -508,7 +511,7 @@ read a sentinel, write one back, print `PROOF_COMPLETE_PASS/FAIL`).
 
 **Boot under OpenVMM** (`E:\dev\spike\run-spike.ps1`), the load-bearing flags:
 
-```
+```sh
 openvmm.exe -k vmlinuz -r initramfs.cpio.gz \
   --pcie-root-complex rc0,segment=0,start_bus=0,end_bus=255,low_mmio=4M,high_mmio=1G \
   --pcie-root-port rc0:fs \
@@ -548,7 +551,7 @@ binary whose embedded panic-location strings expose its full source-file map. Ev
 - **`oss\…`** → the public `microsoft/openvmm` tree. Confirmed present (we already depend on all of
   these): `oss\vm\devices\virtio\virtiofs\…` (`lib`/`inode`/`section`/`virtio`/`virtio_util`),
   `oss\vm\devices\virtio\virtio\…\transport\pci.rs` (**`VirtioPciDevice`**) + `…\transport\task.rs`
-  + `…\queue.rs`, `oss\vm\devices\pci\pci_core\…\cfg_space_emu.rs` + `…\capabilities\msix.rs` +
+  - `…\queue.rs`, `oss\vm\devices\pci\pci_core\…\cfg_space_emu.rs` + `…\capabilities\msix.rs` +
   `…\msi.rs`, `oss\vm\vmcore\guestmem\…`, `oss\vm\vmcore\…\line_interrupt.rs`,
   `oss\vm\devices\support\fs\{fuse,lxutil}\…`, plus `mesh`/`pal_async`/`task_control` support.
 - **`hyper-v\…`** → Microsoft's **internal** Windows depot — **not** mirrored to the public repo.
@@ -594,7 +597,7 @@ The closed bridge is therefore just two internal crates:
 
 **Two further findings from the full decompile (2026-06-02) that validate our build:**
 
-3. **The proxy ABI is confirmed from the *closed* caller's side, and it's a clean function seam.**
+1. **The proxy ABI is confirmed from the *closed* caller's side, and it's a clean function seam.**
    The decompiled call (line 37679) is `HdvInitializeDeviceHostForProxy(param_3 /*ctx GUID*/,
    param_4 /*IVmDeviceHostSupport*/, &out)` — our exact 3-arg shape — and `HdvCreateDeviceInstance`
    (line 36185) is `(host, 1 /*Pci*/, classId, instanceId, vtable, ctx, &out)`, matching `hdv-sys`.
@@ -603,7 +606,7 @@ The closed bridge is therefore just two internal crates:
    optional trait object so it can substitute a mock host in unit tests. That the export is swappable
    behind a vtable is direct evidence the ABI is a self-contained function boundary, which is why our
    single-process spike (`hdv::proxy`, no COM surrogate) works.
-4. **The "adapter, not rewrite" thesis is proven by the binary itself.** The embedded panic paths
+2. **The "adapter, not rewrite" thesis is proven by the binary itself.** The embedded panic paths
    show the shipped DLL links these *public* OpenVMM crates verbatim:
    `oss\vm\devices\virtio\virtiofs\src\lib.rs` (the FUSE virtio-fs device we drive),
    `oss\vm\devices\pci\pci_core\src\{cfg_space_emu,capabilities\msix}.rs`, `oss\vm\vmcore\guestmem`,
@@ -626,6 +629,7 @@ COM CLSID."
 
 **Two distinct GUIDs, two roles** (`WslCoreVm.cpp:2200` `AddGuestDevice(VIRTIO_FS_DEVICE_ID, Admin ?
 VIRTIO_FS_ADMIN_CLASS_ID : VIRTIO_FS_CLASS_ID, …)`):
+
 - **`EmulatorId`** written into the `FlexibleIov` doc = a device-**type** GUID = the HDV `DeviceClassId`.
   Virtio-fs: `VIRTIO_FS_DEVICE_ID = {872270E1-A899-4AF6-B454-7193634435AD}` (`GuestDeviceManager.h:14`).
   (`FLEXIO_DEVICE_ID = {a8679153-843f-467f-ad7e-f429328f7568}` is the VID's own category id — and is

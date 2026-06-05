@@ -140,7 +140,7 @@ flowchart TB
 - **Native bridge:** An Anthropic-built Swift native Node addon, `@ant/claude-swift`,
   dynamically loaded by the Electron main process. It exports a `vm` object with methods:
 
-  ```
+  ```text
   startVM(bundlePath, ramGB)   stopVM()              isGuestConnected()
   installSdk(subpath, version)  spawn(...)            writeStdin(processId, data)
   mountPath(sessionId, hostPath, name, mode)          kill(processId, signal)
@@ -150,7 +150,7 @@ flowchart TB
 
 - **VM bundle path:** `~/Library/Application Support/Claude/vm_bundles/claudevm.bundle/`
 
-  ```
+  ```text
   claudevm.bundle/
   ├── rootfs.img            ~10 GB sparse ext4 — Ubuntu root filesystem
   ├── rootfs.img.zst        ~2.3 GB           — compressed download artifact
@@ -350,7 +350,7 @@ flowchart LR
 The VM uses gVisor for network virtualization. `socket()` is blocked at the syscall
 level for unprivileged processes. Direct DNS, raw TCP, curl — all blocked.
 
-```
+```console
 $ dig example.com
 socket(): Operation not permitted
 
@@ -404,7 +404,7 @@ auto-whitelisted for follow-up `WebFetch`. `WebFetch` is allowlist-gated.
 `/etc/nftables.conf` contains empty chains with default ACCEPT policies — no firewall
 rules inside the VM. Egress security is handled entirely by the three layers above.
 
-```
+```text
 flush ruleset
 table inet filter {
   chain input   { type filter hook input   priority 0; }
@@ -425,7 +425,7 @@ No custom profiles exist for `coworkd`, `sandbox-helper`, or the `claude` binary
 Sessions use Docker-style random names: `adjective-adjective-scientist`
 (e.g. `intelligent-loving-darwin`, `dreamy-optimistic-babbage`, `zealous-bold-ramanujan`).
 
-```
+```text
 /sessions/
 ├── intelligent-loving-darwin/   ← session 1 (own Linux user, uid ≥ 1001)
 ├── dreamy-optimistic-babbage/   ← session 2
@@ -477,7 +477,7 @@ permission prompt — the mount is re-issued as `rwd` only after the user approv
 
 ### Non-standard directories
 
-```
+```text
 /sessions/    — per-session home directories
 /smol/bin/    — populated at runtime by coworkd
 /workspace/   — empty mount point (sessions binding target)
@@ -690,7 +690,7 @@ The Claude Code CLI itself is **not** baked in — installed at runtime via
 
 ### Snap packages (each retains current + previous revision)
 
-```
+```text
 loop0  core20/2682  63.8M     loop3  lxd/38469    91.7M
 loop1  core20/2717  63.8M     loop4  snapd/25935  48.1M
 loop2  lxd/38331    91.6M     loop5  snapd/26382  48.4M
@@ -700,7 +700,7 @@ loop2  lxd/38331    91.6M     loop5  snapd/26382  48.4M
 
 ### `df -h` (issue #37860)
 
-```
+```text
 Filesystem       Size  Used Avail Use% Mounted on
 /dev/nvme1n1p1   9.6G  8.2G  1.4G  86% /
 tmpfs            2.0G     0  2.0G   0% /dev
@@ -771,7 +771,7 @@ All log files have **`644` (world-readable)** permissions.
 
 ### Per-session artifacts
 
-```
+```text
 ~/Library/Application Support/Claude/local-agent-mode-sessions/<session>/
 ├── audit.jsonl              — complete tool transcript, thinking chain, inputs/outputs, timing
 ├── outputs/screenshot-*.jpg — desktop screenshots (~200 KB, 1372×891) — CLEANED on deletion
@@ -911,7 +911,7 @@ Get-DnsClientServerAddress -InterfaceAlias 'vEthernet (cowork-vm-nat)' # DNS?
 
 ### Platform detection (`yukonSilver`, from app.asar `nmr()`)
 
-```
+```text
 1. Platform must be win32 or darwin
 2. Architecture must be x64 or arm64
 3. MSIX installer required (Windows)

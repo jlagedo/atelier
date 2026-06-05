@@ -23,7 +23,7 @@ A **Go** host service boots a Linux utility VM, a **Python/OpenHands** agent loo
 
 ## Architecture
 
-```
+```text
 Renderer (React, sandboxed)
    │  Electron IPC
 Main process (Node) — Session Manager (per-session lifecycle, hibernate/resume)
@@ -59,7 +59,7 @@ OS and runs the whole chain from zero — git submodule → protocol codegen →
 on macOS) → VM image → packaged desktop → verify — writing **every artifact into one tree**,
 `build/<config>/`:
 
-```
+```text
 build/<config>/
   atelierd(.exe), atelierctl(.exe)        # Go broker + dev CLI (broker codesigned on macOS)
   image/<target>/                # vmlinuz, initrd, rootfs.raw|vhd, *.origin, manifest.txt

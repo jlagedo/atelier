@@ -14,6 +14,7 @@ import (
 	"time"
 
 	vz "github.com/Code-Hex/vz/v3"
+	"golang.org/x/sys/unix"
 
 	"github.com/jlagedo/atelier/services/internal/netjail"
 	"github.com/jlagedo/atelier/services/internal/vsock"
@@ -34,9 +35,9 @@ const (
 	watchInterval = 2 * time.Second
 	// DialGuest retry budget. Start only waits for the hypervisor "running" state,
 	// not guest userspace, so the first dial after startVM can outrun runner binding
-	// its vsock listener. We retry on ECONNRESET ("guest not listening yet") across
-	// ~10s — wider than the Windows hvsock dialer's 8×250ms because a darwin cold
-	// boot (kernel + init + runner) can take longer to reach a bound port.
+	// its vsock listener. We retry on transient connect errors (isTransientDialError)
+	// across ~10s — wider than the Windows hvsock dialer's 8×250ms because a darwin
+	// cold boot (kernel + init + runner) can take longer to reach a bound port.
 	dialGuestRetries   = 40
 	dialGuestRetryWait = 250 * time.Millisecond
 	// darwinKernelCmdLine boots our bundle under Virtualization.framework. It
@@ -137,6 +138,10 @@ func (d *darwinDriver) Create(_ context.Context, cfg VMConfig) error {
 	if memMB == 0 {
 		memMB = defaultMemoryMB
 	}
+	// Clamp to the framework's CPU/memory bounds (and memory to host RAM) before
+	// building the config, so an over-spec request degrades gracefully with a log line
+	// instead of the opaque "configuration is invalid" config.Validate() raises.
+	cpu, memBytes := d.clampVMResources(cpu, memMB*1024*1024)
 
 	// The bundle ships a decompressed arm64 Image for the VZ target (image/build.sh
 	// gunzips the kernel for darwin); VZLinuxBootLoader cannot boot a gzip vmlinuz.
@@ -155,7 +160,7 @@ func (d *darwinDriver) Create(_ context.Context, cfg VMConfig) error {
 		return fmt.Errorf("vm: boot loader: %w", err)
 	}
 
-	config, err := vz.NewVirtualMachineConfiguration(bootLoader, cpu, memMB*1024*1024)
+	config, err := vz.NewVirtualMachineConfiguration(bootLoader, cpu, memBytes)
 	if err != nil {
 		return fmt.Errorf("vm: configuration: %w", err)
 	}
@@ -269,8 +274,47 @@ func (d *darwinDriver) Create(_ context.Context, cfg VMConfig) error {
 	d.mu.Lock()
 	d.vms[cfg.ID] = &darwinInstance{vm: vm, console: console, debugConsole: debugConsole, cfg: cfg}
 	d.mu.Unlock()
-	d.log.Info("vm created", "vm", cfg.ID, "cpu", cpu, "memMB", memMB)
+	d.log.Info("vm created", "vm", cfg.ID, "cpu", cpu, "memMB", memBytes/1024/1024)
 	return nil
+}
+
+// clamp bounds v into [lo, hi]. Pure arithmetic, split out so the resource clamp is
+// unit-testable without the cgo VZ bound calls.
+func clamp[T uint | uint64](v, lo, hi T) T {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
+// clampVMResources bounds the requested CPU count and memory (bytes) to what
+// Virtualization.framework accepts, and memory additionally to host RAM, mirroring
+// Apple's VZVirtualMachineManager.create (min(request, physicalMemory) + the VZ
+// min/max). A clamp logs at Warn so an over-spec request is visible, not silent. If
+// hw.memsize can't be read we bound memory by the VZ max alone rather than failing.
+func (d *darwinDriver) clampVMResources(cpu uint, memBytes uint64) (uint, uint64) {
+	cpuClamped := clamp(cpu,
+		vz.VirtualMachineConfigurationMinimumAllowedCPUCount(),
+		vz.VirtualMachineConfigurationMaximumAllowedCPUCount())
+	if cpuClamped != cpu {
+		d.log.Warn("cpu count clamped to VZ bounds", "requested", cpu, "effective", cpuClamped)
+	}
+
+	memHi := vz.VirtualMachineConfigurationMaximumAllowedMemorySize()
+	if host, err := unix.SysctlUint64("hw.memsize"); err != nil {
+		d.log.Warn("hw.memsize read failed; bounding memory by VZ max only", "err", err)
+	} else if host < memHi {
+		memHi = host
+	}
+	memClamped := clamp(memBytes, vz.VirtualMachineConfigurationMinimumAllowedMemorySize(), memHi)
+	if memClamped != memBytes {
+		d.log.Warn("memory size clamped to VZ/host bounds",
+			"requestedMB", memBytes/1024/1024, "effectiveMB", memClamped/1024/1024)
+	}
+	return cpuClamped, memClamped
 }
 
 // Start boots the VM and waits for it to reach the running state so a failed boot
@@ -412,7 +456,8 @@ func (d *darwinDriver) shutdown(ctx context.Context, vm *vz.VirtualMachine) erro
 // Connect onto the device's own dispatch queue, so no hand-rolled queue is needed here
 // (validation #3). A bounded retry absorbs the race between Start returning (VM at the
 // hypervisor "running" state) and runner binding its vsock listener inside the still-
-// booting guest: until runner listens, Connect fails with ECONNRESET, which we retry.
+// booting guest: until runner listens, Connect fails with a transient connect error
+// (isTransientDialError) which we retry; a clearly-fatal framework error fails fast.
 func (d *darwinDriver) DialGuest(ctx context.Context, id string, port uint32) (net.Conn, error) {
 	inst := d.instance(id)
 	if inst == nil {
@@ -435,10 +480,10 @@ func (d *darwinDriver) DialGuest(ctx context.Context, id string, port uint32) (n
 			return conn, nil
 		}
 		lastErr = err
-		// ECONNRESET means runner hasn't bound the port yet — retry. Any other
-		// error is terminal (no device, framework failure, etc.).
-		var nserr *vz.NSError
-		if !errors.As(err, &nserr) || nserr.Code != int(syscall.ECONNRESET) {
+		// A transient connect error means runner hasn't bound the port yet (or the
+		// fresh fd is mid-boot racing) — retry. A clearly-fatal framework error is
+		// terminal, so fail fast with its diagnostic instead of burning the budget.
+		if !isTransientDialError(err) {
 			return nil, fmt.Errorf("vm: dial guest %q (vsock %d): %w", id, port, err)
 		}
 		select {
@@ -448,6 +493,24 @@ func (d *darwinDriver) DialGuest(ctx context.Context, id string, port uint32) (n
 		}
 	}
 	return nil, fmt.Errorf("vm: dial guest %q (vsock %d): %w", id, port, lastErr)
+}
+
+// isTransientDialError reports whether a vsock Connect error is a boot-window race
+// worth retrying. The binding surfaces two shapes during cold boot: a plain Go error
+// from net.FileConn on the freshly-handed fd (never an *vz.NSError — treat as
+// transient), or an *vz.NSError carrying one of the connect-race errnos. Apple's
+// waitForAgent retries on any error; we keep the predicate narrow so a clearly-fatal
+// framework NSError fails fast with its diagnostic rather than after the full budget.
+func isTransientDialError(err error) bool {
+	var nserr *vz.NSError
+	if !errors.As(err, &nserr) {
+		return true
+	}
+	switch nserr.Code {
+	case int(syscall.ECONNRESET), int(syscall.ECONNREFUSED), int(syscall.ENOTCONN), int(syscall.EBADF):
+		return true
+	}
+	return false
 }
 
 // AttachWorkspace shares a host folder into the running guest over virtio-fs (S6).
@@ -581,7 +644,15 @@ func (d *darwinDriver) StartEgress(_ context.Context, id string, filter *netjail
 	if err != nil {
 		return nil, fmt.Errorf("vm: egress listen: %w", err)
 	}
-	return netjail.Start(d.log.With("vm", id), filter, ln)
+	n, err := netjail.Start(d.log.With("vm", id), filter, ln)
+	if err != nil {
+		// netjail.Start owns ln only on success (the returned *Network closes it); its
+		// early error paths don't, so reclaim the cgo handle + per-port framework
+		// registration here or EgressLinkPort leaks and collides on the next start.
+		_ = ln.Close()
+		return nil, err
+	}
+	return n, nil
 }
 
 func (d *darwinDriver) instance(id string) *darwinInstance {

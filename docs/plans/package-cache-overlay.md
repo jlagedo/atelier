@@ -35,7 +35,7 @@ Split cache artifacts from install trees.
 
 ### The download cache → overlayfs
 
-```
+```text
 merged cache  =  what the package manager sees (e.g. ~/.cache/uv)
                        │
         ┌──────────────┴───────────────┐
@@ -84,6 +84,7 @@ The merged **mount** is ephemeral; the **directories behind it are real files on
 | User deletes session | deleted (intentional) | deleted with it | gone |
 
 Two surfaces, two policies:
+
 - **Install tree + workspace** (`/sessions/<tag>`) → **must persist** so hibernate→resume works.
   Never auto-clear.
 - **Cache upper** (overlay miss-spillover) → **disposable by choice.** Fully regenerable from the

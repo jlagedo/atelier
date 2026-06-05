@@ -4,6 +4,7 @@ package vmm
 
 import (
 	"bufio"
+	"errors"
 	"log/slog"
 	"os"
 
@@ -66,6 +67,12 @@ func (c *darwinConsole) pump(log *slog.Logger) {
 	sc.Buffer(make([]byte, 64*1024), 1<<20)
 	for sc.Scan() {
 		log.Info("console", "line", sc.Text())
+	}
+	// A normal Close() unblocks the read with os.ErrClosed — expected, not worth a
+	// line. Anything else (a >1MiB unbroken line -> bufio.ErrTooLong, or an I/O error)
+	// silently ends the boot log, the primary boot-debug signal, so surface it.
+	if err := sc.Err(); err != nil && !errors.Is(err, os.ErrClosed) {
+		log.Warn("console pump ended on read error", "err", err)
 	}
 }
 

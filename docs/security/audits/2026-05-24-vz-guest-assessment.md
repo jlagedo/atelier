@@ -43,7 +43,7 @@ F-16 — commit `7193d79`, validated on a real VZ boot, 43/43 e2e.)
 
 ### bwrap invocation (from `/proc/1/cmdline`)
 
-```
+```sh
 /usr/bin/bwrap
   --unshare-user --unshare-pid --unshare-ipc --unshare-uts
   --uid 1001 --gid 1001
@@ -110,6 +110,7 @@ through the allowlisted `api.anthropic.com` endpoint, or any future sandbox esca
 F-03 (policy source readable) to give an attacker both the key and the full policy surface.
 
 **Recommendation.**
+
 1. **Rotate the exposed key immediately** — it was observed and recorded during this session.
 2. **Architectural fix:** terminate model calls at a **host-side authenticated proxy**. The guest
    sends requests with no ambient key; the host injects a scoped, per-session ephemeral credential
@@ -136,7 +137,7 @@ F-03 (policy source readable) to give an attacker both the key and the full poli
 `--bind / /` in the bwrap invocation exposes all host mounts, including the read-only runner volume
 at `/opt`. Both the host-comms binary and the complete in-guest agent source tree are readable:
 
-```
+```text
 /opt/runner/atelier-runner                                    ← host-comms Go ELF
 /opt/atelier/packages/artisan/src/seams/policy.ts       ← full allow/deny policy engine
 /opt/atelier/packages/artisan/src/broker/client.ts      ← broker client + RPC schema
@@ -305,10 +306,12 @@ observed; do not rely on in-guest instrumentation.
 - **First seen:** 2026-05-24
 
 **Live evidence.**
-```
+
+```text
 Speculation_Store_Bypass: vulnerable
 SpeculationIndirectBranch: unknown
 ```
+
 (from `/proc/self/status`)
 
 Lower risk on Apple Silicon than x86 but relevant for multi-tenant scenarios.
@@ -468,7 +471,7 @@ invariant to maintain.
 
 All VM network traffic flows through a user-space proxy chain:
 
-```
+```text
 VM (tap0) ──► gvforwarder (user-space, /dev/net/tun)
            ──► vsock://2:1024 (HyperV VMBus / VZ)
            ──► Host-side proxy (enforces allowlist policy)
@@ -476,6 +479,7 @@ VM (tap0) ──► gvforwarder (user-space, /dev/net/tun)
 ```
 
 The host-side proxy implements a **DNS-sinkhole + TCP allowlist** pattern:
+
 - Only `api.anthropic.com` resolves (all others return `NXDOMAIN`).
 - TCP connections are only permitted after a DNS lookup for an allowed hostname.
 - Direct-by-IP TCP receives an instant RST.

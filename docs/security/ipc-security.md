@@ -58,7 +58,7 @@ what callers can do.
   only LocalSystem, Administrators, and a dedicated install-time group
   (`atelier-users`, the `docker-users` analogue):
 
-  ```
+  ```text
   D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;<atelier-users-SID>)
   ```
 
@@ -84,7 +84,7 @@ Independent of the ACL, confirm the connecting process is really our app.
   `SecCode` via `SecCodeCopyGuestWithAttributes`, and check it against a pinned
   requirement with `SecCodeCheckValidity` / `SecRequirementCreateWithString`:
 
-  ```
+  ```text
   anchor apple generic and identifier "com.atelier.app"
     and certificate leaf[subject.OU] = "<YOUR_TEAM_ID>"
   ```

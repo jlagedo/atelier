@@ -11,6 +11,8 @@
     "dev": "npm --prefix apps/desktop run start",
     "build": "npm --prefix apps/desktop run package",
     "lint": "npm --prefix apps/desktop run lint",
+    "lint:md": "markdownlint-cli2",
+    "lint:md:fix": "markdownlint-cli2 --fix",
     "format": "npm --prefix apps/desktop run format",
     "typecheck": "npm --prefix apps/desktop run typecheck",
     "test": "npm --prefix apps/desktop run test",
@@ -18,5 +20,8 @@
     "build:all": "node scripts/build-all.mjs",
     "e2e:host": "node scripts/e2e-host.mjs",
     "test:partisan": "node scripts/test-partisan.mjs"
+  },
+  "devDependencies": {
+    "markdownlint-cli2": "^0.22.1"
   }
 }

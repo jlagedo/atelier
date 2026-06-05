@@ -13,6 +13,7 @@ This file is the source of truth for how to build, run, test, and what conventio
 ## Working efficiently in this repo
 
 This repo is small (~210 files) but its docs are large. Keep the main context lean and fast:
+
 - For any "where is X / how does Y work / which files touch Z" question, use the **Explore**
   subagent (or a general-purpose Agent) instead of grepping and reading inline. Have it return
   conclusions + `file:line`, not file dumps — exploration then stays out of the main context.
@@ -121,6 +122,7 @@ pins `yauzl@2.10.0`, whose inflate stream deadlocks on large entries under Node 
 upgrade path (even `@electron/packager@20` pins `extract-zip@2`).
 
 Process layout:
+
 - `src/main` — Node main process. `host-client/` is the Hop-2 named-pipe JSON-RPC client to the Go
   broker; `sessions/` is the **Session Manager** (`manager.ts`) + durable `store.ts` — the
   host-owned state machine that brings up `vm0` once and runs **concurrent persistent per-session
@@ -134,6 +136,7 @@ Process layout:
   session list/mode/status, file panel), `components/ui` (shadcn primitives).
 
 Conventions:
+
 - Renderer is hardened (design §2): `sandbox: true`, `contextIsolation: true`,
   `nodeIntegration: false`, strict CSP (`src/main/security.ts` — dev-relaxed for HMR, prod-strict).
 - The renderer's only bridge is a narrow `contextBridge` (`window.atelier`) in `src/preload`.
@@ -223,6 +226,7 @@ via gvisor-tap-vsock). The 12 doors live in `pkg/protocol` (generated): `getStat
 `writeFile`, `setEgressPolicy`, `setTime`.
 
 Conventions:
+
 - Windows/Linux-only code lives behind `//go:build` tags with a sibling stub
   (e.g. `internal/rpc/transport_*.go`, `internal/hcs/hcs_*.go`, `cmd/runner/*_linux.go` +
   `*_other.go`) so `go build ./...` works on either host.
@@ -347,6 +351,7 @@ integration checks and must pass before the change is considered done — run th
 behavior, add a matching assertion to `scripts/e2e-host.mjs`. The per-package checks below are the
 fast inner loop, not a substitute. (`e2e:host` needs `ANTHROPIC_API_KEY` and a real VZ boot on
 macOS; if you can't run it, say so explicitly rather than claiming success.)
+
 - TS: verify with typecheck + lint + vitest + `package`; run the Electron window directly.
 - Go: verify with `go build ./...` + `go test ./...`; cross-compile `GOOS=windows` to catch
   Windows-only paths. macOS builds need CGO + codesign — use `npm run build:all -- --only=host`.

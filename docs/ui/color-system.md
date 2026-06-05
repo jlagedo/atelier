@@ -56,6 +56,7 @@ exposed to Tailwind utilities via the `@theme inline` block (so `bg-signal`,
 | Charts | `--chart-1..5` | categorical data viz (primary → signal → positive → negative → tertiary) |
 
 ### Atmosphere
+
 `--shadow-lamp` (soft elevation) and `--shadow-signal` (gold glow on the send
 button) are **theme-scoped** — warm/paper in Studio, cool/dusk in Aegean Dusk —
 via `--shadow-*-raw` vars in each theme block. The `.hero-lamp` mesh behind the

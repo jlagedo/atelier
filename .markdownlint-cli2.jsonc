@@ -1,0 +1,26 @@
+{
+  // Rule reference: https://github.com/DavidAnson/markdownlint/blob/main/doc/Rules.md
+  "config": {
+    "default": true,
+    "MD013": false, // line-length: docs wrap prose freely
+    "MD033": false, // inline HTML: allowed (diagrams, <br>, details)
+    "MD024": { "siblings_only": true }, // duplicate headings ok across sections
+    "MD041": false, // first line need not be a top-level heading (status blocks etc.)
+    "MD060": false, // compact pipe tables (|x|y|) are the repo's house style
+    "MD025": false, // design.md is book-structured with multiple `# Part N` H1s
+    "MD036": false, // bold labels (Classification:, source categories) aren't headings
+    "MD028": false // consecutive callout blockquotes (milestone notes) are intentional
+  },
+  "globs": ["**/*.md"],
+  "ignores": [
+    "**/node_modules/**",
+    "**/.venv/**",
+    "third_party/**",
+    "build/**",
+    "apps/desktop/out/**",
+    "apps/desktop/.vite/**",
+    "packages/protocol/src/**",
+    "image/.work/**",
+    "image/bundle/**"
+  ]
+}

@@ -54,7 +54,7 @@ Forge drives three Vite builds (`forge.config.ts`), one per Electron process tar
 
 ## Process model & layout
 
-```
+```text
 src/main/      Node main process
   main.ts          window + lifecycle; installs CSP, registers IPC, tears down on will-quit
   security.ts      CSP (dev-relaxed for HMR/eval, prod-strict)

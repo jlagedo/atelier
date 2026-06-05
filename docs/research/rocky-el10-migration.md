@@ -114,11 +114,13 @@ HDV (Host Device Virtualization).** WSL uses it, and the entire chain was traced
 
 1. **WSL attaches virtio-fs as a `FlexibleIov` device via `ModifyComputeSystem`.** The HCS operational
    log (`Microsoft-Windows-Hyper-V-Compute-Operational`, event 2007) shows on every WSL boot:
+
    ```json
    {"RequestType":"Add",
     "ResourcePath":"VirtualMachine/Devices/FlexibleIov/<instance-guid>",
     "Settings":{"EmulatorId":"872270e1-a899-4af6-b454-7193634435ad","HostingModel":"ExternalRestricted"}}
    ```
+
    Six of them (virtio-fs is device-per-tag; the host folder is **not** in `Settings` — it is set
    out-of-band by the emulator). `EmulatorId 872270e1…` matches the virtio-fs DEVICE_ID in WSL PR
    #13822. **So WSL's virtio-fs IS a `FlexibleIoDevice` — §1b's "adversarially refuted, not
@@ -128,7 +130,7 @@ HDV (Host Device Virtualization).** WSL uses it, and the entire chain was traced
    `IVmExternalRestrictedFlexIOVDevice`. `Hdv*` = **Host Device Virtualization**.
 3. **WSL's emulator is OpenVMM, in Rust.** `C:\Program Files\WSL\wsldevicehost.dll` contains the
    strings `virtiofs` / `virtio-net` / `virtio-pmem` and source paths `hyper-v\hdv\src\virtio_hdv.rs`
-   + `oss\vm\devices\virtio\…\transport\pci.rs` — the **open-source OpenVMM virtio stack**.
+   - `oss\vm\devices\virtio\…\transport\pci.rs` — the **open-source OpenVMM virtio stack**.
 
 **Deeper strings pass (2026-06-02).** The DLL's panic-location strings give its full source map,
 split by depot prefix — **`oss\…`** = public `microsoft/openvmm` (what we reuse), **`hyper-v\…`** =
@@ -157,7 +159,7 @@ adapter over public crates, not a rewrite. Full table + map in the solution doc
 already ships `virtiofs.ko` + `fuse.ko` (`CONFIG_VIRTIO_FS=m`, `CONFIG_FUSE_FS=m`, `CONFIG_VIRTIO_PCI=y`;
 verified on `rockylinux:10`, 2026-06-01) — only the host device was missing, and HDV supplies it:
 
-```
+```text
 broker (owns the HCS VM)
   └─ host-side HDV device host (Rust sidecar, OpenVMM virtiofs crate)
        ├─ HdvInitializeDeviceHost(computeSystem)        [documented]
@@ -192,7 +194,7 @@ rootfs whose only addition was a self-testing `/init`. OpenVMM loaded the bzImag
 conversion needed) on the WHP backend (`Hypervisor detected: Microsoft Hyper-V`). The host folder was
 attached as `--virtio-fs pcie_port=fs:ws,E:\dev\spike\share` on a PCIe root complex/port. Result:
 
-```
+```text
 virtio-pci 0000:01:00.0: enabling device          # the OpenVMM virtio-fs PCI device enumerated
 /sys/bus/pci/devices/0000:01:00.0/virtio0/device:0x001a   # 0x1a (26) = virtio-fs
 fuse: init (API version 7.41) ; modprobe virtiofs rc=0    # stock in-tree el10 modules load

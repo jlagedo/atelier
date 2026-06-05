@@ -127,10 +127,12 @@ keep OpenHands names; derive `door` (`terminal`→compute, others→files); mark
 Phases are strictly sequential; Phase 1 de-risks the core.
 
 ### Phase 1 — one-shot (`--task`) ✅ DONE (commit `28df76c`)
+
 *Exit (met):* `uv run cli_guest.py --task "create hello.txt" --workspace /tmp/ws` emits a well-formed
 NDJSON stream (`init`→`tool_use`→`policy`→`tool_result`→`text`→`result`, id-paired) and creates the file.
 
 Built (`packages/partisan/`, uv + Python 3.14):
+
 - `pyproject.toml` (`openhands-sdk`/`openhands-tools` 1.23.*) via `uv add`; `argparse` mirrors artisan flags (`--serve`/`--resume` stubbed → Phase 2).
 - **Provider/key resolver:** model `--model`→`LLM_MODEL`→`ATELIER_MODEL`→`anthropic/claude-sonnet-4-6`, add `anthropic/` when unprefixed, reject `openhands/`; key `LLM_API_KEY`→`ANTHROPIC_API_KEY` (`SecretStr`, fail-fast); base_url `LLM_BASE_URL`→`ANTHROPIC_BASE_URL`.
 - `Agent(tools=[Terminal, FileEditor, Grep])` (deny-by-omission); `conversation_id=uuid4()`, `persistence_dir` omitted (optional → Phase 2).
@@ -139,6 +141,7 @@ Built (`packages/partisan/`, uv + Python 3.14):
 Resolved from source: `ObservationEvent` has **no** `is_error` (errors are distinct event types ⇒ `isError:false`); `result` = last assistant `MessageEvent` text after `run()` returns; `run()` blocks (no stdout lock needed yet).
 
 ### Phase 2 — serve (`--serve`, `--resume`) ✅ DONE
+
 *Exit (met):* multi-turn over NDJSON; `export_context`→`context{}`; relaunch `--resume <id>` continues.
 
 Built on an **asyncio control loop** (richer than the originally-planned thread+queue): a daemon
@@ -146,6 +149,7 @@ stdin reader hands control messages to the loop via `call_soon_threadsafe`; turn
 `conversation.arun()` task so an `interrupt`/`pause` control can cancel an in-flight LLM call
 mid-completion; **all stdout under one `_emit_lock`**. This is what enables Phase 2's token streaming
 (`text_delta` via `token_callbacks`) + mid-LLM-call interrupt.
+
 - Turn: `user`→`send_message`+`arun`→`result`+`turn_done`; busy-guard rejects a 2nd `user` mid-turn; defer `export_context` until idle (mirror `cli-guest.ts:174`).
 - `conversation_id` from `--resume` else `uuid4()`; `persistence_dir=$PARTISAN_PERSIST/<id.hex>`; auto-resume; emit `init`. Resume does **not** auto-`run()` — it waits for the next `user` turn (matches artisan).
 - `recover_unmatched_actions` repairs an orphaned tool call left by a kill mid-run (RUNNING→ERROR + synthetic error observation), so the next completion isn't rejected by the provider.
@@ -153,6 +157,7 @@ mid-completion; **all stdout under one `_emit_lock`**. This is what enables Phas
 - *Verified:* 26 pytest (mapper + in-process serve, fake model) + cross-language wire (real partisan ↔ shipped `PartisanClient`); `--live` smoke (real model): streaming turn, interrupt mid-stream, and **kill-and-resume persistence recovery** (`scripts/test-partisan.mjs --live`).
 
 ### Phase 3 — packaging + the hardwired switch ✅ DONE
+
 *Exit (met):* a full WORK session driven by partisan on a booted VM — `e2e:host` green (43/43), one-shot
 **and** serve-mode partisan reach the model through the egress jail in-guest.
 
@@ -164,6 +169,7 @@ mid-completion; **all stdout under one `_emit_lock`**. This is what enables Phas
 - *Verified:* `build:all --image` (venv: 177 pkgs, runner.raw ~828 MB) + `e2e:host` 43/43 on macOS/VZ; partisan launches in-cage (Landlock + seccomp + bwrap), runs tmux/TerminalTool, and completes a full serve turn (init → token → clean close).
 
 ### Phase 4 — cutover (done; conformance deferred)
+
 *Exit (met):* artisan + provider deleted, the Anthropic TS SDK and the artisan packaging removed,
 `e2e:host` + `test:partisan` green with partisan as the only agent.
 
@@ -182,6 +188,7 @@ mid-completion; **all stdout under one `_emit_lock`**. This is what enables Phas
   are the standing coverage. Revisit if a regression slips past them.
 
 ### Deferred
+
 **Image trim** (drop unused deps / slim wheels — *not* by vendoring or forking SDK code). Further
 OpenHands capabilities: MCP connectors (`mcp_config`); Skills/microagents;
 `TaskTrackerTool` + sub-agent delegation + `RouterLLM` + condensers; domain typed tools + the

@@ -110,6 +110,7 @@ hand-edit generated TS/Go. Add Zod emission when M3/M5 first need validated para
 Tiny but blocking. No product code; just make the toolchain usable.
 
 ### S0.1 — Toolchain + HCS access
+
 - **Goal:** Go usable from the shell; HCS callable without per-run elevation.
 - **Work:** put `C:\Program Files\Go\bin` on PATH; add the dev user to **Hyper-V
   Administrators** (`aka.ms/hcsadmin`, §9); confirm **Virtual Machine Platform** is enabled.
@@ -119,6 +120,7 @@ Tiny but blocking. No product code; just make the toolchain usable.
 - **Depends:** —  **Risk:** group change may need a logoff/reboot.
 
 ### S0.2 — Image build host (WSL)
+
 - **Goal:** `image/build.sh` runnable.
 - **Work:** run the build inside WSL; install `docker` + `e2fsprogs` (`mke2fs`) there, or
   swap `docker export` for `debootstrap`. `qemu-img` for the VHD conversion.
@@ -137,6 +139,7 @@ Tiny but blocking. No product code; just make the toolchain usable.
 > Cowork than almost anyone outside Anthropic"* (§14).
 
 ### S0a — M0: Boot *someone else's* UVM (spike)
+
 - **Goal:** prove HCS works on the box **and** pick the HCS-access strategy (unknown #1).
 - **Work:** boot **any** known-good kernel+initrd UVM and get guest output. Kernel source:
   LCOW pair / WSL2 kernel / (bootstrap only) Cowork's `vmlinuz`+`initrd` from
@@ -166,6 +169,7 @@ Tiny but blocking. No product code; just make the toolchain usable.
   Spike artifacts under `.spike/` (uvmboot, boot.ps1, probes) — disposable.
 
 ### S1.1 — M1: Build *our* rootfs
+
 - **Goal:** an Ubuntu 22.04 ext4 root disk we control (§7).
 - **Work:** `image/build.sh rootfs` in WSL — `docker export ubuntu:22.04` → `mke2fs -d`
   (no root) → `qemu-img` → `rootfs.vhd`. Install `image/guest/init.sh` as `/sbin/init`.
@@ -174,12 +178,13 @@ Tiny but blocking. No product code; just make the toolchain usable.
 - **Exit:** reproducible rootfs build artifact.
 - **Depends:** S0.2.  **Risk:** ext4 sizing; VHD footer format (`vpc` vs VHDX).
 - **Result (2026-05-20):** done as part of the S0.2 run — `bundle/rootfs.vhd` (325 MB, `vpc`)
-  + raw `.work/rootfs.ext4` (2 GB). Verified **against the built image** with `debugfs`
+  - raw `.work/rootfs.ext4` (2 GB). Verified **against the built image** with `debugfs`
   (no mount/sudo): `/usr/bin/python3` → `python3.10`; `/sbin/init` (via `sbin`→`usr/sbin`
   usrmerge symlink) is our guest init script; `/workspace` mount point present; full
   Ubuntu 22.04 userland. Verify script: `.spike/verify_rootfs.sh`.
 
 ### S1.2 — M1: Drive HCS yourself (first boot of our rootfs)
+
 - **Goal:** **our** VM boots **our** rootfs, via **our** code. The central milestone.
 - **Work:** implement `internal/hcs` (replace the stub) + `internal/vmm`: author the
   compute-system **JSON doc** (KernelDirect, ext4 root on VHD, `console=hvc0 …`),
@@ -217,6 +222,7 @@ Tiny but blocking. No product code; just make the toolchain usable.
   `.spike/boot_ours.ps1` (disposable spike harness).
 
 ### S1.3 — M1: Matched kernel + initrd (the real §7 image)
+
 - **Goal:** replace the borrowed kernel with the **generic-Ubuntu kernel + matching
   initramfs**, kept coupled to `/lib/modules/<ver>` in the rootfs (§7 coupling rule).
 - **Work:** implement `kernel/fetch-kernel.sh` (fetch the generic kernel + its modules) and
@@ -261,6 +267,7 @@ Tiny but blocking. No product code; just make the toolchain usable.
   with `-Initrd` (defaults to the bundle); binaries `.spike/bin/{host,atelierctl}.exe`.
 
 ### S2.1 — M2: Guest daemon (hvsocket server side)
+
 - **Goal:** an in-VM agent that accepts commands over vsock and streams stdout.
 - **Work:** implement `cmd/runner`: AF_VSOCK RPC server reusing `internal/rpc` (JSON-RPC +
   Content-Length); one method `exec` → run a command, emit stdout/stderr as **JSON-RPC
@@ -297,6 +304,7 @@ Tiny but blocking. No product code; just make the toolchain usable.
   holds PID 1 (no kernel panic) through a clean `stopVM` (`err:null`).
 
 ### S2.2 — M2: Host↔guest exec bridge (Hop 3)
+
 - **Goal:** **the** Phase-1 payoff — run a guest command from the host and stream output.
 - **Work:** host `vm.RPCClient` over **AF_HYPERV** (`Microsoft/go-winio` hvsock); broker
   `exec` method → policy gate → guest `exec`; relay notifications back over Hop 2; add
@@ -350,6 +358,7 @@ Tiny but blocking. No product code; just make the toolchain usable.
 > **Network** is the egress jail.
 
 ### S3.1 — M3: Files door (workspace 9p share + jail)
+
 - **Goal:** a host folder appears in the guest at `/workspace`, with the **path jail
   enforced at the privileged boundary** (§8, §10).
 - **Work:** add a **Plan9/9p** share to the compute-system doc (host side); `init.sh`
@@ -400,6 +409,7 @@ Tiny but blocking. No product code; just make the toolchain usable.
   rebuilt to ship the RPC-mount runner.
 
 ### S4.1 — M4: Network door (egress jail)
+
 - **Goal:** the guest reaches **only** allowlisted destinations; everything else blocked
   (§10 Network, §8 Hop 3).
 - **Work:** **start simple** — restricted NIC + allowlist forward proxy (Go), guest traffic
@@ -466,6 +476,7 @@ Tiny but blocking. No product code; just make the toolchain usable.
 > Wire the **SDK's seams**, don't write a loop (§8). The same module runs in both topologies.
 
 ### S5a.1 — M5a: Agent loop on the HOST (Topology A)
+
 - **Goal:** first end-to-end agent on the real sandbox — brain outside, hands inside.
 - **Work:** `packages/artisan` hosts `@anthropic-ai/claude-agent-sdk`. Wire seams:
   `executeTool` → broker `exec`/file methods (Hop 2 → guest Hop 3); `callModel` →
@@ -492,6 +503,7 @@ Tiny but blocking. No product code; just make the toolchain usable.
   server-authoritative approvals (`checkPolicy` RPC) wait for a real Ask/Deny gate.
 
 ### S5b.1 — M5b: Move the loop INTO the guest (Topology B, Cowork parity)
+
 - **Goal:** same module runs as a Node CLI **in the rootfs**; its LLM/MCP/approval calls
   tunnel out over hvsocket to the host broker. Brain + hands in the cage; host holds the keys.
 - **Work:** ship Node + the agent module in the rootfs (manifest already lists `node`);
@@ -513,7 +525,7 @@ Tiny but blocking. No product code; just make the toolchain usable.
   then execs the agent over the broker — so **no new runner/broker/protocol code was needed**.
   Packaging: the rootfs ships **NodeSource Node 22** (apt's is v12) as the runtime; the agent +
   `node_modules` ship on the runner volume at `/opt/atelier/packages/artisan` (`image/agent/Dockerfile`
-  + `stage_agent_ctx` in `image/build.sh`, packed by `cmd_runner`; mounted at `/opt`), **not** baked
+  - `stage_agent_ctx` in `image/build.sh`, packed by `cmd_runner`; mounted at `/opt`), **not** baked
   into the rootfs; runs via `tsx`. Live run against `vm0`: `node v22.22.2`, agent did built-in
   Read → Write and produced `/workspace/summary.csv` (grand total **37.50**, identical on the host via
   9p), the write **audited** by policy; exit 0. **Containment proof:** clearing the allowlist
@@ -534,6 +546,7 @@ Tiny but blocking. No product code; just make the toolchain usable.
 > Only now does the Electron shell become the top of the stack (§6 — Electron is *last*).
 
 ### S6.1 — M6: Electron shell over the broker
+
 - **Goal:** the chat-forward UI (§11) driving the real agent/sandbox.
 - **Work:** `apps/desktop/src/main/host-client` — a Hop-2 JSON-RPC **client** to the Go
   broker over the named pipe; expand the IPC seam (typed, allowlisted); chat stream with
@@ -571,6 +584,7 @@ Tiny but blocking. No product code; just make the toolchain usable.
     surviving a vm0 reboot for *live* sessions; per-session OS isolation inside the shared VM.
 
 ### S6.2 — M6: Ship
+
 - **Goal:** install like Cowork — no per-run UAC (§9).
 - **Work:** install the Go broker as a **LocalSystem Windows service**; restrict the named
   pipe by a **security group** (Docker/Cowork model); MSIX packaging via Electron Forge
