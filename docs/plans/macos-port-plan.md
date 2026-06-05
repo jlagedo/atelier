@@ -1,7 +1,7 @@
 # macOS Port Plan
 
 | Field | Detail |
-|---|---|
+| --- | --- |
 | Status | Active/historical port plan. S1-S7 and S9 landed; S8 and S10 remain open. |
 | Last updated | 2026-05-23; cleanup notes added after docs reorganization. |
 | Primary reader | Engineers continuing the macOS VZ backend or checking port rationale. |
@@ -72,7 +72,7 @@ The non-portable pieces are concentrated below the broker's VMM seam:
 ## Platform Mapping
 
 | Capability | Windows Today | macOS Target |
-|---|---|---|
+| --- | --- | --- |
 | VM lifecycle | HCS via `computecore.dll` | Virtualization.framework `VZVirtualMachine` |
 | Linux boot | HCS KernelDirect: kernel + initrd + VHD | `VZLinuxBootLoader`: kernel + initrd + RAW/ASIF root disk |
 | Root disk | ext4 inside VHD, attached read-only | ext4 inside RAW or ASIF, attached read-only |
@@ -88,7 +88,7 @@ Each technique below was validated against current Apple documentation. Verdicts
 drive the decisions in the rest of this plan.
 
 | # | Claim | Verdict | Notes / source |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 1 | **Filesystem shares can be changed while the VM runs** | **VERIFIED (smoke-tested, S7)** | `VZVirtioFileSystemDevice.share` is `get/set` on the *runtime* device (macOS 12+), reachable via `VZVirtualMachine.directorySharingDevices`; `VZMultipleDirectoryShare.directories` is also mutable. The remaining undocumented bit — *live guest visibility* of a post-`start()` swap — is now confirmed on Apple Silicon by the S7 probe: a share added after `start()` is visible in the guest with **no remount**, even inside an already-mounted point. **This fully resolves the plan's biggest open spike** (see [Files Door](#files-door-on-macos)). |
 | 2 | **Guest mounts a share with `mount -t virtiofs <tag> <target>`** | VERIFIED | `<tag>` = `VZVirtioFileSystemDeviceConfiguration.tag`. A `validateTag(_:)` exists; exact length/charset rules are not published — validate tags before use. |
 | 3 | **Virtualization.framework is callable from Go/Node, not just Swift** | VERIFIED | `com.apple.security.virtualization` must be on whichever Mach-O instantiates `VZVirtualMachine`, run under the hardened runtime. `Code-Hex/vz` drives the whole framework from Go via cgo. No separate daemon is required. `VZVirtualMachine(configuration:queue:)` requires a **serial dispatch queue** — all VM ops must run on that one queue. |
@@ -183,7 +183,7 @@ Committed `WorkspaceShare`: `HostPath`, `ReadOnly`, `Tag`, `Port`.
 How the macOS driver maps each method:
 
 | Method | macOS implementation |
-|---|---|
+| --- | --- |
 | `Create` | Build `VZVirtualMachineConfiguration`: `VZLinuxBootLoader(KernelPath, InitrdPath)`; `VZDiskImageStorageDeviceAttachment(RootFSPath, readOnly: true)`; one `VZVirtioSocketDevice`; one `VZVirtioFileSystemDevice` (empty `VZMultipleDirectoryShare`). Don't `start()` yet. |
 | `Start` | `VZVirtualMachine.start()` on the serial queue; install the egress vsock listener (port 1024). |
 | `Stop` | `stop()` / `requestStop()`; release the queue. |
@@ -412,7 +412,7 @@ This is the priority deliverable: the minimal, file-by-file change set to boot t
 *existing* product on Apple Silicon. No new product features — just port what's there.
 
 | File / area | Change | Why |
-|---|---|---|
+| --- | --- | --- |
 | `services/internal/vmm/driver_other.go` | Narrow build tag `//go:build !windows` → `//go:build !windows && !darwin` | Free up `darwin` for the real driver; other Unixes keep the stub |
 | `services/internal/vmm/driver_darwin.go` *(new)* | Implement `Driver` (Option A: cgo via `Code-Hex/vz`). Map per the [Driver Contract](#driver-contract) table | The whole macOS substrate |
 | `services/internal/netjail/network.go` | Make `Start` take a host-supplied `net.Listener`; stop calling `egressListenURL()` internally | Reuse the egress jail under VZ vsock instead of Hyper-V hvsock |

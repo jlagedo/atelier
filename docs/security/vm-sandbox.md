@@ -1,7 +1,7 @@
 # VM Sandbox Security
 
 | Field | Detail |
-|---|---|
+| --- | --- |
 | Purpose | Track current risks in the guest VM containment boundary. |
 | Primary reader | Engineers changing guest sandboxing, credentials, egress, or policy. |
 | Scope | Autonomous agent working on local files inside the utility VM. |
@@ -16,7 +16,7 @@ them resolved.
 ## Assessment Timeline
 
 | Date | Environment | Notes |
-|---|---|---|
+| --- | --- | --- |
 | 2026-05-22 | Ubuntu 22.04.5 LTS · Linux 6.8 · x86_64 · Hyper-V | Initial HCS assessment and first remediation pass |
 | 2026-05-24 | Ubuntu 24.04.4 LTS · Linux 6.17 · aarch64 · Apple Silicon VZ | Follow-up audit after the macOS/VZ port |
 | 2026-05-25 | Current tree evidence | bwrap narrowing, cgroups, sysctls, module latch, and Landlock present in code |
@@ -31,7 +31,7 @@ Remaining risk is concentrated in credential residency, Hop-2 policy/access
 control, write rollback, and observability.
 
 | Area | Current state | Code reference | Finding |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Hypervisor boundary | Dedicated Linux VM under VZ or HCS | `services/internal/vmm`, `services/internal/hcs` | — |
 | Agent identity | uid/gid 1001, all capabilities dropped | `services/cmd/runner/sandbox_linux.go` | R-01 |
 | Filesystem sandbox | Curated bwrap allow-list, no whole-root bind | `services/cmd/runner/sandbox_linux.go` | F-03, F-09 resolved |
@@ -184,7 +184,7 @@ rendering attacker-controlled remote links/images in privileged UI contexts.
 ## Resolved Findings
 
 | ID | Status |
-|---|---|
+| --- | --- |
 | R-01 | Agent no longer runs as unconstrained root; sandboxed execs run as uid/gid 1001 with all capabilities dropped. |
 | R-02 | Root filesystem is read-only; writable runtime paths are tmpfs/session mounts with explicit modes. |
 | R-03 | Agent gets user/pid/ipc/uts/mount namespace isolation through bwrap. |
@@ -221,4 +221,4 @@ rendering attacker-controlled remote links/images in privileged UI contexts.
 - Broker gate: `services/internal/broker/policy.go`
 - Live agent key resolver: `packages/partisan/cli_guest.py`
 
-*Classification: Internal / Security Sensitive*
+**Classification:** Internal / Security Sensitive

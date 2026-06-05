@@ -1,7 +1,7 @@
 # Runtime Architecture — UI to In-Guest Agent
 
 | Field | Detail |
-|---|---|
+| --- | --- |
 | Purpose | Map the current component chain from the desktop UI to the sandboxed in-guest agent. |
 | Primary reader | Engineers debugging or changing the WORK-session path. |
 | Current agent | `packages/partisan/cli_guest.py` (Python/OpenHands). |
@@ -113,7 +113,7 @@ Renderer  renders text, tool cards, policy cards, and final result
 ## Protocol Summary
 
 | Hop | Boundary | Transport | Wire format |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 1 | Renderer <-> Main | Electron IPC + contextBridge | structured clone messages |
 | 2 | Main/CLI <-> Broker | Windows named pipe or unix socket | JSON-RPC 2.0, Content-Length |
 | 3-control | Broker <-> runner | AF_HYPERV/VZ vsock, port 5000 | JSON-RPC 2.0 + notifications |
@@ -124,7 +124,7 @@ Renderer  renders text, tool cards, policy cards, and final result
 ## Security Notes
 
 | Gap | Source |
-|---|---|
+| --- | --- |
 | No shipped general-purpose guest NIC; egress flows through host `netjail` plus the Landlock TCP 443 backstop. | `services/internal/netjail`, `services/cmd/atelier-landlock` |
 | Hop 2 still lacks ship-grade access control: Windows pipe has no explicit security descriptor, unix socket lives under `/tmp`, and broker gate is `AllowAll`. | [`../security/ipc-security.md`](../security/ipc-security.md) |
 | Model key still enters the in-guest process environment. | [`../security/vm-sandbox.md`](../security/vm-sandbox.md) F-02 |

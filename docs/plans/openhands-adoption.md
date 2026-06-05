@@ -1,7 +1,7 @@
 # partisan — OpenHands adoption plan
 
 | Field | Detail |
-|---|---|
+| --- | --- |
 | Status | **Done (cutover complete)** — partisan is the **sole** in-guest agent; `packages/artisan` + `packages/provider` and the Anthropic TS SDK are deleted, and they no longer ship on the runner volume. Node is **retained** in the guest as a general language runtime (the original "drop Node" step was re-scoped — embedding more guest languages is the next goal). The formal conformance suite was intentionally **deferred** in favour of the existing `e2e:host` + `test:partisan` coverage. Phases 1–3 done. |
 | Primary reader | Engineers finishing the Python/OpenHands cutover or debugging the in-guest agent wire. |
 | Project | **partisan** — Python (OpenHands SDK) successor to artisan, behind the same NDJSON wire |
@@ -21,7 +21,7 @@ was never carried over and went away with artisan.
 ## 1. Decisions
 
 | # | Decision | Why |
-|---|---|---|
+| --- | --- | --- |
 | D1 | Build **partisan** on the OpenHands SDK as artisan's successor. | Provider freedom; the objection is *model* lock-in, not SDK use. |
 | D2 | Embed in-process (`LocalConversation` + `callbacks`); **no** `agent-server`. This is the only stock OpenHands deviation. | Atelier uses a local VM as the cage, so the transport is the VM's vsock pipe. `agent-server` REST/WS/webhook fan-out is dead weight. We tap `callbacks=` directly (§2). |
 | D3 | Keep the **NDJSON wire** (`cli-guest.ts:18-33`); translate SDK events ↔ NDJSON at the process edge. | Lowest blast radius; rides the existing audited `exec` door. |
@@ -55,7 +55,7 @@ directly (~70 LOC, not a fork). Revisit agent-server only if the topology stops 
 **Control = four surfaces** (Phase-1 parity uses only the first two):
 
 | Surface | Mechanism | Blocks? | artisan analog |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Tool list | `Agent(tools=[…])` — omit ⇒ uncallable | structural | `GUEST_DENY` |
 | `callbacks=[fn]` | in-process, every `Event` | no (observe) | `emit()` + audit |
 | `hook_config` PreToolUse | subprocess, `exit 2` blocks (Claude Code contract) | yes | `canUseTool` deny |
@@ -104,7 +104,7 @@ per-command, masks values `<secret-hidden>` (later audit bonus).
 Built from `callbacks=[fn]`; classes in `openhands-sdk/openhands/sdk/event/`:
 
 | OpenHands `Event` | NDJSON | Source |
-|---|---|---|
+| --- | --- | --- |
 | `MessageEvent` (assistant) | `text{text}` | `message.py:25` |
 | `ActionEvent` | `tool_use{id,name,input}` | `action.py:24` (`tool_name:44`, `tool_call_id:45`, `action:40`) |
 | `ObservationEvent` | `tool_result{id,content,isError}` | `observation.py:31` |

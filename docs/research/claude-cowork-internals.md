@@ -1,7 +1,7 @@
 # Inside Claude Cowork: The Desktop Agent Sandbox
 
 | Field | Detail |
-|---|---|
+| --- | --- |
 | Purpose | Reverse-engineering survey of Anthropic Claude Cowork desktop agent sandbox internals. |
 | Primary reader | Engineers comparing Atelier against Cowork's macOS and Windows architecture. |
 | Snapshot | January-April 2026. Treat all internals as point-in-time. |
@@ -121,7 +121,7 @@ flowchart TB
 ### 3.1 VM Basics (same base image on both OSes)
 
 | Property | Value |
-|---|---|
+| --- | --- |
 | OS | Ubuntu 22.04.5 LTS (Jammy Jellyfish), cloud-init instance id `claude-1` |
 | Architecture | ARM64 (aarch64) on Apple Silicon — native, no emulation; x64 images also hosted on CDN |
 | Kernel | 6.8.0-94-generic (HWE) reported; Ubuntu base typically 5.15.x — not in any authoritative public source |
@@ -181,7 +181,7 @@ See [Chapter 16](#16-windows-specific-internals) for full Windows detail. Summar
 the key macOS↔Windows differences:
 
 | Property | macOS | Windows |
-|---|---|---|
+| --- | --- | --- |
 | Hypervisor | Apple Virtualization.framework | Hyper-V via Host Compute Service (HCS) |
 | VM disk format | `rootfs.img` (sparse ext4) | `rootfs.vhdx` (Hyper-V VHDX, ~9.4 GB) |
 | Session disk | `sessiondata.img` | `sessiondata.vhdx` |
@@ -237,7 +237,7 @@ the key macOS↔Windows differences:
 ## 4. Daemons and Processes
 
 | Tier | Process / Service | Function |
-|---|---|---|
+| --- | --- | --- |
 | Host (macOS) | Claude Desktop Electron + `@ant/claude-swift` native addon | Hosts agent loop; manages VM lifecycle via `VZVirtualMachine` |
 | Host (macOS) | `chrome-native-host` (`Claude.app/Contents/Helpers/`) | Native messaging bridge for the Chrome extension; Unix socket at `/tmp/claude-mcp-browser-bridge-<user>/<pid>.sock` |
 | Host (Windows) | `CoworkVMService` (`cowork-svc.exe`, LocalSystem) | VM lifecycle via HCS; named-pipe RPC; per-request Authenticode self-verification |
@@ -297,7 +297,7 @@ flowchart TB
 ### Channel inventory
 
 | Channel | Mechanism | Purpose |
-|---|---|---|
+| --- | --- | --- |
 | Renderer ↔ Main | Electron IPC | UI events, two contextBridge surfaces (below) |
 | Host ↔ VM (macOS) | vsock (inside `@ant/claude-swift`) | Length-prefixed JSON RPC |
 | Host ↔ VM (Windows) | hvsock port 51234, GUID `0000c822-facb-11e6-bd58-64006a7986d3` | Same RPC |
@@ -379,7 +379,7 @@ Every `WebFetch` / in-sandbox curl is checked against `coworkEgressAllowedHosts`
 network egress proxy."}` or HTTP `403 Forbidden` with `X-Proxy-Error: blocked-by-allowlist`.
 
 | Domain | Status | Purpose |
-|---|---|---|
+| --- | --- | --- |
 | `api.anthropic.com` | Allowed | Anthropic API (always) |
 | `claude.ai`, `downloads.claude.ai`, `bridge.claudeusercontent.com` | Allowed | Anthropic infra |
 | `pypi.org` | Allowed | Python packages |
@@ -433,7 +433,7 @@ Sessions use Docker-style random names: `adjective-adjective-scientist`
 ```
 
 | Resource | Shared between sessions? | Notes |
-|---|---|---|
+| --- | --- | --- |
 | `/tmp/` | **Yes** | Sessions can see each other's temp files — info-leak surface |
 | `/sessions/<name>/` | No | `drwxr-x---` permissions block cross-session access |
 | User (UID) | No | Each active session gets its own Linux user (uid ≥ 1001) |
@@ -457,7 +457,7 @@ Desktop performs path translation in the UI via `translateVMPathToHost()`:
 ### Mount taxonomy
 
 | VM path (macOS layout) | Maps to / purpose | Mode |
-|---|---|---|
+| --- | --- | --- |
 | `/sessions/<name>/mnt/<folder>` | User-selected folder | `rw` (or `rwd` after delete approval) |
 | `/sessions/<name>/mnt/outputs` | Session output folder | rw |
 | `/sessions/<name>/mnt/uploads` | User-uploaded files | ro |
@@ -510,7 +510,7 @@ Claude Code's.
 ### Claude-in-Chrome MCP (`mcp__claude-in-chrome__*`, ~19 tools)
 
 | Group | Tools |
-|---|---|
+| --- | --- |
 | Navigation | `navigate`, `tabs_context_mcp` (read-only, no prompt), `tabs_create_mcp`, `tabs_close_mcp`, `switch_browser`, `resize_window` |
 | Content | `read_page`, `get_page_text`, `find`, `screenshot`, `gif_creator` |
 | Input | `click_element`/`click`, `type`, `form_input`/`fill_input`, `upload_image`, `file_upload` |
@@ -605,7 +605,7 @@ flowchart TB
 ### Languages
 
 | Language | Version |
-|---|---|
+| --- | --- |
 | Python | 3.10.12 |
 | Node.js | 22.22.0 (aaddrick's older mount: 18.x) |
 | Ruby | 3.0.2 |
@@ -615,7 +615,7 @@ flowchart TB
 ### CLI tools
 
 | Tool | Version | Purpose |
-|---|---|---|
+| --- | --- | --- |
 | `ffmpeg` / `ffprobe` | 4.4.2 | Video/audio processing |
 | `git` | 2.34.1 | Version control |
 | `pandoc` | 2.9.2 | Document conversion |
@@ -632,7 +632,7 @@ flowchart TB
 ### Python packages (pip — 181 total)
 
 | Category | Packages |
-|---|---|
+| --- | --- |
 | Data analysis | `pandas` (45 MB), `numpy` (32 MB + `numpy.libs` 27 MB), `matplotlib` (22 MB), `sympy` (30 MB) |
 | Computer vision | `opencv-python` (115 MB), `opencv-python-headless` (81 MB) — **both installed, mutually exclusive**; `cv2` (77 MB), `pillow.libs` (14 MB) |
 | Video / media | `imageio_ffmpeg` (77 MB) |
@@ -645,7 +645,7 @@ flowchart TB
 ### Node.js global packages (`/usr/local/lib/node_modules_global` — 192 MB)
 
 | Package | Purpose |
-|---|---|
+| --- | --- |
 | `docx` | Word document creation |
 | `pptxgenjs` | PowerPoint generation |
 | `pdf-lib` | PDF manipulation |
@@ -655,7 +655,7 @@ flowchart TB
 ### Large bundled toolchains
 
 | Path | Size | Purpose |
-|---|---|---|
+| --- | --- | --- |
 | `/usr/lib/libreoffice` | 319 MB | Headless `.docx`/`.xlsx`/`.pptx` → PDF via `unoserver`/`unoconvert` |
 | `/usr/share/texlive` | 286 MB | LaTeX / PDF generation |
 
@@ -669,7 +669,7 @@ The Claude Code CLI itself is **not** baked in — installed at runtime via
 ### Breakdown (fresh image, pre-user)
 
 | Category | Size | % of disk |
-|---|---|---|
+| --- | --- | --- |
 | System packages (`/usr`) | ~6,400 MB | 67% |
 | Snap (dual revisions) | ~1,400 MB | 15% |
 | Logs + caches (`/var`) | ~650 MB | 7% |
@@ -679,7 +679,7 @@ The Claude Code CLI itself is **not** baked in — installed at runtime via
 ### Largest `/usr` directories
 
 | Path | Size | Notes |
-|---|---|---|
+| --- | --- | --- |
 | `/usr/lib/firmware` | 1,131 MB | Hardware blobs for devices that don't exist in a VM |
 | `/usr/local/lib/python3.10/dist-packages` | 717 MB | 181 pip packages |
 | `/usr/lib/modules` | 599 MB | Kernel modules |
@@ -712,7 +712,7 @@ tmpfs            392M  940K  391M   1% /run
 ### Known bloat / bugs (GitHub issues)
 
 | Issue | Description |
-|---|---|
+| --- | --- |
 | Duplicate OpenCV | `opencv-python` (115 MB) AND `opencv-python-headless` (81 MB) — mutually exclusive, 81 MB wasted |
 | LXD snap | 368 MB wasted on a snap with no purpose in a sandboxed VM |
 | Snap dual revisions | `snap refresh.retain=1` would save ~200 MB |
@@ -730,7 +730,7 @@ per session. Anthropic can flip any capability remotely without a client update.
 ### Notable flags
 
 | Flag | Effect |
-|---|---|
+| --- | --- |
 | `chicago_config` | Enables/disables Computer Use per user |
 | `clipboardGuard`, `screenshotFilter`, `pixelValidation`, `mouseAnimation` | Computer Use sub-controls |
 | `tengu_harbor_ledger` | Communication-channel **deny-list** (Discord, Telegram, iMessage) — not an allowlist |
@@ -741,7 +741,7 @@ per session. Anthropic can flip any capability remotely without a client update.
 ### Codenames
 
 | Codename | Component |
-|---|---|
+| --- | --- |
 | `tengu` | GrowthBook feature-flag namespace |
 | `ditto` | Persistent parent agent session (`local_ditto_*`) |
 | `chicago` | Computer Use capability |
@@ -762,7 +762,7 @@ All log files have **`644` (world-readable)** permissions.
 ### Host logs (macOS — `~/Library/Logs/Claude/`)
 
 | Log | Contents |
-|---|---|
+| --- | --- |
 | `cowork_vm_node.log` | VM lifecycle, networking status, API reachability |
 | `cowork_vm_swift.log` | VM config (CPUs, RAM, rootfs path) logged each boot |
 | `coworkd.log` | Session creation, user provisioning, sandbox-helper updates |
@@ -813,7 +813,7 @@ suitable for regulated workloads."
 ### Permission UX (tiered)
 
 | Tier | Access |
-|---|---|
+| --- | --- |
 | Tier 1 (default) | No file access at all |
 | Tier 2 (after folder approval) | Read/write/create inside the mounted folder (`rw`) |
 | Tier 3 (high-risk) | File deletion / certain command classes require explicit prompt; mount re-issued as `rwd` |
@@ -838,7 +838,7 @@ suitable for regulated workloads."
 ### Documented vulnerabilities / disclosures
 
 | Disclosure | Summary |
-|---|---|
+| --- | --- |
 | **PromptArmor** (Jan 2026, 2 days after launch) | Invisible-text instruction in a Word doc caused Cowork to silently upload personal docs (incl. partial SSNs) to an attacker-controlled Anthropic account, abusing the always-allowed `api.anthropic.com` egress channel. Reported to Anthropic 3 months earlier, unpatched at launch. |
 | **CVE-2025-59536 (CVSS 8.7)** | Check Point Research (Donenfeld, Vanunu), *"Caught in the Hook"* — malicious hooks in `.claude/settings.json` achieved RCE before trust dialogs appeared. Shared code path with Cowork. Fixed in Claude Code 1.0.111 (Oct 2025); disclosed Feb 25, 2026. |
 | **LayerX Security** (Feb 9, 2026) | Desktop Extensions (DXTs) run unsandboxed at user privileges — "impacts more than 10,000 active users and 50 DXT extensions." A benign prompt + a maliciously worded calendar event suffices for arbitrary local code execution. Anthropic: "falls outside our current threat model." |
@@ -879,7 +879,7 @@ flowchart TB
 ### Control channels
 
 | Channel | Mechanism |
-|---|---|
+| --- | --- |
 | Host ↔ service | Named pipe `\.\pipe\cowork-vm-service` (polled ~1 s; each call does an Authenticode verify ~960 ms → 17–20% idle CPU burn, issue #31848) |
 | Service ↔ VM | hvsock port **51234**, service GUID `0000c822-facb-11e6-bd58-64006a7986d3` (VM connects out on vsock :1024 first, then back to :51234) |
 | Daemon console | Named pipe `\.\pipe\cowork-daemon-console-cowork-vm-<id>` → `C:\ProgramData\Claude\Logs\coworkd\user-<SID>.log` |
@@ -887,7 +887,7 @@ flowchart TB
 ### Bundle contents (validated checksums)
 
 | File | Size | Purpose |
-|---|---|---|
+| --- | --- | --- |
 | `rootfs.vhdx` | 9,252,634,624 B (~9.4 GB) | Ubuntu root filesystem (VHDX) |
 | `rootfs.vhdx.zst` | 2,326,875,206 B (~2.2 GB) | Compressed download |
 | `vmlinuz` | 14,965,128 B (~14 MB) | Linux kernel (explicit on Windows) |
@@ -925,7 +925,7 @@ On Windows Server 2022, the Hyper-V role must be explicitly installed via
 ### Failure modes & fixes
 
 | # | Failure | Symptom | Fix |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 1 | **WinNAT evaporation** (Windows Update / VPN install / Hyper-V reconfig silently drops the rule) | "The Claude API cannot be reached from Claude's workspace." | `New-NetNat -Name cowork-vm-nat -InternalIPInterfaceAddressPrefix 172.16.0.0/24` |
 | 2 | **DNS not configured** on adapter after WinNAT loss | No resolution | `Set-DnsClientServerAddress -InterfaceAlias 'vEthernet (cowork-vm-nat)' -ServerAddresses @('1.1.1.1','8.8.8.8')` + `Clear-DnsClientCache` + `Restart-Service CoworkVMService -Force` |
 | 3 | **Corrupted `sessiondata.vhdx`** | `host share not mounted at /mnt/.virtiofs-root/shared` → parsed as "CLI output was not valid JSON" | Rename/delete `sessiondata.vhdx`, restart service |
@@ -963,7 +963,7 @@ Remove-Item -Recurse "$env:LOCALAPPDATA\Packages\Claude_*"
 ## 17. Comparison with Adjacent Anthropic Products
 
 | Product | Sandbox | Notes |
-|---|---|---|
+| --- | --- | --- |
 | **Claude Code (CLI)** | `@anthropic-ai/sandbox-runtime` directly on host (sandbox-exec on macOS, bwrap on Linux/WSL2) since v1.0.29 — **no VM** | Same `agent_toolset_20260401`, same Chrome MCP bridge. "Claude code on the web" uses an Anthropic-managed cloud VM per session |
 | **Claude Agent SDK / Managed Agents** | Anthropic-hosted container on the Claude Platform | Same toolset & sandbox primitives. Pricing (Apr 9, 2026): Sonnet 4.6 $3/$15; Opus 4.6 & 4.7 $5/$25 per Mtok in/out |
 | **Computer Use reference impl** | Docker container (Xvfb + Mutter + Tint2 + Firefox + LibreOffice) | Cowork uses the same model API but against the user's *actual* host display |
@@ -1038,7 +1038,7 @@ Remove-Item -Recurse "$env:LOCALAPPDATA\Packages\Claude_*"
 ## 20. Glossary
 
 | Term | Definition |
-|---|---|
+| --- | --- |
 | **AppArmor** | Linux mandatory-access-control framework. In the Cowork VM only stock Ubuntu profiles exist — no custom profiles for agent processes. |
 | **`agent_toolset_20260401`** | Internal identifier for the in-VM MCP toolset, mirroring Claude Code's. |
 | **Authenticode** | Microsoft code-signing scheme. `CoworkVMService` self-verifies on each named-pipe call (~960 ms), causing idle CPU burn. |

@@ -1,7 +1,7 @@
 # Package-manager cache via shared overlay
 
 | Field | Detail |
-|---|---|
+| --- | --- |
 | Status | Design — not yet executed |
 | Primary reader | Engineers evaluating guest package install performance and isolation. |
 | Objective | Make `pip` / `uv` / `npm` installs in the guest fast and persistent without eroding session isolation |
@@ -18,14 +18,14 @@ work. See [`../research/claude-cowork-internals.md`](../research/claude-cowork-i
 Package installs create two different surfaces:
 
 | Surface | Policy |
-|---|---|
+| --- | --- |
 | Tool binaries (`node`, `pip`, `uv`, `npm`) | Bake into the read-only image surface, like `runner` and the agent. |
 | Install output: download cache and install tree (`site-packages`, `node_modules`) | Make cache reuse fast, persistent, and isolated. |
 
 Rejected alternatives:
 
 | Alternative | Reason rejected |
-|---|---|
+| --- | --- |
 | Pre-bake a big package zoo | Bloats the image. Cowork bakes 717 MB of pip packages, including dual OpenCV, and still misses user-requested packages. |
 | One shared writable cache dir | Lets one session poison another and hits documented package-manager corruption bugs from concurrent writers. |
 
@@ -51,7 +51,7 @@ merged cache  =  what the package manager sees (e.g. ~/.cache/uv)
 Each package manager already supports a redirectable cache dir:
 
 | Tool | Env var | Notes |
-|---|---|---|
+| --- | --- | --- |
 | uv | `UV_CACHE_DIR` | Best fit — cache is content-addressed + designed thread-safe/append-only/shareable |
 | pip | `PIP_CACHE_DIR` | Keep pip's temp build dir on the **same fs** as its cache (avoids non-atomic `shutil.move`) |
 | npm | `npm_config_cache` | Least robust under sharing; lean on `npm cache verify` as a safety net |
@@ -78,7 +78,7 @@ never shared. Only the raw artifact cache goes through the overlay.
 The merged **mount** is ephemeral; the **directories behind it are real files on a persistent disk**.
 
 | Event | `/sessions/<tag>` (install tree + workspace) | Cache upper | overlay mount |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Hibernate (idle/LRU → resume) | persists | persists | torn down, remount on resume |
 | VM stop / crash / reboot | persists (disk volume, not tmpfs) | persists | gone, remount on boot |
 | User deletes session | deleted (intentional) | deleted with it | gone |

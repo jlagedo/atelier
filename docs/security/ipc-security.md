@@ -1,7 +1,7 @@
 # IPC Security — Hop 2 (App to Host Broker)
 
 | Field | Detail |
-|---|---|
+| --- | --- |
 | Purpose | Define the Hop 2 IPC threat model and hardening ladder. |
 | Primary reader | Engineers shipping or hardening the desktop-to-broker boundary. |
 | Scope | IPC between the unprivileged desktop app and privileged host broker. |
@@ -11,7 +11,7 @@
 ## Boundary
 
 | Side | Identity | Privilege |
-|------|----------|-----------|
+| ------ | ---------- | ----------- |
 | Electron **main** (Hop 2 client) | runs as the interactive user | unprivileged |
 | Host **broker** (`cmd/atelierd`, Hop 2 server) | elevated process now; planned Windows service | privileged |
 
@@ -45,7 +45,7 @@ The same five levels apply on both platforms. L1-L3 gate who connects. L4 gates
 what callers can do.
 
 | Level | Control | Threat closed | Effort |
-|-------|---------|---------------|--------|
+| ------- | --------- | --------------- | -------- |
 | L0 | default ACL + `AllowAll` | — | — |
 | L1 | restrict the pipe/socket to a principal | random / other-user processes | low |
 | L2 | tight ACL + verify the caller is our signed binary | squatting/MITM; unsigned callers | medium |

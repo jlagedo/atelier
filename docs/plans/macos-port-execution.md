@@ -1,7 +1,7 @@
 # macOS Port — Execution Plan
 
 | Field | Detail |
-|---|---|
+| --- | --- |
 | Purpose | Track macOS port execution slices and verification. |
 | Primary reader | Engineers implementing or reviewing port work. |
 | Companion | [`macos-port-plan.md`](./macos-port-plan.md) for architecture and API validation. |
@@ -22,7 +22,7 @@
 ## Progress Dashboard
 
 | ID | Slice | Plan ref | Status | PR |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | S0 | Driver seam (Driver/Manager, build tags) | M0 | ☑ `03a78ae` | — |
 | S1 | darwin build-tag split + compiling stub | M3 (pre) | ☑ `cc094d6` | — |
 | S2 | arm64 guest bundle (`darwin-arm64-vz`, raw ext4) | M2 | ☑ `2d2db72` | — |

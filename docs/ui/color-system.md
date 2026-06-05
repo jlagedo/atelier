@@ -1,7 +1,7 @@
 # Color System
 
 | Field | Detail |
-|---|---|
+| --- | --- |
 | Purpose | Define semantic color tokens and usage rules for the desktop UI. |
 | Primary reader | Engineers adding or changing renderer components. |
 | Source of truth | [`../../apps/desktop/src/renderer/index.css`](../../apps/desktop/src/renderer/index.css). |
@@ -22,7 +22,7 @@ painting. Do not sample colors from other app UIs.
 ## The two themes
 
 | | Light — **"Studio"** | Dark — **"Aegean Dusk"** (hero) |
-|---|---|---|
+| --- | --- | --- |
 | Source | a watercolour of a painter's atelier | a sunset over water |
 | Foundation | warm parchment paper | cool petrol-teal dusk |
 | Ink | oxblood-brown (the walls) | warm off-white |
@@ -43,7 +43,7 @@ exposed to Tailwind utilities via the `@theme inline` block (so `bg-signal`,
 `text-positive`, etc. exist). shadcn components consume them by name.
 
 | Role | Token | Meaning / where |
-|---|---|---|
+| --- | --- | --- |
 | Foundation | `--background` `--card` `--popover` `--border` `--input` | surfaces & lines — ~90% of the UI |
 | Ink | `--foreground` `--muted-foreground` | text hierarchy |
 | Hover surface | `--accent` | shadcn's subtle hover only |
@@ -82,7 +82,7 @@ empty-state hero likewise reads per-theme colors from `--hero-1/2/3`.
 ### Gold vs blue — cheat sheet
 
 | Use **`--signal`** (gold) | Use **`--primary`** (blue) |
-|---|---|
+| --- | --- |
 | Send button | Suggestion / example cards |
 | Assistant avatar & "A" mark | File rows, folder icons |
 | Brand mark | Focus rings (`--ring`) |

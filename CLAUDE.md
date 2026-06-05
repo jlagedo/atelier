@@ -26,7 +26,7 @@ This repo is small (~210 files) but its docs are large. Keep the main context le
 ## Repo layout
 
 | Dir | What | State |
-|---|---|---|
+| --- | --- | --- |
 | `apps/desktop` | Electron/React desktop UI (the shell) | WORK mode wired to the broker; chat mode mock |
 | `services` | One Go module — host broker (`atelierd`), in-VM daemon (`runner`), dev CLI (`atelierctl`) | full substrate (boot/exec/files/net) |
 | `packages/partisan` | Python/OpenHands in-guest agent loop (`cli_guest.py`) — the sole agent | live launch site (`e2e:host` green); LiteLLM picks the provider — `docs/plans/openhands-adoption.md` |
@@ -42,7 +42,7 @@ Generated/build output is gitignored: `build/` (the orchestrator's staged artifa
 ### Where things live (jump here, don't search)
 
 | To touch… | Go to |
-|---|---|
+| --- | --- |
 | Policy gate / containment chokepoint | `services/internal/broker/broker.go` |
 | Files door (workspace path jailing) | `services/internal/broker/files.go` |
 | macOS VZ driver | `services/internal/vmm/driver_darwin.go` |

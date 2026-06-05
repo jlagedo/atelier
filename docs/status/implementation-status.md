@@ -1,7 +1,7 @@
 # Atelier — Implementation Status
 
 | Field | Detail |
-|---|---|
+| --- | --- |
 | Purpose | Record slice order, milestone status, and verification notes. |
 | Primary reader | Engineers reading project history or checking how a capability landed. |
 | Status | Historical log through S6.1. Original last broad update: 2026-05-22. |
@@ -30,7 +30,7 @@ Use this overlay for the current repo state; the detailed phase sections below r
 valuable as implementation history.
 
 | Area | Current state |
-|---|---|
+| --- | --- |
 | Go host substrate | Cross-platform VZ/HCS substrate exists; macOS egress containment is verified through S9, with packaging/notarization still open |
 | Guest agent | **partisan** (`packages/partisan`, Python/OpenHands) is the sole in-guest agent; the former TypeScript `artisan` loop was removed at cutover |
 | Desktop | WORK mode drives the broker and Session Manager; chat mode is still mock |
@@ -40,7 +40,7 @@ valuable as implementation history.
 ## Historical Status — 2026-05-22
 
 | Area | State |
-|---|---|
+| --- | --- |
 | Go host substrate | HCS boot, guest exec, 9p files, egress jail, and multi-session mounts implemented |
 | Guest agent | Topology B is the live path; `cli-guest --serve` supports persistent turns and resume |
 | Desktop | WORK mode wired to broker and Session Manager; chat mode still mock |
@@ -52,7 +52,7 @@ valuable as implementation history.
 The scaffold went **wide and shallow**: every layer has a seam, almost no depth.
 
 | Area | State |
-|---|---|
+| --- | --- |
 | Go RPC (Hop 2) — JSON-RPC 2.0 + Content-Length framing, server/client/codec | **Real**, tests green |
 | Broker / policy gate / audit log | **Real seam**; `getStatus` works, capability methods are gated stubs |
 | `internal/hcs`, `internal/vmm`, `internal/netjail`, `cmd/runner` | **Stubs / empty** |
@@ -90,7 +90,7 @@ These were **not** settled in the original design and gated the early slices:
 ## Phase overview
 
 | Phase | Milestones (§14) | Theme | Demoable from |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | **0** | — | Dev-environment unblock | shell |
 | **1** | M0–M2 | **Compute substrate**: boot a VM + exec bridge | `atelierctl` |
 | **2** | M3–M4 | **The doors**: workspace files + egress jail | `atelierctl` |

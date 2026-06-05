@@ -1,7 +1,7 @@
 # Windows host↔guest sharing via virtio-fs over HDV
 
 | Field | Detail |
-|---|---|
+| --- | --- |
 | Status | Design + decision record. Started 2026-06-01. Empirical proof landed (PASS); architecture decided (Option 1); packaging decided (in-broker C-ABI DLL). Implementation not started. |
 | Primary reader | Engineers building the Windows file-sharing path for the Atelier cage on a Rocky/EL10 (or any RHEL-family) guest. |
 | Companion | [`../research/rocky-el10-migration.md`](../research/rocky-el10-migration.md) — holds the EL10 9p-absence finding and the virtio-fs proof transcript (§1, §1c). This doc holds the *solution* design and the decisions. |
@@ -219,7 +219,7 @@ retires.
 ```
 
 | Component | New? | Responsibility |
-|---|---|---|
+| --- | --- | --- |
 | `windowsDriver` (`driver_windows.go`) | reworked | Attach/Detach build `{tag→path,ro}` and call the DLL's `hvfs_set_shares`; drop Plan9 calls. `WorkspaceShare.Port` becomes a Windows no-op. |
 | HCS compute-system doc (`internal/hcs`) | changed | declare the `FlexibleIov`/VPCI slot so the guest gets the device; retire `MakePlan9Add/RemoveRequest` on Windows. |
 | **`hyperv_virtiofs.dll`** | **new (Rust)** | the device host: `hdv` bindings + OpenVMM `virtio` transport over HDV + OpenVMM `virtiofs` device + the share map + the directory jail. C-ABI surface (§6). |
@@ -276,7 +276,7 @@ open-sourced by itself (the missing open counterpart to WSL's closed `wsldeviceh
 **Internal layering** (lower layers reusable for any HDV device, not just virtio-fs):
 
 | Crate | Responsibility |
-|---|---|
+| --- | --- |
 | `hdv-sys` | raw FFI to the HDV C API (`HdvInitializeDeviceHost`, `HdvCreateDeviceInstance`, `HdvCreateGuestMemoryAperture`, `HdvRegisterDoorbell`, callbacks). |
 | `hdv` | safe RAII wrapper (device host, instance, aperture, doorbell, PCI config). |
 | `virtio-hdv` | OpenVMM virtio transport **over** `hdv` (guest mem ← apertures, kick ← doorbells, config space). The open `wsldevicehost` slice. |
@@ -559,7 +559,7 @@ binary whose embedded panic-location strings expose its full source-file map. Ev
 The closed bridge is therefore just two internal crates:
 
 | Closed file (`hyper-v\…`) | Our open counterpart |
-|---|---|
+| --- | --- |
 | `hdv\src\api.rs` (25 panic-refs — the largest) | `hdv-sys` + `hdv` (HDV FFI + RAII) |
 | `hdv\src\virtiofs.rs` | **`virtio-hdv`** (the adapter for virtio-fs — the one file to write) + the `hyperv_virtiofs` cdylib wiring |
 | `hdv\src\{virtio_net,virtio_pmem}.rs` | not needed (we only ship virtio-fs) |

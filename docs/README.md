@@ -9,7 +9,7 @@ agent.
 ## Open By Task
 
 | Task | Read |
-|---|---|
+| --- | --- |
 | Understand the live UI -> broker -> VM -> agent path | [`architecture/runtime-architecture.md`](architecture/runtime-architecture.md) |
 | Find historical rationale | [`architecture/design.md`](architecture/design.md) |
 | Review VM sandbox risks | [`security/vm-sandbox.md`](security/vm-sandbox.md) |
@@ -27,7 +27,7 @@ agent.
 ## Document Status
 
 | Status | Documents |
-|---|---|
+| --- | --- |
 | Current reference | `architecture/runtime-architecture.md`, `security/vm-sandbox.md`, `security/ipc-security.md`, `ui/color-system.md` |
 | Active tracker | `plans/macos-port-execution.md`, `plans/openhands-adoption.md` |
 | Proposal | `plans/package-cache-overlay.md`, `plans/windows-virtiofs-hdv.md`, `design/agent-interaction-paradigm.md` |

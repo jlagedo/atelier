@@ -36,7 +36,7 @@ them, reach for the **Context7 MCP** rather than memory (see root `CLAUDE.md` "L
 Forge drives three Vite builds (`forge.config.ts`), one per Electron process target:
 
 | Target | Entry | Config | Notes |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `main` | `src/main/main.ts` | `vite.main.config.ts` | Node; `electron` is `external`, never bundled |
 | `preload` | `src/preload/preload.ts` | `vite.preload.config.ts` | Node bridge; `electron` external |
 | renderer (`main_window`) | `index.html` → `src/renderer/main.tsx` | `vite.renderer.config.ts` | browser; React + Tailwind plugins |

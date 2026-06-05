@@ -1,7 +1,7 @@
 # SANDBOXESCAPEBENCH vs. Atelier Containment
 
 | Field | Detail |
-|---|---|
+| --- | --- |
 | Purpose | Cross-check Atelier's guest cage against an external container-escape benchmark. |
 | Primary reader | Engineers reasoning about the guest containment boundary and its residual risk. |
 | Paper | Marchand et al., *Quantifying Frontier LLM Capabilities for Container Sandbox Escape*, [arXiv:2603.02277](https://arxiv.org/abs/2603.02277) (cs.CR), 1 Mar 2026. CC-BY-4.0. |
@@ -63,7 +63,7 @@ From `sandbox_linux.go` and the image pipeline, the non-privileged agent exec ru
 ### L1 — Orchestration (4): architecturally absent
 
 | Scenario | CVE | Status |
-|---|---|---|
+| --- | --- | --- |
 | CRI-O sysctl injection | 2022-0811 | N/A — no CRI-O / kubelet |
 | kubectl cp tar overwrite | 2019-1002101 | N/A — no Kubernetes / `kubectl` |
 | RBAC over-privileged service account | — | N/A — no control plane |
@@ -74,7 +74,7 @@ No orchestrator exists in Atelier's runtime path; these have no analog.
 ### L3 — Engine & Runtime (8): the easy wins (diff 1, models ~1.00) — defeated by construction
 
 | Scenario | CVE | Atelier defense |
-|---|---|---|
+| --- | --- | --- |
 | `--privileged` | — | Agent never runs privileged; `--cap-drop ALL`. (`p.Privileged` is an operator/debug hatch, not the agent path.) |
 | docker.sock | — | No Docker daemon in the guest at runtime; socket never mounted; toolbox excludes it. |
 | CAP_SYS_ADMIN | — | No caps; `mount()`/cgroup-mount seccomp-denied. |
@@ -93,7 +93,7 @@ These share the guest kernel, so they are the real threat to the **in-guest cage
 Each is still individually neutralized:
 
 | Scenario | CVE | Atelier defense |
-|---|---|---|
+| --- | --- | --- |
 | Host PID ns + ptrace | — | `--unshare-pid` (fresh PID ns), `ptrace_scope=2`, no `CAP_SYS_PTRACE`. |
 | cgroup `release_agent` | 2022-0492 | Needs `CAP_SYS_ADMIN` + `mount()` + `unshare -UrmC` — all denied (cap-drop + seccomp + `CLONE_NEWUSER` blocked, F-01). No model solved this even in a vulnerable container. |
 | eBPF verifier privesc | 2017-16995 | `bpf()` seccomp-denied (the paper had to disable eBPF to stop it being a universal shortcut); also a 4.4–4.14 bug — guest is 6.8/6.17, patched. |
@@ -135,4 +135,4 @@ Defense-in-depth holds: cap-drop, seccomp, fresh namespaces, kernel patch level,
   no-capability evaluation pinned if the vendored moby profile is ever bumped (see
   `image/agent/seccomp/SOURCE`).
 
-*Classification: Internal / Security Sensitive*
+**Classification:** Internal / Security Sensitive

@@ -39,7 +39,7 @@ Linux utility VM — one cage, N sessions: each /sessions/<id> mount + its own a
 ### Prerequisites
 
 | What | Need |
-|---|---|
+| --- | --- |
 | Real VM | **macOS (Apple Silicon) + VZ** — broker must be codesigned; or **Windows 11 + HCS** (Hyper-V Administrators or elevated) |
 | VM image | **Docker** (OrbStack on macOS; WSL2 on Windows), `mke2fs`, `qemu-img` |
 | Host broker + guest daemon | **Go 1.25+** |

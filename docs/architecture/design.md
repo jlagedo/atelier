@@ -1,7 +1,7 @@
 # Atelier — Design Document
 
 | Field | Detail |
-|---|---|
+| --- | --- |
 | Purpose | Preserve the design rationale that shaped Atelier. |
 | Primary reader | Engineers checking why the project chose VM containment, HCS, broker boundaries, or the three-door model. |
 | Status | Historical design and decision record. Original last update: 2026-05-22. |
@@ -18,17 +18,17 @@ their own space. Earlier working name: `theparser`.
 
 ## Contents
 
-**Part I — Problem & Principles**
+**Part I** — Problem & Principles
 
 1. Vision & Why
 2. Security Model — *containment, not consent*
 3. Scope Boundaries
 
-**Part II — Reference (what already exists)**
+**Part II** — Reference (what already exists)
 4. Reference Architecture: Anthropic **Cowork** (verified)
 5. HCS & the Windows virtualization stack
 
-**Part III — Our Architecture (the decisions)**
+**Part III** — Our Architecture (the decisions)
 6. Compute Sandbox decision — **3b, dedicated HCS utility VM**
 7. The Linux VM image — Kernel + Rootfs
 8. Process Architecture (hops · protocol · transport · languages · topology)
@@ -38,23 +38,23 @@ their own space. Earlier working name: `theparser`.
 12. Skills (distribution)
 13. Provider Seam & Data Residency
 
-**Part IV — Plan**
+**Part IV** — Plan
 14. Milestone Ladder M0–M6
 
-**Back matter**
+**Back matter** — references, open questions, glossary
 15. References
 16. Open Questions / Pending Decisions
 17. Glossary / Keyword Dictionary
 
 ---
 
-# Part I — Problem & Principles
+## Part I — Problem & Principles
 
-## 1. Vision & Why
+### 1. Vision & Why
 
 An **Electron desktop app**: a chat client for an AI stack that lets **non-technical operations users** run **skills and agents safely** against the company AI — and, crucially, **work directly on their local files**.
 
-### The problem we're solving
+#### The problem we're solving
 
 Ops users already have a great **browser-based AI agent** with company-wide data access and subagents. What it *can't* do is touch local files without friction:
 
@@ -62,25 +62,25 @@ Ops users already have a great **browser-based AI agent** with company-wide data
 
 A desktop "workspace" app removes that treadmill: the agent reads/generates/updates local CSVs, Excel, and documents **in place**, no upload/download dance.
 
-### The key architectural consequence
+#### The key architectural consequence
 
 **Local file access is the entire reason this app exists.** The browser agent already covers company-wide data. So any design where the desktop does *not* have first-class local capability defeats the purpose. This single fact drives every decision below.
 
-### Two goals (be honest about both)
+#### Two goals (be honest about both)
 
 - **Personal (the real driver):** learn to build an Electron desktop app, and understand **Cowork-grade VM isolation on Windows** at a deep level.
 - **Work (the framing):** a prototype to give ops users safe access to the internal AI stack.
 
 ---
 
-## 2. Security Model — *containment, not consent*
+### 2. Security Model — *containment, not consent*
 
-### Two layers people conflate
+#### Two layers people conflate
 
 1. **App hardening (standard Electron).** Protects the *app* from malicious content. Table-stakes: `sandbox: true`, `contextIsolation: true`, no `nodeIntegration` in the renderer, strict CSP, a small **allowlisted IPC** surface. Not the hard part.
 2. **Agent containment (the hard part).** The LLM's output is **untrusted input**. A prompt injection or hallucination can turn a "run code" / "write file" tool into damage. App hardening won't save you — the app is working as designed. Containment means the agent has **no ambient authority**: it acts only through explicitly granted, individually-sandboxed **capabilities**, each policy-gated (`allow`/`ask`/`deny`) and **audited**.
 
-### Why not just copy Claude Desktop?
+#### Why not just copy Claude Desktop?
 
 Classic Claude Desktop (MCP) is a **trust + consent** model:
 
@@ -90,12 +90,12 @@ Classic Claude Desktop (MCP) is a **trust + consent** model:
 
 That's fine for *developers*. It's wrong for **non-technical bank ops** who install skills from a registry and **rubber-stamp every "Allow"**. We need containment **by construction**, not consent.
 
-### The "three doors" capability model *(full detail in §10)*
+#### The "three doors" capability model *(full detail in §10)*
 
 The agent has exactly three doors; each is independently sandboxed and audited:
 
 | Door | Capability | Containment |
-|---|---|---|
+| --- | --- | --- |
 | **Files** | read/write in the workspace | jailed to the workspace folder; writes need approval |
 | **Network** | call company APIs | only via connected **MCP servers** (egress allowlist) |
 | **Compute** | run Python | runs **inside the VM**; no FS/net except what the host bridges |
@@ -104,22 +104,22 @@ Nice side effect: because the compute door has **no direct network**, the agent 
 
 ---
 
-## 3. Scope Boundaries
+### 3. Scope Boundaries
 
 - Desktop app = **local files + AI** (+ MCP to company APIs later). Company-wide data stays the **browser agent's** lane (for now).
 - With the 3b VM (§6), **big-CSV Python is in scope** (real Python in the VM), unlike the earlier Pyodide-limited plan.
 
 ---
 
-# Part II — Reference (what already exists)
+## Part II — Reference (what already exists)
 
-## 4. Reference Architecture: Anthropic **Cowork** (verified on the dev machine)
+### 4. Reference Architecture: Anthropic **Cowork** (verified on the dev machine)
 
 **Cowork** (Anthropic, Jan 2026; Windows Feb 10 2026) is essentially the consumer version of this project: a Claude Desktop agent for **non-technical users** that works in local files ("Claude Code for people who don't code"). This is great news — the concept is validated, and we have a proven architecture to study.
 
 > **Pitch reframe:** we're not inventing a category. We're enterprise-izing a validated one — *"Cowork, but with our auth, audit, and a skills registry."*
 
-### How Cowork sandboxes (defense in depth)
+#### How Cowork sandboxes (defense in depth)
 
 - **Hard isolation:** a **full local Linux VM** via **HCS** (Host Compute System) — *not* a normal Hyper-V Manager VM (see §5).
 - **Process sandbox (inside the VM):** **bubblewrap** (FS view, namespaces, capabilities) + **seccomp** (syscall filtering).
@@ -127,7 +127,7 @@ Nice side effect: because the compute door has **no direct network**, the agent 
 - **Files:** the designated folder is shared host↔VM via **Plan9/9p** (verified — see §8; some docs mention VirtioFS, but the shipped Windows build uses 9p).
 - **Tools:** MCP servers are **passed through** into the VM.
 
-### Empirical confirmation (probed on this Windows 11 Pro dev box)
+#### Empirical confirmation (probed on this Windows 11 Pro dev box)
 
 Everything below was observed directly — we reverse-engineered Cowork's model from real artifacts:
 
@@ -167,7 +167,7 @@ Everything below was observed directly — we reverse-engineered Cowork's model 
 
 - **Hyper-V infra processes present:** `vmcompute` (HCS service), `vmms` (VM mgmt), `vmwp.exe` (per-VM Worker Process hosting the Ubuntu VM).
 
-### The confirmed privilege chain
+#### The confirmed privilege chain
 
 ```text
 claude.exe (you, unprivileged)
@@ -178,12 +178,12 @@ claude.exe (you, unprivileged)
 
 ---
 
-## 5. HCS & the Windows virtualization stack
+### 5. HCS & the Windows virtualization stack
 
 "Hyper-V" is a hypervisor with **several management surfaces**; only one shows up in Hyper-V Manager:
 
 | Surface | API / process | In Hyper-V Manager? | Used by |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Full Hyper-V role | VMMS (`vmms.exe`) | **Yes** | hand-made VMs |
 | **Host Compute System (HCS)** | `vmcompute.exe` / `computecore.dll`, `HcsCreateComputeSystem` | **No** | **WSL2, Windows Sandbox, Docker, Cowork** |
 | Windows Hypervisor Platform (WHP) | `WinHvPlatform.dll`, `WHvCreatePartition` | **No** | VirtualBox, QEMU, Android emulator |
@@ -192,38 +192,38 @@ We are building on **HCS** — the same machinery WSL2/Cowork use, which is why 
 
 ---
 
-# Part III — Our Architecture (the decisions)
+## Part III — Our Architecture (the decisions)
 
-## 6. Compute Sandbox decision — **3b, dedicated HCS utility VM** (Cowork parity)
+### 6. Compute Sandbox decision — **3b, dedicated HCS utility VM** (Cowork parity)
 
-### The ladder we considered
+#### The ladder we considered
 
 | Rung | Python runs in | Isolation | Effort | Verdict |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | 1. Pyodide (WASM, in-app) | the app | by construction (no FS/net) | low | rejected — memory/package limits |
 | 2/3a. Reuse WSL2 (hardened distro) | existing WSL2 VM | moderate (must lock down) | medium | rejected — shares subsystem, weaker isolation |
 | **3b. Dedicated HCS utility VM** | own VM + bubblewrap/seccomp + egress proxy | **hard (Cowork-grade)** | high | **CHOSEN** |
 
-### Rationale
+#### Rationale
 
 - Enterprise-grade isolation is a hard requirement for the bank.
 - The personal learning goal **is** "understand exactly how Cowork works."
 - Real Python + full ecosystem + real performance handles big-CSV / scipy workloads that Pyodide can't.
 
-### Acknowledged tradeoff
+#### Acknowledged tradeoff
 
 This shifts the center of gravity **from Electron to Windows virtualization systems programming**. The Electron app becomes the **final** milestone (M6), not the first. Accepted knowingly.
 
 ---
 
-## 7. The Linux VM image — Kernel + Rootfs
+### 7. The Linux VM image — Kernel + Rootfs
 
 We do **not** build Linux from scratch — we borrow both pieces and supply them directly (lightweight, LCOW-style, no installer/bootloader).
 
 - **Kernel** — the engine; one file (`vmlinux`/`vmlinuz`), direct-booted (KernelDirect). Needs virtio / 9p / virtiofs / vsock / Hyper-V drivers. **Borrow** Microsoft's LCOW/WSL2 kernel (has them all), or a generic distro kernel. (Cowork ships its own Ubuntu generic kernel.)
 - **Rootfs** — the userland ("the distro"). Grab a minimal distro off the shelf: `docker export` of `debian:slim`/`ubuntu`, or a WSL rootfs tarball. Pour into an **ext4** image. (Alpine considered and rejected — see below.)
 
-### Boot sequence (it's just a Linux boot, with one twist)
+#### Boot sequence (it's just a Linux boot, with one twist)
 
 ```text
 1. Host (HCS) loads the kernel directly        ← replaces BIOS/GRUB ("KernelDirect")
@@ -236,7 +236,7 @@ An **initramfs** is a tiny in-RAM temporary rootfs used before pivoting to the r
 
 **Everything *inside* the VM is ordinary Linux** (familiar territory). The only genuinely new continent is the **host side**: driving HCS + the host↔guest plumbing.
 
-### VM image spec (decided — the M1 target)
+#### VM image spec (decided — the M1 target)
 
 **Kernel — reuse a prebuilt one (do NOT hand-compile). *Which* one is TO BE VERIFIED at M1.** A utility VM is a **Hyper-V guest**, so the kernel needs Hyper-V/VMBus drivers.
 
@@ -269,12 +269,12 @@ An **initramfs** is a tiny in-RAM temporary rootfs used before pivoting to the r
 
 **Sequence:** M0 boots whatever the LCOW tooling ships (don't decide). M1 wires *this* spec into your own `HcsCreateComputeSystem` call.
 
-### Empirical confirmation — Cowork's actual bundle on disk
+#### Empirical confirmation — Cowork's actual bundle on disk
 
 Found at `%APPDATA%\Claude\vm_bundles\claudevm.bundle\` — **this is exactly the layout this section specifies**, which is strong validation:
 
 | File | Size | What |
-|---|---|---|
+| --- | --- | --- |
 | `vmlinuz` | 14.3 MB | the kernel (direct-booted; `.vmlinuz.origin` present) |
 | `initrd` | 169 MB | the boot initramfs (confirms the kernel loads drivers as modules → initrd required) |
 | `rootfs.vhdx` | ~9 GB | the Ubuntu userland + the in-guest `cowork-daemon` (ext4 in a VHDX) |
@@ -285,7 +285,7 @@ All three of `vmlinuz`/`initrd`/`rootfs.vhdx` carry a `.origin` marker with the 
 
 ---
 
-## 8. Process Architecture
+### 8. Process Architecture
 
 ```text
 Renderer (Chromium UI, sandboxed JS)
@@ -302,10 +302,10 @@ Linux utility VM ── kernel + rootfs + Node + python + tools
 
 **The broker is the containment.** The agent never drives the service directly — its requests pass through the broker's **policy gate (allow/ask/deny) + audit log** first. Without that gate you've rebuilt Claude Desktop's rubber-stamp problem.
 
-### Native code: sidecar, not in-process addon
+#### Native code: sidecar, not in-process addon
 
 | Option | Verdict |
-|---|---|
+| --- | --- |
 | **Option 1 — in-process (cgo `c-shared` lib via N-API/FFI)** | ❌ awkward for Go *and* a crash kills the whole app; would force the entire GUI to run elevated (security anti-pattern). |
 | **Option 2 — standalone Go service/sidecar** | ✅ **CHOSEN** — the natural Go shape; crash isolation, privilege separation, and (key for learning) the whole VMM is developable/testable from a **terminal** with no Electron until M6. |
 
@@ -313,12 +313,12 @@ Linux utility VM ── kernel + rootfs + Node + python + tools
 
 This mirrors the grown-ups: Docker Desktop (UI + privileged engine), WSL (`wsl.exe` + `wslservice`) — and **Docker's engine + hcsshim are themselves Go**, so we're in good company.
 
-### Protocol (Hop 2) — borrow Cowork's exact design (verified)
+#### Protocol (Hop 2) — borrow Cowork's exact design (verified)
 
 Reverse-engineered from the shipped app's `index.js` (the main-process bundle) + live named-pipe enumeration. **Cowork's host-broker IPC is a clean, standard design — adopt it almost verbatim.**
 
 | Aspect | Cowork (verified) | Our choice |
-|---|---|---|
+| --- | --- | --- |
 | Transport | named pipe **`\\.\pipe\cowork-vm-service`** (broker) + per-VM **`cowork-daemon-console-<vmid>`** (guest console) | named pipe (match) |
 | Wire format | **JSON-RPC 2.0** — request (`method`+`id`), **notification** (`method`, no `id`) for streaming, response (`id`+`result`\|`error`) | JSON-RPC 2.0 (match) |
 | Framing | **`Content-Length`** headers (LSP/DAP style) | Content-Length framing — *(supersedes the earlier "newline-delimited JSON" idea; survives embedded newlines in file content / streamed stdout)* |
@@ -333,12 +333,12 @@ Reverse-engineered from the shipped app's `index.js` (the main-process bundle) +
 
 **Privilege split confirmed:** the JS client has **zero** HCS/hvsocket code — it's a thin RPC client; *all* privileged HCS + guest transport lives in the compiled `cowork-svc.exe`. → Validates Option 2 above: keep Node dumb (pure RPC client), put everything privileged in the Go service.
 
-### Transport (Hop 3) — host ↔ guest, verified
+#### Transport (Hop 3) — host ↔ guest, verified
 
 Reverse-engineered from the Go symbol table of **`cowork-svc.exe`** (package `github.com/anthropics/cowork-win32-service` — note: **this repo is private/proprietary**, 404 on GitHub; only its *open-source dependencies* are public). **The service is written in Go** — and this evidence is *why we chose Go too* (see the decision box below). The host↔guest link is **not one protocol — it's three layered channels**, brought up in this order:
 
 | # | Channel | Implementation (verified symbols) | Role |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 1 | **Custom hvsocket RPC** | `vm.RPCServer` over `vm.HVSocketConn`/`HVSockAddr`/`HVSocketListener`; methods `Start`/`acceptLoop`/`handleConnection`/`handleMessage`/`handleResponse`/`handleEvent`/`SendGuestResponse` | **Control plane** to the in-guest `cowork-daemon`. Async, bidirectional request/response **+ events** over a single AF_HYPERV socket. Comes up first; bootstraps the rest. |
 | 2 | **User-mode network over hvsocket** | `github.com/containers/gvisor-tap-vsock` (`pkg/tap` IP-pool/DHCP, `services/dns`/`dhcp`/`forwarder`, `virtualnetwork`, `types.ExposeRequest`/`UnexposeRequest`) + `inetaf/tcpproxy` | Guest has **no real Hyper-V NIC**; the host process *is* the guest's entire network in user space → DNS/DHCP/forward/**allowlist** all host-controlled. **This is the egress jail, by construction.** |
 | 3 | **Exec/file plane** | Cowork symbols suggest SSH over the vsock network; Atelier instead uses runner RPC for exec/`execInput` and Plan9/9p for files. | **Our implementation:** no sshd in the guest; runner streams stdout/stderr as JSON-RPC notifications, and host folders mount over 9p. |
@@ -364,10 +364,10 @@ Reverse-engineered from the Go symbol table of **`cowork-svc.exe`** (package `gi
 > public reference for HCS document shape. We still wrote our own thin `computecore.dll` bindings
 > because hcsshim's reusable boot path is not usable for our non-GCS guest.
 
-### Languages — two, by component (locked)
+#### Languages — two, by component (locked)
 
 | Component | Language | Why |
-|---|---|---|
+| --- | --- | --- |
 | **Host service + broker** | **Go** | *Don't fight the ecosystem* — the reference stack is Go. **HCS** via our own thin `computecore.dll` bindings, **pipes + hvsocket** via **`Microsoft/go-winio`**, **user-mode net** via **`containers/gvisor-tap-vsock`** + `inetaf/tcpproxy`. New stack for the author — chosen deliberately. |
 | **Agent loop / CLI (the brain)** | **TypeScript / Node** | Anthropic SDK is first-class in TS (streaming, tool-use, prompt caching). **Claude Code is itself Node**, and Cowork runs it inside the VM — so "TS agent in the guest" *is* the reference. |
 
@@ -380,7 +380,7 @@ shape, but the repo now uses its own thin `computecore.dll` bindings for lifecyc
 `Microsoft/go-winio` for named pipes and hvsockets. This avoids importing hcsshim `internal/`
 packages and avoids its GCS-specific LCOW boot path.
 
-### Agent topology: A → B (decided)
+#### Agent topology: A → B (decided)
 
 The agent loop's *location* is the one big runtime choice. Both topologies run the **same TS code**; only two seams differ — `executeTool` and the `callModel`/MCP transport.
 
@@ -394,20 +394,20 @@ The agent loop's *location* is the one big runtime choice. Both topologies run t
 
 ---
 
-## 9. Privilege / Elevation Model (verified)
+### 9. Privilege / Elevation Model (verified)
 
 - HCS compute-system creation **requires privilege** (Hyper-V Administrators or SYSTEM). A normal user cannot call HCS directly (verified: `hcsdiag` access denied).
 - **Brokered model:** a SYSTEM service does the privileged work; the unprivileged app talks to it via a **named pipe gated by a security group**. (Docker: `com.docker.service` + `docker-users`. Cowork: `CoworkVMService` LocalSystem.)
 - **Admin needed once, at install** (enable Virtual Machine Platform / install the service). **No per-run UAC.** Enterprise: IT does this via MSI/Intune — normal.
 
-### Build implications
+#### Build implications
 
 - **Dev (M0–M5):** add yourself to the **Hyper-V Administrators** group (`aka.ms/hcsadmin`) so the Go service (and `hcsdiag list`) work without full elevation each time — or run from an elevated terminal.
 - **Ship (M6):** install the Go service as a **LocalSystem Windows service** + named pipe to Electron. End users then need **neither UAC nor Hyper-V-Admin membership** — identical to Cowork.
 
 ---
 
-## 10. The Three Doors — detail
+### 10. The Three Doors — detail
 
 > **S6.1 update — no interactive approval (enterprise-fixed, user-proof, policy-guided).** The "explicit
 > approval" language below described an earlier consent model. The shipped agent path has **no runtime
@@ -419,7 +419,7 @@ The agent loop's *location* is the one big runtime choice. Both topologies run t
 > the wire-level gate/audit point. For Topology B (the in-guest loop) the cage boundary is the **VM**: in-cage
 > file + shell tools are allowed; egress-bound tools (network) are denied.
 
-### Files
+#### Files
 
 - Read/list **auto-allowed** within the workspace.
 - Writes / overwrites / deletes → audited by the **fixed policy** (no interactive approval; see the S6.1 note
@@ -427,29 +427,29 @@ The agent loop's *location* is the one big runtime choice. Both topologies run t
 - **Jail:** canonicalize every path against the workspace root; reject `..` and symlinks that escape.
 - Every action → **audit log** (who/what/when/which file).
 
-### Network
+#### Network
 
 - Only via **connected MCP servers** (the egress allowlist = the set of configured servers). No raw sockets.
 - Each tool call **policy-gated + audited**.
 - Auth = corporate **OIDC** (already solved; out of scope for this project).
 
-### Compute (Python)
+#### Compute (Python)
 
 - Real Python **inside the VM** (full ecosystem, real performance).
 - VM network restricted (allowlist proxy, or **no-NIC + hvsocket-only broker**) → Python cannot exfiltrate; network is forced through the audited MCP layer.
 
 ---
 
-## 11. UI / Frontend Stack (verified against Cowork)
+### 11. UI / Frontend Stack (verified against Cowork)
 
 **Layout decision: chat-forward** (Claude/Cowork model), not editor-forward (Codex). The conversation is center stage; files and tool runs render as **cards inside the stream**. Rationale: our users are **non-technical ops**, not developers — a Monaco-based IDE would intimidate. Monaco stays an *optional later* "view this file" affordance, never the centerpiece.
 
-### Ground truth — what Claude Desktop / Cowork actually ships
+#### Ground truth — what Claude Desktop / Cowork actually ships
 
 Read directly from the installed app's `app.asar` `package.json` (`Claude_1.8089.1.0_x64`, Electron app, Vite-built — confirmed by `.vite/build` + `.vite/renderer` in the bundle). **This is source-of-truth, not a blog post.**
 
 | Concern | Cowork's choice | Our decision |
-|---|---|---|
+| --- | --- | --- |
 | Shell | **Electron 41** | Electron (match) |
 | Build / package | **Electron Forge 7.8 + `@electron-forge/plugin-vite`**; `maker-msix` (Windows), `maker-dmg`/`squirrel`/`pkg` | **Forge + Vite plugin**, `maker-msix` (we ship MSIX too). *(Revises earlier "electron-vite" call.)* |
 | UI framework | **React 18.3** + `@vitejs/plugin-react` | React 18 (match) |
@@ -462,7 +462,7 @@ Read directly from the installed app's `app.asar` `package.json` (`Claude_1.8089
 | Lint/format | **oxlint + oxfmt** (Rust-based Oxc) | adopt for the TS/UI side — fast (Go side uses `gofmt`/`go vet`) |
 | Tests | **vitest** | vitest |
 
-### Findings that reach beyond the UI (cross-cutting)
+#### Findings that reach beyond the UI (cross-cutting)
 
 - **Agent loop = `@anthropic-ai/claude-agent-sdk`** (public npm). → See §8 / §14 M5; don't hand-write the loop.
 - **`node-pty`** for shell exec/streaming → maps to our Hop-3 "exec into guest + stream stdout" (M2).
@@ -472,11 +472,11 @@ Read directly from the installed app's `app.asar` `package.json` (`Claude_1.8089
 - **`@ant/ipc-codegen`** → they **code-gen a typed IPC layer**. Strong pattern to copy for renderer ⇄ main ⇄ Go-sidecar.
 - **electron-store** (settings), **winston** (logs), **`@sentry/electron`** (crash reporting), **https-proxy-agent** (egress).
 
-### Multi-window architecture (observed)
+#### Multi-window architecture (observed)
 
 Separate Vite renderer entries: `main_window`, `quick_window` (quick launcher), `buddy_window` (the cowork companion), `about_window`, `find_in_page`, plus a `computerUseTeach` onboarding view. → A desktop AI app is **several small windows**, not one monolith. Plan for it.
 
-### The chat-stream guts (our build list)
+#### The chat-stream guts (our build list)
 
 - Markdown: a renderer + `@tailwindcss/typography` for prose styling.
 - Code blocks: **Shiki** (VS Code grammars) for polish.
@@ -484,13 +484,13 @@ Separate Vite renderer entries: `main_window`, `quick_window` (quick launcher), 
 - Long threads: virtualize (`virtua` / `@tanstack/react-virtual`).
 - Agent-specific: **tool-call cards** (collapsible "ran python" / "edited orders.csv"), **diff viewer** for file changes, **inline approval prompts** (the broker's gate), a **`/workspace` file panel** (list, not a full IDE tree).
 
-### Recommended starting stack (our app)
+#### Recommended starting stack (our app)
 
 **Electron Forge + Vite + React 18 + TypeScript + Tailwind (+typography/forms) + shadcn/ui + Phosphor icons + Zustand**, chat-forward layout, Shiki for code, **Monaco deferred**, oxlint/oxfmt + vitest for the toolchain.
 
 ---
 
-## 12. Skills (distribution)
+### 12. Skills (distribution)
 
 A **central registry** + client-side **install** ("plugins for ops users"). Two halves:
 
@@ -501,16 +501,16 @@ Study Claude Desktop **Desktop Extensions** (`.dxt` / `.mcpb` one-click MCP bund
 
 ---
 
-## 13. Provider Seam & Data Residency
+### 13. Provider Seam & Data Residency
 
 - **Provider seam:** hit the **Anthropic API** directly; the thin provider abstraction lets an in-house endpoint drop in later. Don't let provider-specifics leak past the seam.
 - **Data residency caveat:** to reason about a file, its **contents are sent to the model**. With an **in-house endpoint** data stays in the datacenter. With the **Anthropic API** it leaves — **don't demo with real client data**.
 
 ---
 
-# Part IV — Plan
+## Part IV — Plan
 
-## 14. Milestone Ladder (each is a real "it works" moment)
+### 14. Milestone Ladder (each is a real "it works" moment)
 
 Historical milestone ladder. The main path is now implemented through S6.1, with live UI E2E,
 service installation, pipe ACLs, and packaging still open. See
@@ -529,11 +529,11 @@ service installation, pipe ACLs, and packaging still open. See
 
 ---
 
-# Back matter
+## Back matter
 
-## 15. References
+### 15. References
 
-**Microsoft / HCS**
+#### Microsoft / HCS
 
 - `microsoft/hcsshim` — the crown jewel (Go). Read `internal/uvm` (boots the Linux UVM), `internal/guest` (the **GCS** guest agent), `internal/hcs/system.go` (lifecycle), `internal/tools/uvmboot`, `vmcompute` bindings, `runhcs`.
 - `microsoft/OpenGCS` — the Linux guest agent (now folded into hcsshim).
@@ -542,7 +542,7 @@ service installation, pipe ACLs, and packaging still open. See
 - HCS Reference **Tutorial** — MicrosoftDocs/Virtualization-Documentation.
 - `aka.ms/hcsadmin` — Hyper-V Administrators group.
 
-**Open-source Go libs the host service is built from or mirrors**
+#### Open-source Go libs the host service is built from or mirrors
 
 - `microsoft/hcsshim` (MIT) — reference for HCS document shape and Plan9 conventions; not imported as the lifecycle driver.
 - `Microsoft/go-winio` (MIT) — named pipes + hvsocket.
@@ -550,7 +550,7 @@ service installation, pipe ACLs, and packaging still open. See
 - `inetaf/tcpproxy` (Apache-2.0) — TCP forwarding.
 - *(Anthropic's own `cowork-win32-service` is **closed** — 404 on GitHub; only the deps above are public.)*
 
-**Cowork architecture / behavior**
+#### Cowork architecture / behavior
 
 - VentureBeat launch coverage.
 - pvieito.com — "Inside Claude Cowork: How Anthropic Runs Claude Code in a Local VM."
@@ -558,13 +558,13 @@ service installation, pipe ACLs, and packaging still open. See
 - blog.pluto.security — Cowork internals.
 - Cowork-on-Windows + virtiofs/Plan9 bug threads: `anthropics/claude-code` #31520, #32172, #31991 (Hyper-V required).
 
-**Privilege model**
+#### Privilege model
 
 - Docker Desktop — Windows permission requirements (privileged `com.docker.service` model).
 
 ---
 
-## 16. Open Questions / Pending Decisions
+### 16. Open Questions / Pending Decisions
 
 - ~~**Rootfs distro**~~ → **DECIDED: Ubuntu 22.04 (glibc).** Mirrors Cowork; Python wheels just work. Alpine rejected (musl → wheel pain). See §7.
 - ~~**Kernel**~~ → **DECIDED: generic Ubuntu kernel, matched to the Ubuntu userland** (keep kernel ↔ `/lib/modules` coupled). **Do NOT hand-compile.** M0 uses the tooling's **matched LCOW pair** as a throwaway bootstrap only. WSL2 kernel rejected (mismatch with userland). See §7.
@@ -579,11 +579,11 @@ service installation, pipe ACLs, and packaging still open. See
 
 ---
 
-## 17. Glossary / Keyword Dictionary
+### 17. Glossary / Keyword Dictionary
 
 Quick decoder for the jargon in this doc. Grouped by area; one line each.
 
-### Windows virtualization
+#### Windows virtualization
 
 - **Hyper-V** — Microsoft's type-1 hypervisor; the foundation under all the surfaces below.
 - **HCS (Host Compute System)** — the low-level API (`vmcompute.exe` / `computecore.dll`, `HcsCreateComputeSystem`) for creating/managing VMs & containers. Used by WSL2, Docker, Windows Sandbox, Cowork. VMs created here are **invisible to Hyper-V Manager**.
@@ -602,7 +602,7 @@ Quick decoder for the jargon in this doc. Grouped by area; one line each.
 - **Hyper-V Administrators** — the Windows security group that may call HCS without full admin (`aka.ms/hcsadmin`).
 - **WSL2** — Microsoft's Linux subsystem; also HCS-based, but its `-microsoft-standard-WSL2` kernel is **not** what Cowork uses.
 
-### Host ↔ guest plumbing
+#### Host ↔ guest plumbing
 
 - **hvsocket** — Hyper-V socket on the host side (`AF_HYPERV`); a stream channel between host and guest with no NIC. The backbone of Hop 3.
 - **vsock** — the guest-side counterpart (`AF_VSOCK`, addressed by CID/port); pairs with hvsocket.
@@ -616,7 +616,7 @@ Quick decoder for the jargon in this doc. Grouped by area; one line each.
 - **serial console** (`hvc0`) — the VM's text console; Cowork bridges it to the `cowork-daemon-console-<vmid>` named pipe for logs.
 - **SSH / sshd / sftp** — Cowork's exec/file plane: the host SSHes into an sshd in the guest *over the vsock network* to run commands and move files.
 
-### Linux guest
+#### Linux guest
 
 - **kernel** (`vmlinux` / `vmlinuz` / `bzImage`) — the OS core, direct-booted by the host.
 - **rootfs** — the userland filesystem ("the distro"): libraries, Python, tools, init.
@@ -632,7 +632,7 @@ Quick decoder for the jargon in this doc. Grouped by area; one line each.
 - **namespaces / capabilities** — kernel isolation primitives bwrap builds on (separate views of FS/net/PID; fine-grained privilege bits).
 - **pip / wheels** — Python's installer and its prebuilt binary packages (the glibc/musl pain point).
 
-### Electron / desktop app
+#### Electron / desktop app
 
 - **Electron** — Chromium + Node.js desktop-app framework; our shell.
 - **main process / renderer** — Electron's privileged Node side (`main`) vs the sandboxed UI (`renderer`).
@@ -646,7 +646,7 @@ Quick decoder for the jargon in this doc. Grouped by area; one line each.
 - **N-API / FFI** — Node's native-addon ABI / foreign-function interface; the *in-process* native-code path we **rejected** (Option 1). (Rust's `napi-rs` and Go's `cgo c-shared` are the language-specific variants.)
 - **node-pty** — pseudo-terminal library for running & streaming a shell from Node; maps to our guest-exec channel.
 
-### AI / agent
+#### AI / agent
 
 - **agent loop** — the model↔tools cycle (call model → run tool → feed result → repeat); we host the SDK's, not hand-write it.
 - **Claude Agent SDK** (`@anthropic-ai/claude-agent-sdk`) — Anthropic's public npm agent loop; Cowork ships it, so do we.
@@ -659,7 +659,7 @@ Quick decoder for the jargon in this doc. Grouped by area; one line each.
 - **ambient authority** — implicit power a process has just by running; containment = **removing** it (the agent acts only through gated capabilities).
 - **RFB / VNC** — remote-framebuffer screen streaming; how Cowork shows the VM's GUI (we likely skip it).
 
-### Protocol & glue
+#### Protocol & glue
 
 - **JSON-RPC 2.0** — the request/response/notification wire format on the broker pipe.
 - **notification (vs request)** — a JSON-RPC message with **no `id`**; used for one-way streaming (stdout/progress/logs).

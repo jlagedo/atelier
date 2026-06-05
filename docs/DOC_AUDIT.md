@@ -8,7 +8,7 @@ Primary reader: engineers deciding which doc to trust before changing code.
 ## Reviewed Set
 
 | Bucket | Files |
-|---|---|
+| --- | --- |
 | Current reference | `architecture/runtime-architecture.md`, `security/vm-sandbox.md`, `security/ipc-security.md`, `ui/color-system.md` |
 | Active trackers | `plans/macos-port-execution.md`, `plans/openhands-adoption.md` |
 | Historical logs | `architecture/design.md`, `status/implementation-status.md`, `plans/macos-port-plan.md` |
@@ -19,7 +19,7 @@ Primary reader: engineers deciding which doc to trust before changing code.
 ## Review Flags
 
 | Document | Flag |
-|---|---|
+| --- | --- |
 | `architecture/design.md` | Historical. It preserves Windows/HCS and TypeScript-agent rationale, not the current runtime map. |
 | `status/implementation-status.md` | Historical through S6.1. Use the top overlay for current state; use body sections as slice history. |
 | `plans/macos-port-plan.md` | Mixed active and historical plan text. Early sections still mention artisan/TypeScript because they predate partisan. |
@@ -34,7 +34,7 @@ Primary reader: engineers deciding which doc to trust before changing code.
 ## Cleanup Log
 
 | Change | Reason |
-|---|---|
+| --- | --- |
 | Rewrote `docs/README.md` around tasks and document status. | Engineers need a routing table before background. |
 | Kept raw audits and research snapshots intact. | Rewriting evidence-heavy files risks changing point-in-time facts. |
 | Labeled historical docs at the top. | Prevent stale plan text from reading as current implementation. |
@@ -47,7 +47,7 @@ Primary reader: engineers deciding which doc to trust before changing code.
 These are product/security gaps, not doc bugs.
 
 | Gap | Source |
-|---|---|
+| --- | --- |
 | Provider key still enters the guest process environment. | `security/vm-sandbox.md` F-02 |
 | Broker policy gate is still `AllowAll`. | `security/vm-sandbox.md` F-10; `security/ipc-security.md` |
 | Hop 2 pipe/socket access control is not ship-grade. | `security/ipc-security.md` |
@@ -58,7 +58,7 @@ These are product/security gaps, not doc bugs.
 ## Claims To Confirm
 
 | Claim | Why confirm |
-|---|---|
+| --- | --- |
 | `research/claude-cowork-internals.md` symbol names, flags, codenames, and product behavior. | Source is reverse-engineering from January-April 2026; Anthropic ships frequently. |
 | `research/rocky-el10-migration.md`: EL10 lacks 9p support. | The doc confirms EL9/Rocky 9 and treats EL10 as a working assumption pending a spike. |
 | `security/vm-sandbox.md` F-15 exact file paths under partisan. | The finding came from the artisan/Claude-agent path and needs a partisan home-directory re-audit. |

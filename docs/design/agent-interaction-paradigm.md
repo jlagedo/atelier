@@ -30,7 +30,7 @@ consent" paradigm** (blank prompt box = user supplies all initiative; permission
 dialogs = user absorbs all risk). We invert all three axes:
 
 | Today's default | Our direction | HCI lineage it revives |
-|---|---|---|
+| --- | --- | --- |
 | User carries all initiative (prompt every time) | **Mixed-initiative** — agent & user trade who-acts-when | Horvitz, *Principles of Mixed-Initiative UIs*, CHI 1999 |
 | Safety = user approves each action | **Safety = containment** (the cage is the consent) | sandbox / zero-trust isolation |
 | Each session is disposable | **Each session crystallizes into a replayable routine** | Programming-by-Demonstration (PbD) |
@@ -293,7 +293,7 @@ connection the agent proposed.**
 ### The grammar (maps onto the four stages)
 
 | Stage | On the canvas | Who makes it |
-|---|---|---|
+| --- | --- | --- |
 | ① Input | an **object** (dropped file + agent's guess) | Jonny drops; agent labels |
 | ② Match/validate (the macro) | an **edge** between objects — *the verb lives here* | **agent proposes**, Jonny confirms/corrects |
 | ③ Output | a **new object** the edge spawns | agent creates |
@@ -346,7 +346,7 @@ state to know what's happening, and *writes* canvas state to act.
 Routing **everything** through the agent makes a *drag* wait on an LLM (2–3s) = dead. Split:
 
 | Kind | Examples | Through the agent? | Feel |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | **Mechanical** | drag, move, zoom, pan, select, collapse | **No** — canvas runtime, local | instant |
 | **Semantic** | drop a file, type intent, answer reconcile?/join?, correct a row | **Yes** — a request to the agent | "thinking…" then resolves |
 

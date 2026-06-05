@@ -1,7 +1,7 @@
 # Migrating the cage to Rocky Linux EL10
 
 | Field | Detail |
-|---|---|
+| --- | --- |
 | Status | Research / decision record, May 2026; HCS share-device research + HDV/OpenVMM virtio-fs finding (§1c) added 2026-06-01. **virtio-fs proof executed 2026-06-01 — PASS**: a stock Rocky 10.1 kernel mounts an OpenVMM-supplied virtio-fs share read-write on Windows/WHP (§1c "Proof-before-build", spike Step 0b). No Atelier code changed. |
 | Primary reader | Engineers evaluating a future utility-VM rootfs move from Ubuntu 24.04 to Rocky Linux EL10. |
 | Decision | Target Rocky Linux EL10 for the spike. |
@@ -28,7 +28,7 @@ The cage image is a four-stage `docker export` pipeline. None of the Dockerfiles
 containers; `image/build.sh` exports each into an ext4 disk.
 
 | Stage | File | Role |
-|---|---|---|
+| --- | --- | --- |
 | **rootfs** | `image/rootfs/Dockerfile` (`FROM ubuntu:24.04`) | cage filesystem **+ the pinned guest kernel** |
 | **imager** | `image/imager/Dockerfile` (`FROM ubuntu:22.04`) | just `e2fsprogs`; runs `mke2fs -d` to pour the export into ext4 |
 | **agent** | `image/agent/Dockerfile` (`FROM ubuntu:24.04`) | builds artisan `node_modules` + partisan `uv` venv onto the `/opt` runner volume |
@@ -269,7 +269,7 @@ identical on EL10** (the question is whether the module is *present*, not rename
 ### Critical (the actual project)
 
 | # | Change | Where | Note |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | C1 | **Kernel package** `linux-image-virtual-hwe-24.04` → `kernel` (+ `kernel-core`/`kernel-modules-core`) | `rootfs/Dockerfile:45` | No "HWE" line in EL; 6.12 is fixed. Open question: which module split carries `hv_sock`/`virtiofs` — `kernel-modules-core` vs `kernel-modules`. **There is no `kernel-virt` package in stock RHEL/Rocky — do not design around it.** |
 | C2 | **Host↔guest share rework** — stock Rocky 10.1 has no 9p (§1), so Plan9 is out | `image/guest/init.sh` (drop 9p modprobes; add `virtiofs`/`fuse` or `cifs`) **+ `services/internal/{vmm,hcs,netjail}`/broker** | Best fix: **virtio-fs via HDV + OpenVMM** (§1c) — keeps a true RHEL kernel and a modern share, reaches the Go broker (new HDV device host). Fallbacks: network CIFS/NFS over the egress door; block-device + broker sync; custom kernel with 9p. **Step 0 of the spike.** |
 | C3 | **initramfs: `initramfs-tools` → `dracut`** | `rootfs/Dockerfile:44`; `build.sh:219`; `fetch-kernel.sh` | Output filename changes: `/boot/initrd.img-<ver>` → `/boot/initramfs-<ver>.img`. Update the extraction glob + error text. Use `dracut-config-generic` (finding #3). |
@@ -280,7 +280,7 @@ also a gzip'd Image).
 ### Mechanical (substitution, low risk)
 
 | Change | Where |
-|---|---|
+| --- | --- |
 | `apt-get install/update` + `rm -rf /var/lib/apt/lists/*` → `dnf install -y` + `dnf clean all`; drop `DEBIAN_FRONTEND`, `--no-install-recommends` | all four Dockerfiles |
 | `iproute2` → `iproute` (EL drops the `2`) | `rootfs/Dockerfile:42` |
 | NodeSource `deb.nodesource.com/setup_22.x` → `rpm.nodesource.com/setup_22.x` | `rootfs/Dockerfile:52`, `agent/Dockerfile:25` |

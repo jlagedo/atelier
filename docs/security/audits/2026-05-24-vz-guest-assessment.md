@@ -1,7 +1,7 @@
 # Live Security Assessment — Guest VM Sandbox
 
 | Field | Detail |
-|---|---|
+| --- | --- |
 | Status | Raw point-in-time audit. Keep for evidence and traceability. |
 | Current register | [`../vm-sandbox.md`](../vm-sandbox.md). |
 | Date | 2026-05-24 |
@@ -29,7 +29,7 @@ F-16 — commit `7193d79`, validated on a real VZ boot, 43/43 e2e.)
 ## Environment Fingerprint
 
 | Property | Value |
-|---|---|
+| --- | --- |
 | Hostname | `(none)` (UTS namespace, no hostname set) |
 | Kernel | `Linux 6.17.0-29-generic #29~24.04.1-Ubuntu SMP PREEMPT_DYNAMIC` |
 | Architecture | `aarch64` |
@@ -62,7 +62,7 @@ F-16 — commit `7193d79`, validated on a real VZ boot, 43/43 e2e.)
 ## Working Controls (verified this session)
 
 | Control | Evidence |
-|---|---|
+| --- | --- |
 | Running as uid/gid **1001** — not root | `id → uid=1001(atelier)` |
 | **All capabilities dropped** | `CapInh/CapPrm/CapEff/CapBnd/CapAmb = 0x0000000000000000` |
 | `NoNewPrivs = 1` | `/proc/self/status` |
@@ -394,7 +394,7 @@ content-integrity layer for high-risk operations.
 ## Resolved Findings (for reference)
 
 | ID | Summary | Status |
-|---|---|---|
+| --- | --- | --- |
 | R-01 | Agent ran as unconstrained root with all capabilities | **Fixed** — now uid=1001, `--cap-drop ALL` |
 | R-02 | World-writable system filesystem | **Fixed** — rootfs read-only, writable paths are tmpfs |
 | R-03 | Zero namespace isolation between processes | **Fixed** — bwrap user/pid/ipc/uts/mnt namespaces |
@@ -416,7 +416,7 @@ Package registry access is **intentionally open** in this configuration. The fol
 live and is expected behaviour, not a defect:
 
 | Host | DNS | TCP 443 | TCP 80 | Notes |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | `api.anthropic.com` | ✅ | ✅ | ✅ | Model API (port 80 still subject to F-05) |
 | `pypi.org` | ✅ | ✅ | ✅ | Intentionally open |
 | `files.pythonhosted.org` | ✅ | ✅ | — | Intentionally open |
@@ -490,4 +490,4 @@ The `AllowAll` host-side gate (F-10) is the remaining gap in this chain.
 
 ---
 
-*Classification: Internal / Security Sensitive*
+**Classification:** Internal / Security Sensitive
