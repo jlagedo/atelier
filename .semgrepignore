@@ -1,0 +1,30 @@
+# Semgrep ignore. NOTE: providing this file REPLACES Semgrep's built-in default
+# ignore list, so the standard noise dirs must be restated here, not just the
+# project-specific ones. Mirrors .gitignore / .markdownlint-cli2.jsonc ignores.
+
+# VCS
+.git/
+
+# Dependencies / virtualenvs
+node_modules/
+.venv/
+.npm/
+.yarn/
+
+# Vendored code / git submodules (not ours to scan)
+third_party/
+
+# Build + generated output (all gitignored)
+build/
+apps/desktop/out/
+apps/desktop/.vite/
+apps/desktop/dist/
+packages/protocol/src/
+services/pkg/protocol/
+services/bin/
+image/.work/
+image/bundle/
+
+# Tool caches
+.ruff_cache/
+*.min.js

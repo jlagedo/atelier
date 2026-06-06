@@ -91,5 +91,8 @@ general programming concepts.
   files. `golangci-lint` must be on PATH locally (`brew install golangci-lint`).
 - After editing any Markdown, run `npm run lint:md` (config in `.markdownlint-cli2.jsonc`); it must
   pass clean.
+- `npm run security` runs SAST (`lint:sec`: Semgrep) + CVE/SCA (`lint:cve`: govulncheck +
+  osv-scanner), via on-the-fly toolchains (`uvx`/`go run`, need network); separate from `lint`, run
+  on demand / in CI.
 - Comments explain WHY, not WHAT; keep them minimal.
 - Commit messages: conventional style (`feat`/`fix`/`chore` + scope), focused on the why.
