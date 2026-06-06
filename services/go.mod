@@ -1,6 +1,6 @@
 module github.com/jlagedo/atelier/services
 
-go 1.25.0
+go 1.26.4
 
 require (
 	github.com/Code-Hex/vz/v3 v3.7.1
@@ -10,7 +10,7 @@ require (
 	github.com/landlock-lsm/go-landlock v0.8.1
 	github.com/mdlayher/vsock v1.2.1
 	github.com/sirupsen/logrus v1.9.4
-	golang.org/x/sys v0.43.0
+	golang.org/x/sys v0.44.0
 	gvisor.dev/gvisor v0.0.0-20240916094835-a174eb65023f
 )
 
