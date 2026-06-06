@@ -4,8 +4,8 @@ version = "0.1.0"
 description = "Atelier in-guest AI agent (Python/OpenHands) — successor to artisan"
 requires-python = ">=3.12"
 dependencies = [
-    "openhands-sdk==1.23.*",
-    "openhands-tools==1.23.*",
+    "openhands-sdk==1.26.*",
+    "openhands-tools==1.26.*",
 ]
 
 [dependency-groups]

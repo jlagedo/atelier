@@ -6,7 +6,7 @@ paths:
 # Agent loop — `packages/partisan` (Python/OpenHands)
 
 `packages/partisan/cli_guest.py` is the sole in-guest agent, built on the **OpenHands SDK** (Python
-≥3.12, `openhands-sdk`/`openhands-tools` 1.23.*, LiteLLM under it). The loop runs inside the cage, so
+≥3.12, `openhands-sdk`/`openhands-tools` 1.26.*, LiteLLM under it). The loop runs inside the cage, so
 its hands are OpenHands' built-in coding tools (Bash/Read/Write/Edit/Glob/Grep) acting directly on the
 guest fs — no broker round-trip for tools; only the model call escapes via the egress jail. The SDK is
 embedded in-process (`Conversation` + `callbacks=[fn]`, no agent-server).
